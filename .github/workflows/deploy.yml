@@ -1,0 +1,90 @@
+name: Deploy
+
+# Builds an image tagged with the commit SHA, pushes it to ACR, then lets
+# Terraform perform the deployment. Terraform — not `az containerapp update` —
+# owns the image tag, so state never drifts from what is running.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy at a time; a queued run supersedes an older one but never
+  # cancels an apply in flight.
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  REGISTRY: acrwsj27prodsec
+  IMAGE: discord-scoutid-linked-role
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Requires a reviewer on the prod environment before anything is pushed.
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: |
+          az acr login --name "$REGISTRY"
+          IMAGE_REF="$REGISTRY.azurecr.io/$IMAGE:${{ steps.tag.outputs.tag }}"
+          docker build -t "$IMAGE_REF" .
+          docker push "$IMAGE_REF"
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - run: terraform init
+        working-directory: terraform
+
+      - name: Apply
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve -lock-timeout=5m \
+            -var-file=terraform.tfvars \
+            -var="docker_image_tag=${{ steps.tag.outputs.tag }}"
+        env:
+          ARM_USE_OIDC: true
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          TF_VAR_discord_token: ${{ secrets.DISCORD_TOKEN }}
+          TF_VAR_discord_client_id: ${{ secrets.DISCORD_CLIENT_ID }}
+          TF_VAR_discord_client_secret: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          TF_VAR_discord_public_key: ${{ secrets.DISCORD_PUBLIC_KEY }}
+          TF_VAR_discord_guild_id: ${{ secrets.DISCORD_GUILD_ID }}
+          TF_VAR_scoutid_client_id: ${{ secrets.SCOUTID_CLIENT_ID }}
+          TF_VAR_scoutid_client_secret: ${{ secrets.SCOUTID_CLIENT_SECRET }}
+          TF_VAR_cookie_secret: ${{ secrets.COOKIE_SECRET }}
+          TF_VAR_scoutnet_event_id: ${{ secrets.SCOUTNET_EVENT_ID }}
+          TF_VAR_scoutnet_participants_apikey: ${{ secrets.SCOUTNET_PARTICIPANTS_APIKEY }}
+
+      - name: Verify the new revision serves traffic
+        run: |
+          HOST=https://discord-scoutid.wsj27.scouterna.net
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$HOST/")
+            if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
+            echo "attempt $i: HTTP $code"; sleep 10
+          done
+          echo "app did not return 200 within ~200s"; exit 1

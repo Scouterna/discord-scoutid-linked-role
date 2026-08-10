@@ -60,9 +60,16 @@ variable "docker_image_name" {
 }
 
 variable "docker_image_tag" {
-  description = "Docker image tag"
+  description = "Docker image tag — always an immutable git SHA, set by CI"
   type        = string
-  default     = "latest"
+
+  # Container Apps only creates a new revision when the image *string* changes,
+  # so a mutable tag silently keeps the old container running. No default: the
+  # tag must be stated explicitly by whoever deploys.
+  validation {
+    condition     = !contains(["latest", "main", "master"], var.docker_image_tag)
+    error_message = "Use an immutable git-SHA tag. A mutable tag leaves Container Apps running the previous image, because the image string never changes."
+  }
 }
 
 # Discord Configuration

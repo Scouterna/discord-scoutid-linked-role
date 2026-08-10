@@ -122,9 +122,16 @@ docker compose run --rm discord-scoutid-linked-role node src/register.js
 Infrastructure lives in [terraform/](terraform/) — Azure Container Apps, Table
 Storage, Container Registry, DNS. See [terraform/README.md](terraform/README.md).
 
-**Always tag images with the git SHA.** Azure Container Apps only creates a new
-revision when the image *string* changes, so pushing over `:latest` silently
-keeps the old container running.
+Pushing to `main` builds, pushes and applies automatically — see
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml). Terraform owns the
+image tag, so the deployed revision and the state stay in agreement.
+
+The commands below are the break-glass path. **Always tag images with the git
+SHA**: Azure Container Apps only creates a new revision when the image *string*
+changes, so pushing over `:latest` silently keeps the old container running.
+Deploying this way also leaves Terraform unaware of the change — update
+`docker_image_tag` in [terraform/terraform.tfvars](terraform/terraform.tfvars) to
+match, or the next apply rolls production back.
 
 Dependencies install from registry.npmjs.org. To build behind an npm proxy, drop
 a `.npmrc` in the repo root — it is gitignored, and the Dockerfile installs with

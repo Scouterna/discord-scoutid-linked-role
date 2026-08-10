@@ -12,9 +12,13 @@ tenant_id       = "317a47ba-fd32-41b8-8ebe-310a1adc9863"
 min_replicas = 1
 max_replicas = 2
 
-# Docker Image Configuration
+# Docker Image Configuration.
+# CI overrides the tag with the commit SHA it built (-var docker_image_tag=...).
+# The value here is what a manual `terraform apply` would deploy, so it must
+# track what is actually running in production — otherwise an apply rolls the
+# app back to an older image.
 docker_image_name = "discord-scoutid-linked-role"
-docker_image_tag  = "latest"
+docker_image_tag  = "54bed27"
 
 # Role configuration
 scoutnet_event_role        = "WSJ-event"

@@ -1,0 +1,106 @@
+name: Terraform plan
+
+# Validates and plans on pull requests. Never applies.
+#
+# Fork PRs (and Dependabot PRs) get no cloud credentials from GitHub, so the
+# plan job is skipped for them and only the credential-free checks run. Do not
+# switch this to pull_request_target — that would hand the Azure identity to
+# code from an untrusted branch.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/plan.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+        working-directory: terraform
+      - run: terraform init -backend=false
+        working-directory: terraform
+      - run: terraform validate
+        working-directory: terraform
+
+  plan:
+    name: Plan
+    # Same-repo PRs only: forks cannot reach the OIDC identity.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: prod-plan
+    permissions:
+      contents: read
+      id-token: write # required for OIDC federation to Azure
+      pull-requests: write # to post the plan as a comment
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - run: terraform init
+
+      - name: Plan
+        id: plan
+        # The tag is irrelevant to a plan of the infrastructure, but the variable
+        # has no default, so pass the current HEAD to satisfy it.
+        run: |
+          terraform plan -no-color -lock-timeout=5m \
+            -var-file=terraform.tfvars \
+            -var="docker_image_tag=$(git rev-parse --short HEAD)" \
+            -out=tfplan | tee plan.txt
+        env:
+          ARM_USE_OIDC: true
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          TF_VAR_discord_token: ${{ secrets.DISCORD_TOKEN }}
+          TF_VAR_discord_client_id: ${{ secrets.DISCORD_CLIENT_ID }}
+          TF_VAR_discord_client_secret: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          TF_VAR_discord_public_key: ${{ secrets.DISCORD_PUBLIC_KEY }}
+          TF_VAR_discord_guild_id: ${{ secrets.DISCORD_GUILD_ID }}
+          TF_VAR_scoutid_client_id: ${{ secrets.SCOUTID_CLIENT_ID }}
+          TF_VAR_scoutid_client_secret: ${{ secrets.SCOUTID_CLIENT_SECRET }}
+          TF_VAR_cookie_secret: ${{ secrets.COOKIE_SECRET }}
+          TF_VAR_scoutnet_event_id: ${{ secrets.SCOUTNET_EVENT_ID }}
+          TF_VAR_scoutnet_participants_apikey: ${{ secrets.SCOUTNET_PARTICIPANTS_APIKEY }}
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            let body;
+            try {
+              const plan = fs.readFileSync('terraform/plan.txt', 'utf8');
+              // Comments cap at 65536 chars; keep the tail, which holds the summary.
+              const trimmed = plan.length > 60000 ? '...(truncated)\n' + plan.slice(-60000) : plan;
+              body = `#### Terraform plan \`${{ steps.plan.outcome }}\`\n\n<details><summary>Show plan</summary>\n\n\`\`\`terraform\n${trimmed}\n\`\`\`\n\n</details>`;
+            } catch {
+              body = `#### Terraform plan \`${{ steps.plan.outcome }}\` — no plan output produced.`;
+            }
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
