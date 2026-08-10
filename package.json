@@ -1,0 +1,24 @@
+{
+  "name": "discord-scoutid-linked-role",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "A Linked Role bot for Discord that links to ScoutID.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Petter Sandholdt <petter@sandholdt.se>",
+  "dependencies": {
+    "@azure/data-tables": "^13.3.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0"
+  }
+}

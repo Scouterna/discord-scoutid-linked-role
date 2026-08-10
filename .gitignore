@@ -1,0 +1,21 @@
+node_modules
+.DS_Store
+npm-debug.log*
+logs/
+# Local npm registry override, used by the Docker build if present
+.npmrc
+.env
+.env.*
+!.env.example
+scoutid-metadata.json
+.claude/*.local.json
+
+# Terraform
+**/secrets.tfvars
+**/.terraform
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate*.backup
+**/.terraform.tfstate.lock.info
+**/*tfplan
+.azure
