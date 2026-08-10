@@ -257,13 +257,20 @@ resource "azurerm_container_app" "main" {
   }
 }
 
-# DNS CNAME Record for Discord ScoutID Linker - points to Container App default domain
+# DNS CNAME Record for Discord ScoutID Linker - points to Container App default domain.
+#
+# Must be the app-level ingress FQDN, which is stable across revisions — not
+# `latest_revision_fqdn`, which names a single revision. That name is written one
+# revision behind (the new revision is still provisioning when Terraform reads
+# it), so plans never converge, and once the named revision is purged under
+# max_inactive_revisions the record stops resolving and the custom domain goes
+# dark for a full TTL.
 resource "azurerm_dns_cname_record" "project_cname" {
   name                = var.project_name
   zone_name           = azurerm_dns_zone.main.name
   resource_group_name = azurerm_resource_group.shared.name
   ttl                 = 3600
-  record              = azurerm_container_app.main.latest_revision_fqdn
+  record              = azurerm_container_app.main.ingress[0].fqdn
   tags                = var.tags
 }
 
