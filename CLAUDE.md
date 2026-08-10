@@ -29,6 +29,24 @@ docker run --rm --env-file .env $ACR:$TAG node src/register.js
 > `az containerapp update` so a new revision is created. Terraform deploys
 > should set `docker_image_tag` to the git SHA for the same reason.
 
+## Azure CLI: use the Scouterna config dir
+
+This project lives in the Scouterna tenant, which is **not** the tenant the
+default `az` login uses. Keep the two apart with a repo-local config dir
+(gitignored) so that `az login` here never changes the active subscription of
+the everyday session:
+
+```bash
+export AZURE_CONFIG_DIR="$PWD/.azure-scouterna"
+az login --tenant 317a47ba-fd32-41b8-8ebe-310a1adc9863
+az account set --subscription d4887907-2e73-4465-9fe3-44c82ed016d6
+```
+
+Every `az` and `terraform` command for this project needs that variable set —
+the azurerm provider and the state backend both authenticate through the CLI, so
+without it they silently target the wrong tenant and fail on the state account.
+`.claude/settings.local.json` sets it for Claude Code sessions.
+
 ## Architecture
 
 - Node.js 20 + Express 5 + Azure Table Storage (ESM modules)

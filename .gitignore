@@ -18,4 +18,6 @@ scoutid-metadata.json
 **/terraform.tfstate*.backup
 **/.terraform.tfstate.lock.info
 **/*tfplan
-.azure
+
+# Azure CLI config/token cache for the Scouterna tenant (see CLAUDE.md)
+.azure*
