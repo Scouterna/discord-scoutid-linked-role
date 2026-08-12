@@ -34,4 +34,8 @@ EXPOSE 3000
 # it keeps the workload portable to a cluster that does enforce them.
 USER node
 
-CMD ["npm", "start"]
+# Exec form, and node directly rather than via `npm start`: this makes node
+# PID 1 so it receives SIGTERM itself. Under npm the signal reaches a wrapper
+# that does not reliably forward it, and the graceful-shutdown handler in
+# src/server.js never runs.
+CMD ["node", "src/server.js"]

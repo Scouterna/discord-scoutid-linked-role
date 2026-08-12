@@ -127,6 +127,24 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
 
 const ADMIN_PERMISSION = BigInt(0x8);
 
+// Slash commands ACK within Discord's 3-second window and then do the real
+// work a moment later. That work outlives the HTTP response, so draining
+// connections at shutdown is not enough on its own — it has to be tracked and
+// waited for, or a rollout kills it after the user has already been told the
+// command was accepted.
+const pendingWork = new Set();
+
+function scheduleBackground(fn, delayMs = 1000) {
+  const task = new Promise((resolve) => {
+    setTimeout(() => {
+      Promise.resolve().then(fn).catch(console.error).finally(resolve);
+    }, delayMs);
+  });
+  pendingWork.add(task);
+  task.finally(() => pendingWork.delete(task));
+  return task;
+}
+
 app.post(
   "/interactions",
   express.raw({ type: "application/json" }),
@@ -157,37 +175,25 @@ app.post(
     if (interaction.type === 2 && interaction.data.name === "refresh-scoutid") {
       // Respond with deferred ephemeral message (type 5, flags 64), then process in background
       res.json({ type: 5, data: { flags: 64 } });
-      setTimeout(
-        () => handleRefreshCommand(interaction).catch(console.error),
-        1000,
-      );
+      scheduleBackground(() => handleRefreshCommand(interaction));
       return;
     }
 
     if (interaction.type === 2 && interaction.data.name === "status-scoutid") {
       res.json({ type: 5, data: { flags: 64 } });
-      setTimeout(
-        () => handleStatusCommand(interaction).catch(console.error),
-        1000,
-      );
+      scheduleBackground(() => handleStatusCommand(interaction));
       return;
     }
 
     if (interaction.type === 2 && interaction.data.name === "audit-scoutid") {
       res.json({ type: 5, data: { flags: 64 } });
-      setTimeout(
-        () => handleAuditCommand(interaction).catch(console.error),
-        1000,
-      );
+      scheduleBackground(() => handleAuditCommand(interaction));
       return;
     }
 
     if (interaction.type === 2 && interaction.data.name === "link-scoutid") {
       res.json({ type: 5, data: { flags: 64 } });
-      setTimeout(
-        () => handleLinkCommand(interaction).catch(console.error),
-        1000,
-      );
+      scheduleBackground(() => handleLinkCommand(interaction));
       return;
     }
 
@@ -681,6 +687,60 @@ async function addDiscordRoles(userId, roleNames) {
 }
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`App listening on port ${port}`);
 });
+
+// --- Graceful shutdown ---
+//
+// Kubernetes sends SIGTERM, then SIGKILLs after terminationGracePeriodSeconds
+// (60). The preStop hook spends the first 10 of those keeping the pod in
+// service while its endpoint removal propagates, so the budget here is ~50s —
+// stay under it and always exit on our own terms.
+//
+// Node installs no default SIGTERM handler, and as PID 1 it would otherwise
+// ignore the signal entirely and wait for the SIGKILL. This handler is what
+// makes terminationGracePeriodSeconds mean anything.
+const SHUTDOWN_TIMEOUT_MS = 40_000;
+
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, draining`);
+
+  // Backstop: never let a wedged request or hung fetch hold the pod open past
+  // the grace period, where it would be SIGKILLed mid-write instead.
+  const forceExit = setTimeout(() => {
+    console.error(
+      `Drain exceeded ${SHUTDOWN_TIMEOUT_MS}ms, exiting with work outstanding`,
+    );
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
+
+  // Stop accepting new connections. Idle keep-alives are closed explicitly —
+  // server.close() alone waits for them and would stall the whole drain.
+  const closed = new Promise((resolve) => server.close(resolve));
+  server.closeIdleConnections();
+
+  closed
+    .then(() => {
+      if (pendingWork.size > 0) {
+        console.log(`waiting for ${pendingWork.size} background task(s)`);
+      }
+      return Promise.allSettled([...pendingWork]);
+    })
+    .then(() => {
+      console.log("drain complete, exiting");
+      process.exit(0);
+    })
+    .catch((e) => {
+      console.error("error while draining:", e);
+      process.exit(1);
+    });
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
