@@ -1,0 +1,11 @@
+{
+  // Container-side twin of ~/code/discord-scoutid-linked-role.code-workspace.
+  // The host file uses paths relative to ~/code, which does not exist in the
+  // container; these are the bind-mount targets from devcontainer.json.
+  "folders": [
+    { "path": "/workspaces/discord-scoutid-linked-role" },
+    { "path": "/workspaces/discord-wsj27-infra" },
+    { "path": "/workspaces/discord-wsj27-bot" }
+  ],
+  "settings": {}
+}
