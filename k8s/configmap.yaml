@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-scoutid-config
+data:
+  PORT: "3000"
+  TABLE_NAME: scoutidlinks
+
+  DISCORD_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback
+  DISCORD_VALIDATION_URL: https://discord-scoutid.wsj27.scouterna.net/linked-role
+  SCOUTID_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/scoutid-oauth-callback
+
+  # Not a secret: it is a plain env value on the Container App today. It lives
+  # in secrets.tfvars only because that is where the Terraform variable sits.
+  SCOUTNET_EVENT_ID: "43490"
+
+  SCOUTNET_SCOUT_ROLE: scout
+  SCOUTNET_EVENT_ROLE: WSJ-event
+  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt
+  SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,ist-direktresa::IST,cmt::CMT

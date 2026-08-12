@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: wsj27
+
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# The Secret is deliberately absent: it is created imperatively (plan P4), the
+# way scoutview-secrets already is. This cluster has no sealed-secrets or
+# external-secrets, so a Secret here would mean plaintext in a public repo.
+
+images:
+  - name: ghcr.io/scouterna/discord-scoutid-linked-role
+    # CI rewrites this in its own ephemeral checkout, so the committed value
+    # stays a placeholder and can never go stale. A manual apply must name the
+    # tag; skipping it fails loudly on ImagePullBackOff rather than shipping
+    # something unintended:
+    #
+    #   IMG=ghcr.io/scouterna/discord-scoutid-linked-role
+    #   (cd k8s && kustomize edit set image "$IMG=$IMG:<sha>") && kubectl apply -k k8s/
+    #
+    # Revert the edit afterwards — do not commit a real tag here.
+    newTag: PLACEHOLDER-set-by-ci

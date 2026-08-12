@@ -28,4 +28,10 @@ COPY src ./src
 
 EXPOSE 3000
 
+# The node images ship an unprivileged `node` user. Nothing here writes to
+# disk, so read-only access to root-owned files is enough. The wsj27 namespace
+# has no Pod Security Standards enforcement, so this changes nothing today —
+# it keeps the workload portable to a cluster that does enforce them.
+USER node
+
 CMD ["npm", "start"]

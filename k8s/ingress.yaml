@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: discord-scoutid
+  labels:
+    app: discord-scoutid
+  annotations:
+    # These two are the whole certificate setup. cert-manager's ingress-shim
+    # creates and owns the Certificate from them, so there is no
+    # certificate.yaml here — same as scoutview, which renews unattended.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    acme.cert-manager.io/http01-ingress-class: traefik
+spec:
+  # Required: traefik is not the default IngressClass on this cluster (Kong
+  # also runs here), so an omitted class silently lands on the wrong one.
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - discord-scoutid.wsj27.scouterna.net
+      secretName: discord-scoutid-tls
+  rules:
+    - host: discord-scoutid.wsj27.scouterna.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: discord-scoutid
+                port:
+                  number: 80

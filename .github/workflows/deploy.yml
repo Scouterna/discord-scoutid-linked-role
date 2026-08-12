@@ -1,16 +1,15 @@
 name: Deploy
 
-# Builds an image tagged with the commit SHA, pushes it to ACR, then lets
-# Terraform perform the deployment. Terraform — not `az containerapp update` —
-# owns the image tag, so state never drifts from what is running.
+# Builds an image tagged with the commit SHA, pushes it to GHCR, then applies
+# k8s/ to the `wsj27` namespace on Scouterna's shared AKS cluster.
+#
+# No Azure credentials are involved any more: the image goes to GHCR and the
+# deploy goes to Kubernetes. Azure keeps only the DNS zone and the storage
+# account the pod talks to at runtime.
 
-# The push trigger is removed for the duration of the AKS migration. This
-# workflow still runs `terraform apply`, which would revert the DNS TTL the
-# cutover depends on (main.tf pins the CNAME at ttl = 3600) and keep
-# reconciling the Container App from Terraform state. Phase 3 replaces this
-# file with build-and-apply against the cluster; until then deploy manually
-# via workflow_dispatch, or the WSL build documented in CLAUDE.md.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -23,8 +22,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGISTRY: acrwsj27prodsec
-  IMAGE: discord-scoutid-linked-role
+  IMAGE: ghcr.io/scouterna/discord-scoutid-linked-role
+  # Pinned rather than trusting whatever the runner image ships, and matching
+  # the devcontainer. `kubectl apply -k` embeds kustomize, but `kustomize edit`
+  # needs the standalone binary.
+  KUSTOMIZE_VERSION: 5.4.3
 
 jobs:
   deploy:
@@ -33,7 +35,7 @@ jobs:
     environment: prod
     permissions:
       contents: read
-      id-token: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -41,47 +43,45 @@ jobs:
         id: tag
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: azure/login@v2
+      - uses: docker/login-action@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
         run: |
-          az acr login --name "$REGISTRY"
-          IMAGE_REF="$REGISTRY.azurecr.io/$IMAGE:${{ steps.tag.outputs.tag }}"
-          docker build -t "$IMAGE_REF" .
-          docker push "$IMAGE_REF"
+          docker build -t "$IMAGE:${{ steps.tag.outputs.tag }}" .
+          docker push "$IMAGE:${{ steps.tag.outputs.tag }}"
 
-      - uses: hashicorp/setup-terraform@v3
-
-      - run: terraform init
-        working-directory: terraform
-
-      - name: Apply
-        working-directory: terraform
+      - name: Install kustomize
         run: |
-          terraform apply -auto-approve -lock-timeout=5m \
-            -var-file=terraform.tfvars \
-            -var="docker_image_tag=${{ steps.tag.outputs.tag }}"
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kustomize
+          kustomize version
+
+      - name: Configure kubectl
         env:
-          ARM_USE_OIDC: true
-          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
-          TF_VAR_discord_token: ${{ secrets.DISCORD_TOKEN }}
-          TF_VAR_discord_client_id: ${{ secrets.DISCORD_CLIENT_ID }}
-          TF_VAR_discord_client_secret: ${{ secrets.DISCORD_CLIENT_SECRET }}
-          TF_VAR_discord_public_key: ${{ secrets.DISCORD_PUBLIC_KEY }}
-          TF_VAR_discord_guild_id: ${{ secrets.DISCORD_GUILD_ID }}
-          TF_VAR_scoutid_client_id: ${{ secrets.SCOUTID_CLIENT_ID }}
-          TF_VAR_scoutid_client_secret: ${{ secrets.SCOUTID_CLIENT_SECRET }}
-          TF_VAR_cookie_secret: ${{ secrets.COOKIE_SECRET }}
-          TF_VAR_scoutnet_event_id: ${{ secrets.SCOUTNET_EVENT_ID }}
-          TF_VAR_scoutnet_participants_apikey: ${{ secrets.SCOUTNET_PARTICIPANTS_APIKEY }}
+          # Base64-encoded kubeconfig for the `github-deployer` service
+          # account. That identity can touch discord-scoutid and nothing else
+          # in the namespace — it cannot read Secrets or delete anything.
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/.kube"
+          printf '%s' "$KUBE_CONFIG" | base64 -d > "$RUNNER_TEMP/.kube/config"
+          chmod 600 "$RUNNER_TEMP/.kube/config"
+          echo "KUBECONFIG=$RUNNER_TEMP/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Apply manifests
+        run: |
+          # Edits the ephemeral checkout only; the committed kustomization.yaml
+          # keeps its placeholder, so no tag in the repo can go stale.
+          (cd k8s && kustomize edit set image "$IMAGE=$IMAGE:${{ steps.tag.outputs.tag }}")
+          kubectl apply -k k8s/
+          # The real gate. Fails on CrashLoopBackOff or ImagePullBackOff, and
+          # with maxUnavailable: 0 a failing rollout never takes the old pods
+          # down — so a bad image cannot break production.
+          kubectl rollout status deploy/discord-scoutid --timeout=180s
 
       - name: Verify the new revision serves traffic
         run: |

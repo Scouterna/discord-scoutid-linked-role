@@ -21,3 +21,12 @@ scoutid-metadata.json
 
 # Azure CLI config/token cache for the Scouterna tenant (see CLAUDE.md)
 .azure*
+
+# Kubeconfigs hold long-lived service-account tokens; they live in ~/.kube
+**/kubeconfig*
+**/kubectl
+**/*.kubeconfig
+
+# Corporate root CAs for the devcontainer's TLS-intercepted npm mirror.
+# Site-specific, so they stay out of a public repo.
+.devcontainer/certs/

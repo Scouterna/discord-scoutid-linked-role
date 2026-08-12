@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discord-scoutid
+  labels:
+    app: discord-scoutid
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: discord-scoutid
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Keeps a warm replica through a rollout, so Discord's 3-second
+      # interaction ACK is always met. Never scale to zero.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: discord-scoutid
+    spec:
+      # /interactions ACKs immediately, then finishes the real work ~1s later
+      # in the background. Too short a grace period kills that work mid-rollout.
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          # Soft: two replicas are worth little if both sit on the same node.
+          # Preferred, not required, so a full node can never block scheduling.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: discord-scoutid
+      containers:
+        - name: app
+          # Tag is set by CI (`kustomize edit set image`). Never :latest — it
+          # makes rollouts and `rollout undo` ambiguous.
+          image: ghcr.io/scouterna/discord-scoutid-linked-role:PLACEHOLDER-set-by-ci
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: discord-scoutid-config
+            # Created imperatively, not by kustomize. See the migration plan, P4.
+            - secretRef:
+                name: discord-scoutid-secrets
+          # Sized against 93-97% actual node memory. Do not oversize.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # GET / returns 200 and is the only health endpoint the app has.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
