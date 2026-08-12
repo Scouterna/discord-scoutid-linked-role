@@ -119,38 +119,38 @@ docker compose run --rm discord-scoutid-linked-role node src/register.js
 
 ## Deploying
 
-Infrastructure lives in [terraform/](terraform/) — Azure Container Apps, Table
-Storage, Container Registry, DNS. See [terraform/README.md](terraform/README.md).
+The bot runs on Kubernetes — namespace `wsj27` on Scouterna's shared AKS
+cluster — with manifests in [k8s/](k8s/) and images in GHCR. What remains in
+Azure is the Table Storage account holding the links, and the DNS record; see
+[terraform/README.md](terraform/README.md).
 
-Pushing to `main` builds, pushes and applies automatically — see
-[.github/workflows/deploy.yml](.github/workflows/deploy.yml). Terraform owns the
-image tag, so the deployed revision and the state stay in agreement.
+Pushing to `main` builds the image and applies the manifests — see
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml). The `prod`
+environment gates it. Terraform is **not** part of deployment any more.
 
-The commands below are the break-glass path. **Always tag images with the git
-SHA**: Azure Container Apps only creates a new revision when the image *string*
-changes, so pushing over `:latest` silently keeps the old container running.
-Deploying this way also leaves Terraform unaware of the change — update
-`docker_image_tag` in [terraform/terraform.tfvars](terraform/terraform.tfvars) to
-match, or the next apply rolls production back.
+**Always tag images with the git SHA, never `latest`.** On Container Apps a
+mutable tag silently kept the old container running; on Kubernetes it makes
+rollouts and `rollout undo` ambiguous, because two different images share one
+name. CI tags with the SHA automatically.
 
 Dependencies install from registry.npmjs.org. To build behind an npm proxy, drop
 a `.npmrc` in the repo root — it is gitignored, and the Dockerfile installs with
 it in a separate stage so it never becomes a layer in the image.
 
+Break-glass manual deploy. `kubectl apply -k k8s/` on its own gives
+`ImagePullBackOff`: the committed tag is a placeholder that CI rewrites in its
+own checkout, so the tag must be named explicitly.
+
 ```bash
-TAG=$(git rev-parse --short HEAD)
-ACR=acrwsj27prodsec.azurecr.io/discord-scoutid-linked-role
+export KUBECONFIG=~/.kube/wsj27.yaml
+IMG=ghcr.io/scouterna/discord-scoutid-linked-role
 
-docker build -t $ACR:$TAG . && docker push $ACR:$TAG
+(cd k8s && kustomize edit set image "$IMG=$IMG:$(git rev-parse --short HEAD)")
+kubectl apply -k k8s/
+kubectl rollout status deploy/discord-scoutid
+# then revert the kustomization edit — never commit a real tag
 
-az containerapp update \
-  --name app-discord-scoutid-prod-sec \
-  --resource-group rg-discord-scoutid-prod-sec \
-  --image $ACR:$TAG
-
-az containerapp logs show \
-  --name app-discord-scoutid-prod-sec \
-  --resource-group rg-discord-scoutid-prod-sec --follow
+kubectl logs -l app=discord-scoutid --follow --prefix
 ```
 
 ## Discord Developer Portal setup

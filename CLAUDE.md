@@ -2,32 +2,67 @@
 
 ## Build & Deploy
 
-**Always tag images with the git SHA, never just `latest`.** Azure Container
-Apps does not create a new revision when the image *string* is unchanged
-(`...:latest` → `...:latest`), so deploying over `latest` silently keeps the
-old image running. A unique tag forces a fresh revision every time.
+**The bot runs on Kubernetes**, in namespace `wsj27` on Scouterna's shared AKS
+cluster `webservices` — not on Azure Container Apps. Deploying is a push to
+`main`: [.github/workflows/deploy.yml](.github/workflows/deploy.yml) builds the
+image, pushes it to GHCR and applies `k8s/`. The `prod` environment gates it.
+
+**Always tag images with the git SHA, never `latest`.** The reason changed with
+the platform but the rule did not: on Container Apps a mutable tag silently kept
+the old container running; on Kubernetes it makes rollouts and `rollout undo`
+ambiguous, because two different images share one name.
 
 ```bash
-TAG=$(git rev-parse --short HEAD)
-ACR=acrwsj27prodsec.azurecr.io/discord-scoutid-linked-role
+export KUBECONFIG=~/.kube/wsj27.yaml   # ~/.kube/config is rancher-desktop
 
-# Build from WSL (a local, gitignored .npmrc points npm at the internal mirror)
-docker build --no-cache -t $ACR:$TAG .
-docker push $ACR:$TAG
-
-# Deploy to Azure (unique tag → guaranteed new revision)
-az containerapp update --name app-discord-scoutid-prod-sec --resource-group rg-discord-scoutid-prod-sec --image $ACR:$TAG
-
-# View logs
-az containerapp logs show --name app-discord-scoutid-prod-sec --resource-group rg-discord-scoutid-prod-sec --follow
-
-# Register slash command (once)
-docker run --rm --env-file .env $ACR:$TAG node src/register.js
+kubectl get pods -l app=discord-scoutid
+kubectl logs -l app=discord-scoutid --tail=50 --prefix
+kubectl rollout status deploy/discord-scoutid
+kubectl rollout restart deploy/discord-scoutid      # zero-downtime, see below
+kubectl rollout undo deploy/discord-scoutid         # previous ReplicaSet
 ```
 
-> If you must redeploy the same tag, add `--revision-suffix <unique>` to the
-> `az containerapp update` so a new revision is created. Terraform deploys
-> should set `docker_image_tag` to the git SHA for the same reason.
+**Break-glass manual deploy.** `kubectl apply -k k8s/` alone will *not* work:
+the committed `newTag` is a deliberate placeholder that CI rewrites in its own
+checkout, so applying it as-is gives `ImagePullBackOff`. Name the tag:
+
+```bash
+IMG=ghcr.io/scouterna/discord-scoutid-linked-role
+(cd k8s && kustomize edit set image "$IMG=$IMG:<sha>") && kubectl apply -k k8s/
+# then revert the edit — never commit a real tag
+```
+
+**Rotating secrets** — replaces `az containerapp secret set`:
+
+```bash
+kubectl create secret generic discord-scoutid-secrets \
+  --from-env-file=.env.k8s --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deploy/discord-scoutid
+```
+
+**Registering slash commands** (rarely needed; definitions change seldom):
+
+```bash
+docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
+```
+
+### Why rollouts are safe
+
+Three settings work together, and removing any one reintroduces dropped
+requests. This was measured, not assumed — before the preStop hook a rollout
+dropped 5 of 559 requests; after, 0 of 254.
+
+- `maxUnavailable: 0` keeps a Ready pod throughout, so Discord's 3-second
+  interaction ACK is always met. It does **not** stop traffic reaching a
+  terminating pod — that is what the next item is for.
+- A **10s `preStop` sleep**, because pod deletion and endpoint removal are
+  concurrent: traefik keeps routing here briefly after termination begins.
+- A **SIGTERM handler** in [src/server.js](src/server.js) that drains open
+  connections *and* waits for background work. Slash commands ACK immediately
+  and do the real work ~1s later, so that work outlives the HTTP response;
+  without the wait a deploy kills it after the user was told it was accepted.
+  This requires `CMD ["node", …]` (exec form) so node is PID 1 and receives the
+  signal at all — under `npm start` it never arrives.
 
 ## Azure CLI: use the Scouterna config dir
 
@@ -50,8 +85,15 @@ without it they silently target the wrong tenant and fail on the state account.
 ## Architecture
 
 - Node.js 20 + Express 5 + Azure Table Storage (ESM modules)
-- Azure Container Apps + Azure Storage Account (Table) + ACR
-- Terraform in `terraform/` manages all infrastructure
+- Runs on Kubernetes: namespace `wsj27` on Scouterna's shared AKS cluster
+  `webservices`, behind traefik with a cert-manager certificate. Manifests in
+  `k8s/`, images in GHCR. Storage stayed in Azure — Table Storage is durable,
+  costs öre, and keeping it meant no data migration and a free rollback
+- Terraform in `terraform/` manages only what is left in Azure: the storage
+  account holding the links, and the DNS record. **Nothing applies it
+  automatically** — [plan.yml](.github/workflows/plan.yml) plans on PRs, and
+  applying is a deliberate manual act. It is destined for a separate
+  `wsj-infra` repo
 - Docker build pulls from registry.npmjs.org unless a gitignored `.npmrc` overrides it (installed in a separate build stage, so it never lands in the image). On a network that TLS-intercepts npmjs, `npm ci` half-installs while still exiting 0 — so a local `.npmrc` pointing at a reachable mirror is required there. The Dockerfile verifies every dependency landed and fails the build otherwise
 - Local dev uses the Azurite storage emulator (see `docker-compose.yml`)
 
