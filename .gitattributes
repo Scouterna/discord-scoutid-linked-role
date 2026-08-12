@@ -1,0 +1,8 @@
+# core.autocrlf=true on Windows would check these out with CRLF, which breaks
+# them on Linux: bash fails on a `\r` in a shebang or command, and Docker
+# carries the `\r` into RUN lines. Everything here executes in a container or
+# on a CI runner, so pin them to LF regardless of platform.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
