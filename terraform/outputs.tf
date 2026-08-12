@@ -30,22 +30,22 @@ output "storage_account_name" {
 
 output "discord_redirect_uri" {
   description = "Discord OAuth redirect URI (update this in Discord Developer Portal)"
-  value       = "https://${trimsuffix(azurerm_dns_cname_record.project_cname.fqdn, ".")}/discord-oauth-callback"
+  value       = "https://${trimsuffix(azurerm_dns_a_record.project_a.fqdn, ".")}/discord-oauth-callback"
 }
 
 output "discord_validation_url" {
   description = "Discord validation URL (update this in Discord Developer Portal)"
-  value       = "https://${trimsuffix(azurerm_dns_cname_record.project_cname.fqdn, ".")}/linked-role"
+  value       = "https://${trimsuffix(azurerm_dns_a_record.project_a.fqdn, ".")}/linked-role"
 }
 
 output "scoutid_redirect_uri" {
   description = "ScoutID OAuth redirect URI (update this in ScoutID settings)"
-  value       = "https://${trimsuffix(azurerm_dns_cname_record.project_cname.fqdn, ".")}/scoutid-oauth-callback"
+  value       = "https://${trimsuffix(azurerm_dns_a_record.project_a.fqdn, ".")}/scoutid-oauth-callback"
 }
 
 output "discord_interactions_url" {
   description = "Discord interactions endpoint URL (set in Discord Developer Portal > General Information)"
-  value       = "https://${trimsuffix(azurerm_dns_cname_record.project_cname.fqdn, ".")}/interactions"
+  value       = "https://${trimsuffix(azurerm_dns_a_record.project_a.fqdn, ".")}/interactions"
 }
 
 output "deployment_commands" {

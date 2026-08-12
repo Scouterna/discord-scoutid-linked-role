@@ -257,33 +257,21 @@ resource "azurerm_container_app" "main" {
   }
 }
 
-# DNS CNAME Record for Discord ScoutID Linker - points to Container App default domain.
+# DNS A Record for Discord ScoutID Linker — points at the traefik load balancer
+# on Scouterna's shared AKS cluster, where the bot now runs.
 #
-# Must be the app-level ingress FQDN, which is stable across revisions — not
-# `latest_revision_fqdn`, which names a single revision. That name is written one
-# revision behind (the new revision is still provisioning when Terraform reads
-# it), so plans never converge, and once the named revision is purged under
-# max_inactive_revisions the record stops resolving and the custom domain goes
-# dark for a full TTL.
-resource "azurerm_dns_cname_record" "project_cname" {
+# This replaced a CNAME to the Container App ingress FQDN, plus an
+# `asuid.discord-scoutid` TXT record that existed only for Container Apps
+# custom-domain verification. Both are gone: a CNAME cannot coexist with an A
+# record at the same name, and nothing verifies the domain any more.
+#
+# The TTL stays low while the migration beds in, so that recreating the old
+# CNAME is a fast rollback. Raise it once the cluster has proven itself.
+resource "azurerm_dns_a_record" "project_a" {
   name                = var.project_name
   zone_name           = azurerm_dns_zone.main.name
   resource_group_name = azurerm_resource_group.shared.name
-  ttl                 = 3600
-  record              = azurerm_container_app.main.ingress[0].fqdn
+  ttl                 = 60
+  records             = [var.aks_ingress_ip]
   tags                = var.tags
-}
-
-# DNS TXT Record for Container App Custom Domain Verification
-resource "azurerm_dns_txt_record" "project_cname_verify" {
-  name                = "asuid.${var.project_name}"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = azurerm_resource_group.shared.name
-  ttl                 = 3600
-
-  record {
-    value = "D518F2D5350C431D2056B3C713EF3768B3AB5A91926CD1CD81DFF4D84B9BEE85"
-  }
-
-  tags = var.tags
 }

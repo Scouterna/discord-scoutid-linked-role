@@ -167,3 +167,14 @@ variable "scoutnet_nickname_suffixes" {
   type        = string
   default     = ""
 }
+
+variable "aks_ingress_ip" {
+  description = "Static public IP of the traefik load balancer on Scouterna's shared AKS cluster, where the bot runs"
+  type        = string
+  default     = "20.238.205.144"
+
+  validation {
+    condition     = can(regex("^([0-9]{1,3}[.]){3}[0-9]{1,3}$", var.aks_ingress_ip))
+    error_message = "aks_ingress_ip must be a bare IPv4 address."
+  }
+}
