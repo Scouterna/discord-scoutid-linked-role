@@ -4,9 +4,13 @@ name: Deploy
 # Terraform perform the deployment. Terraform — not `az containerapp update` —
 # owns the image tag, so state never drifts from what is running.
 
+# The push trigger is removed for the duration of the AKS migration. This
+# workflow still runs `terraform apply`, which would revert the DNS TTL the
+# cutover depends on (main.tf pins the CNAME at ttl = 3600) and keep
+# reconciling the Container App from Terraform state. Phase 3 replaces this
+# file with build-and-apply against the cluster; until then deploy manually
+# via workflow_dispatch, or the WSL build documented in CLAUDE.md.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
