@@ -50,6 +50,14 @@ spec:
             # Created imperatively, not by kustomize. See the migration plan, P4.
             - secretRef:
                 name: discord-scoutid-secrets
+          # Pod deletion and endpoint removal happen concurrently, so traefik
+          # keeps routing here for a moment after termination starts. Without
+          # this delay a rollout returns 502s (measured: 5 failures in 457
+          # requests). Must stay well under terminationGracePeriodSeconds.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
           # Sized against 93-97% actual node memory. Do not oversize.
           resources:
             requests:
