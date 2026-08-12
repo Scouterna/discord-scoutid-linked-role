@@ -5,26 +5,13 @@ resource "azurerm_resource_group" "shared" {
   tags     = var.tags
 }
 
-# Azure Container Registry (Basic tier - cheapest)
+# The Azure Container Registry lived here until both WSJ27 Discord bots moved
+# to the shared AKS cluster. Images are built and pulled from GHCR now —
+# ghcr.io/scouterna/discord-scoutid-linked-role and
+# ghcr.io/scouterna/wsj27-discord-bot — so nothing in this subscription serves
+# containers any more. It was kept alive through Phase 8 purely because the
+# wsj27-bot was still pulling from it.
 #
-# The ScoutID bot no longer uses this — it builds to and pulls from
-# ghcr.io/scouterna/discord-scoutid-linked-role. But `discord-wsj27-bot` is
-# STILL deployed from `acrwsj27prodsec.azurecr.io/discord-wsj27-bot:latest` on
-# Container Apps, so deleting this registry would leave that bot unable to pull
-# on its next restart — a failure that would surface long after the change, at
-# whatever moment the platform happened to move it.
-#
-# Delete this only once the wsj27-bot has moved to the cluster and GHCR
-# (migration plan, P9), not with the rest of the ScoutID teardown in P8.
-resource "azurerm_container_registry" "main" {
-  name                = replace("acr-wsj27-${var.environment}-${var.location-abbr}", "-", "")
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
-  sku                 = "Basic"
-  admin_enabled       = true
-  tags                = var.tags
-}
-
 # The DNS zone below is shared with other WSJ27 projects — never
 # `terraform destroy` this configuration.
 
