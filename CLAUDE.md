@@ -77,10 +77,13 @@ az login --tenant 317a47ba-fd32-41b8-8ebe-310a1adc9863
 az account set --subscription d4887907-2e73-4465-9fe3-44c82ed016d6
 ```
 
-Every `az` and `terraform` command for this project needs that variable set —
-the azurerm provider and the state backend both authenticate through the CLI, so
-without it they silently target the wrong tenant and fail on the state account.
-`.claude/settings.local.json` sets it for Claude Code sessions.
+Every `az` command for this project needs that variable set, or it silently
+targets the wrong tenant. `.claude/settings.local.json` sets it for Claude Code
+sessions.
+
+The same directory is what `Scouterna/wsj27-infra` authenticates through: the
+azurerm provider and the state backend both go via the CLI, so Terraform there
+needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 ## Architecture
 
@@ -89,11 +92,12 @@ without it they silently target the wrong tenant and fail on the state account.
   `webservices`, behind traefik with a cert-manager certificate. Manifests in
   `k8s/`, images in GHCR. Storage stayed in Azure — Table Storage is durable,
   costs öre, and keeping it meant no data migration and a free rollback
-- Terraform in `terraform/` manages only what is left in Azure: the storage
-  account holding the links, and the DNS record. **Nothing applies it
-  automatically** — [plan.yml](.github/workflows/plan.yml) plans on PRs, and
-  applying is a deliberate manual act. It is destined for a separate
-  `wsj-infra` repo
+- **No Terraform lives in this repository.** What is left in Azure — the storage
+  account holding the links, and the DNS record — is managed from the `azure/`
+  root module in `Scouterna/wsj27-infra`, alongside the Discord server config.
+  Infrastructure shared between projects should not live inside one of them.
+  Nothing applies it automatically: CI there validates but does not plan or
+  apply, so applying is a deliberate manual act
 - Docker build pulls from registry.npmjs.org unless a gitignored `.npmrc` overrides it (installed in a separate build stage, so it never lands in the image). On a network that TLS-intercepts npmjs, `npm ci` half-installs while still exiting 0 — so a local `.npmrc` pointing at a reachable mirror is required there. The Dockerfile verifies every dependency landed and fails the build otherwise
 - Local dev uses the Azurite storage emulator (see `docker-compose.yml`)
 
@@ -125,7 +129,10 @@ without it they silently target the wrong tenant and fail on the state account.
 
 ## Config format reference
 
-Aktuell prod-config (se [terraform/terraform.tfvars](terraform/terraform.tfvars)):
+Aktuell prod-config — [k8s/configmap.yaml](k8s/configmap.yaml) är enda källan.
+Roll-konfigurationen låg tidigare i `terraform.tfvars`, men de variablerna togs
+bort när Container App avvecklades: Terraform hanterar inte längre något som
+boten läser.
 
 ```
 # Marker-roller (alla länkade / alla event-anmälda)
@@ -168,7 +175,7 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 
 ## Krav på Discord-servern
 
-Discord-rollerna ägs av [discord-wsj27-infra](https://github.com/wsj27se/discord-wsj27-infra) (Terraform). Boten letar upp roller efter namn (case-insensitive) — om en roll inte finns hoppas tilldelningen tyst över. Roller som måste finnas:
+Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`) (Terraform). Boten letar upp roller efter namn (case-insensitive) — om en roll inte finns hoppas tilldelningen tyst över. Roller som måste finnas:
 
 | Bot tilldelar | Källa i infra-repot |
 |---|---|

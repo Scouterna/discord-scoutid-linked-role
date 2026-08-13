@@ -47,7 +47,7 @@ the question is unanswered; a category without one gets a role named after the
 category itself. Division numbers are zero-padded to at least 2 digits
 (`3` → `03`, `100` → `100`).
 
-The current production mapping ([terraform/terraform.tfvars](terraform/terraform.tfvars)):
+The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 
 | Fee ID                     | Category         | Division question | With division       | Without division     | Nickname suffix |
 | -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------------- |
@@ -58,7 +58,7 @@ The current production mapping ([terraform/terraform.tfvars](terraform/terraform
 | 25697, 25693               | `cmt`            | —                 | `CMT`               | —                    | `(CMT)`         |
 
 The roles themselves are owned by a separate Terraform repo,
-[discord-wsj27-infra](https://github.com/wsj27se/discord-wsj27-infra). Its troop
+[Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`). Its troop
 and IST-patrol counts must cover every value ScoutNet can return for the
 division questions.
 
@@ -122,7 +122,7 @@ docker compose run --rm discord-scoutid-linked-role node src/register.js
 The bot runs on Kubernetes — namespace `wsj27` on Scouterna's shared AKS
 cluster — with manifests in [k8s/](k8s/) and images in GHCR. What remains in
 Azure is the Table Storage account holding the links, and the DNS record; see
-[terraform/README.md](terraform/README.md).
+the `azure/` module in `Scouterna/wsj27-infra`.
 
 Pushing to `main` builds the image and applies the manifests — see
 [.github/workflows/deploy.yml](.github/workflows/deploy.yml). The `prod`
@@ -157,7 +157,7 @@ kubectl logs -l app=discord-scoutid --follow --prefix
 
 The app needs the `bot` scope and **Manage Roles** + **Manage Nicknames**
 permissions, and its role must sit above every role it assigns. Three URLs point
-back at the deployment (`terraform output` prints them):
+back at the deployment, all on `https://discord-scoutid.wsj27.scouterna.net`:
 
 | Portal setting                                       | Path                       |
 | ---------------------------------------------------- | -------------------------- |
