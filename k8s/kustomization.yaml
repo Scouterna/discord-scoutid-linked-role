@@ -8,6 +8,10 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - backup-cronjob.yaml
+
+# backup-restore-job.yaml is deliberately NOT listed: it is a one-off, applied
+# by hand when a restore is actually needed.
 
 # The Secret is deliberately absent: it is created imperatively (plan P4), the
 # way scoutview-secrets already is. This cluster has no sealed-secrets or

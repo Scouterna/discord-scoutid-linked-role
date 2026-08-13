@@ -46,6 +46,52 @@ kubectl rollout restart deploy/discord-scoutid
 docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
 ```
 
+### Backup and restore
+
+**Table Storage has no soft delete and no point-in-time restore** — unlike blobs.
+An export is the only backup that exists, so
+[k8s/backup-cronjob.yaml](k8s/backup-cronjob.yaml) runs daily at 03:15 UTC and
+writes a JSON snapshot to the `scoutid-backups` container on
+**`stwsj27tfstatesec`** — a different storage account, in a different resource
+group, with blob versioning and 30-day soft delete. The data account has
+neither, and no `CanNotDelete` lock can be created without subscription Owner,
+so a backup sitting beside the data would not survive the case worth planning
+for. Blobs expire after 90 days via a lifecycle rule scoped to that container
+prefix (the same account holds Terraform state — never write an unscoped rule
+there).
+
+The `state` partition is excluded: OAuth state is ephemeral with a 10-minute
+expiry. Everything else is kept — the 9 `link` rows are the irreplaceable part,
+since losing them means every user must re-verify, while tokens merely force a
+re-auth.
+
+Two properties worth preserving if this is ever edited: it paginates explicitly
+(the service caps a page at 1000 entities and the CLI does not follow the
+marker, so a single call silently truncates once enough people link), and it
+refuses to upload a snapshot containing zero `link` rows.
+
+```bash
+kubectl get cronjob discord-scoutid-backup
+kubectl create job manual-backup --from=cronjob/discord-scoutid-backup   # run now
+kubectl logs job/manual-backup
+```
+
+**Restoring** — [k8s/backup-restore-job.yaml](k8s/backup-restore-job.yaml),
+applied by hand, never part of the kustomization. It defaults to a scratch table
+and refuses to touch `scoutidlinks` unless `ALLOW_PRODUCTION_RESTORE=yes`, so
+running it unedited cannot overwrite production.
+
+```bash
+kubectl apply -f k8s/backup-restore-job.yaml   # edit BACKUP_BLOB / RESTORE_TABLE first
+kubectl logs -f job/discord-scoutid-restore
+kubectl delete job discord-scoutid-restore
+```
+
+Verified end to end on 2026-08-13: 27 entities exported, restored into a scratch
+table, and compared against the live table — every entity byte-identical. Repeat
+that comparison after changing either job; a backup that has never been restored
+is not a backup.
+
 ### Why rollouts are safe
 
 Three settings work together, and removing any one reintroduces dropped

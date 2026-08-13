@@ -1,0 +1,122 @@
+# One-off restore from a backup blob. NOT part of the kustomization — apply it
+# by hand when you actually need it:
+#
+#   kubectl apply -f k8s/backup-restore-job.yaml
+#   kubectl logs -f job/discord-scoutid-restore
+#   kubectl delete job discord-scoutid-restore
+#
+# Set BACKUP_BLOB to the snapshot you want. RESTORE_TABLE deliberately defaults
+# to a scratch table: running this unedited must never overwrite production.
+# Restoring into the live table additionally requires ALLOW_PRODUCTION_RESTORE=yes,
+# so it cannot happen by forgetting to change one value.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: discord-scoutid-restore
+  labels:
+    app: discord-scoutid-backup
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: discord-scoutid-backup
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: restore
+          image: mcr.microsoft.com/azure-cli:2.89.1
+          env:
+            - name: TABLE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: discord-scoutid-secrets
+                  key: TABLE_CONNECTION_STRING
+            - name: BACKUP_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: scoutid-backup-target
+                  key: BACKUP_CONNECTION_STRING
+
+            # "" means "the newest blob in the container".
+            - name: BACKUP_BLOB
+              value: ""
+            # Scratch by default. The live table is `scoutidlinks`.
+            - name: RESTORE_TABLE
+              value: "scoutidrestoretest"
+            - name: ALLOW_PRODUCTION_RESTORE
+              value: "no"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              if [ "$RESTORE_TABLE" = "scoutidlinks" ] && [ "$ALLOW_PRODUCTION_RESTORE" != "yes" ]; then
+                echo "ERROR: refusing to write to the live table without ALLOW_PRODUCTION_RESTORE=yes" >&2
+                exit 1
+              fi
+
+              BLOB="$BACKUP_BLOB"
+              if [ -z "$BLOB" ]; then
+                BLOB="$(az storage blob list -c scoutid-backups \
+                  --connection-string "$BACKUP_CONNECTION_STRING" \
+                  --query '[-1].name' -o tsv --only-show-errors)"
+              fi
+              echo "restoring from: $BLOB  ->  table: $RESTORE_TABLE"
+
+              az storage blob download -c scoutid-backups \
+                --connection-string "$BACKUP_CONNECTION_STRING" \
+                -n "$BLOB" -f /tmp/backup.json --overwrite --only-show-errors >/dev/null
+
+              az storage table create --name "$RESTORE_TABLE" \
+                --connection-string "$TABLE_CONNECTION_STRING" \
+                --only-show-errors >/dev/null || true
+
+              # subprocess with an argv list, not a shell string: the `value`
+              # field holds JSON with quotes and spaces, which would not survive
+              # shell word-splitting.
+              python3 - <<'PY'
+              import json, os, subprocess, sys
+
+              rows = json.load(open('/tmp/backup.json'))
+              table = os.environ['RESTORE_TABLE']
+              conn = os.environ['TABLE_CONNECTION_STRING']
+
+              ok = fail = 0
+              for r in rows:
+                  entity = [f'PartitionKey={r["PartitionKey"]}', f'RowKey={r["RowKey"]}']
+                  for k, v in r.items():
+                      # Timestamp and etag are server-managed; sending them back
+                      # is rejected.
+                      if k in ('PartitionKey', 'RowKey', 'Timestamp', 'etag'):
+                          continue
+                      entity.append(f'{k}={v}')
+                  p = subprocess.run(
+                      ['az', 'storage', 'entity', 'insert',
+                       '--table-name', table, '--connection-string', conn,
+                       '--if-exists', 'replace', '--only-show-errors',
+                       '--entity'] + entity,
+                      capture_output=True, text=True)
+                  if p.returncode == 0:
+                      ok += 1
+                  else:
+                      fail += 1
+                      print(f'  FAILED {r["PartitionKey"]}/{r["RowKey"]}: '
+                            f'{p.stderr.strip()[:200]}', file=sys.stderr)
+
+              print(f'restored {ok} entities, {fail} failed')
+              sys.exit(1 if fail else 0)
+              PY
+
+              echo "verifying row counts in $RESTORE_TABLE"
+              az storage entity query --table-name "$RESTORE_TABLE" \
+                --connection-string "$TABLE_CONNECTION_STRING" \
+                --num-results 1000 --query 'length(items)' -o tsv --only-show-errors

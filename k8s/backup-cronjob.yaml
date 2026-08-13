@@ -1,0 +1,130 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discord-scoutid-backup
+  labels:
+    app: discord-scoutid-backup
+spec:
+  # 03:15 UTC daily. Table Storage has no soft delete and no point-in-time
+  # restore — unlike blobs — so an export is the only backup that exists.
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Keep more failures than successes: a CronJob that quietly stops working is
+  # worse than no backup, because you believe you are covered.
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: discord-scoutid-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mcr.microsoft.com/azure-cli:2.89.1
+              env:
+                # Source: the live table.
+                - name: TABLE_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: discord-scoutid-secrets
+                      key: TABLE_CONNECTION_STRING
+                - name: TABLE_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: discord-scoutid-config
+                      key: TABLE_NAME
+                # Target: a DIFFERENT storage account, in a different resource
+                # group, which has blob versioning and 30-day soft delete. The
+                # data account has neither, and no CanNotDelete lock can be
+                # created on it without subscription Owner — so a backup living
+                # beside the data would not survive the case worth planning for.
+                - name: BACKUP_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: scoutid-backup-target
+                      key: BACKUP_CONNECTION_STRING
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+
+                  STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+                  OUT=/tmp/rows.json
+                  : > /tmp/pages.json
+
+                  # Paginate explicitly. The service caps a page at 1000
+                  # entities and the CLI does not follow the marker itself, so
+                  # a single call would silently truncate once enough people
+                  # link — the failure would not surface until a restore.
+                  MARKER=""
+                  while : ; do
+                    if [ -z "$MARKER" ]; then
+                      PAGE="$(az storage entity query \
+                        --table-name "$TABLE_NAME" \
+                        --connection-string "$TABLE_CONNECTION_STRING" \
+                        --filter "PartitionKey ne 'state'" \
+                        --num-results 1000 -o json)"
+                    else
+                      PAGE="$(az storage entity query \
+                        --table-name "$TABLE_NAME" \
+                        --connection-string "$TABLE_CONNECTION_STRING" \
+                        --filter "PartitionKey ne 'state'" \
+                        --num-results 1000 --marker "$MARKER" -o json)"
+                    fi
+                    printf '%s\n' "$PAGE" >> /tmp/pages.json
+                    MARKER="$(printf '%s' "$PAGE" | python3 -c \
+                      'import json,sys; print(json.load(sys.stdin).get("nextMarker") or "")')"
+                    [ -n "$MARKER" ] || break
+                  done
+
+                  python3 - "$OUT" <<'PY'
+                  import json, sys
+                  rows = []
+                  with open('/tmp/pages.json') as fh:
+                      buf = fh.read()
+                  dec = json.JSONDecoder()
+                  i = 0
+                  while i < len(buf):
+                      while i < len(buf) and buf[i].isspace():
+                          i += 1
+                      if i >= len(buf):
+                          break
+                      obj, i = dec.raw_decode(buf, i)
+                      rows.extend(obj.get('items', []))
+                  json.dump(rows, open(sys.argv[1], 'w'), indent=1, default=str)
+                  print(f'exported {len(rows)} entities')
+                  PY
+
+                  # Refuse to publish an empty or link-less snapshot. Overwriting
+                  # good history with a broken export is the one way a backup
+                  # system makes an outage worse.
+                  LINKS="$(python3 -c \
+                    'import json;print(sum(1 for r in json.load(open("/tmp/rows.json")) if r.get("PartitionKey")=="link"))')"
+                  echo "link rows: $LINKS"
+                  if [ "$LINKS" -lt 1 ]; then
+                    echo "ERROR: refusing to upload a snapshot containing no link rows" >&2
+                    exit 1
+                  fi
+
+                  az storage blob upload \
+                    --connection-string "$BACKUP_CONNECTION_STRING" \
+                    --container-name scoutid-backups \
+                    --name "scoutidlinks-${STAMP}.json" \
+                    --file "$OUT" \
+                    --overwrite false \
+                    --only-show-errors
+
+                  echo "uploaded scoutidlinks-${STAMP}.json (${LINKS} links)"
