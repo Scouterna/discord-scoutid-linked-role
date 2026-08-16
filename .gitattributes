@@ -2,7 +2,7 @@
 # them on Linux: bash fails on a `\r` in a shebang or command, and Docker
 # carries the `\r` into RUN lines. Everything here executes in a container or
 # on a CI runner, so pin them to LF regardless of platform.
-*.sh        text eol=lf
-Dockerfile  text eol=lf
-*.yaml      text eol=lf
-*.yml       text eol=lf
+# The catch-all replaces a list of extensions that missed *.json and *.js, so a
+# Windows checkout left package.json and package-lock.json looking modified from
+# inside the devcontainer — line-ending noise that buries real changes.
+* text=auto eol=lf
