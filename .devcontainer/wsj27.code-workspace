@@ -4,8 +4,8 @@
   // container; these are the bind-mount targets from devcontainer.json.
   "folders": [
     { "path": "/workspaces/discord-scoutid-linked-role" },
-    { "path": "/workspaces/discord-wsj27-infra" },
-    { "path": "/workspaces/discord-wsj27-bot" }
+    { "path": "/workspaces/wsj27-infra" },
+    { "path": "/workspaces/wsj27-discord-bot" }
   ],
   "settings": {}
 }

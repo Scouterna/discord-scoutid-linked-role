@@ -18,9 +18,14 @@
   // The two sibling repos of the multi-root workspace. They are bound
   // individually rather than by mounting the parent `code/` directory, so
   // unrelated repositories stay out of the container.
+  //
+  // Both the host directory and the mount target match the GitHub repository
+  // name (`Scouterna/wsj27-infra`, `Scouterna/wsj27-discord-bot`). They used to
+  // be `discord-wsj27-*` locally, which read as if those were the repo names —
+  // note that the bot's is wsj27-discord-bot, not discord-wsj27-bot.
   "mounts": [
-    "source=${localWorkspaceFolder}/../discord-wsj27-infra,target=/workspaces/discord-wsj27-infra,type=bind,consistency=cached",
-    "source=${localWorkspaceFolder}/../discord-wsj27-bot,target=/workspaces/discord-wsj27-bot,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/../wsj27-infra,target=/workspaces/wsj27-infra,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/../wsj27-discord-bot,target=/workspaces/wsj27-discord-bot,type=bind,consistency=cached",
 
     // Kubeconfigs are portable YAML, so the host's are reused as-is.
     // HOME/USERPROFILE are concatenated because exactly one is set per

@@ -1,19 +1,25 @@
 # Devcontainer
 
-Covers all three repos of the WSJ27 workspace: this one, `discord-wsj27-infra`
-and `discord-wsj27-bot`.
+Covers all three repos of the WSJ27 workspace: this one, `wsj27-infra`
+and `wsj27-discord-bot`.
 
 ## Opening it
 
 The two sibling repos are bind-mounted from `../`, so they must be cloned next
-to this one:
+to this one. **Each directory has to be named exactly like its GitHub
+repository** — the bind mounts resolve by name, and a mismatch silently gives
+you an empty directory instead of the repo:
 
 ```
 code/
   discord-scoutid-linked-role/   ← open this one
-  discord-wsj27-infra/
-  discord-wsj27-bot/
+  wsj27-infra/                   ← Scouterna/wsj27-infra
+  wsj27-discord-bot/             ← Scouterna/wsj27-discord-bot
 ```
+
+Note the bot's repository is `wsj27-discord-bot`, not `discord-wsj27-bot`; the
+Kubernetes Deployment it ships *is* called `discord-wsj27-bot`, and those two
+names are unrelated.
 
 Open this folder and **Reopen in Container**. For the multi-root view, then open
 `/workspaces/discord-scoutid-linked-role/.devcontainer/wsj27.code-workspace`

@@ -60,7 +60,7 @@ install_deps() {
 }
 
 install_deps /workspaces/discord-scoutid-linked-role "discord-scoutid-linked-role"
-install_deps /workspaces/discord-wsj27-bot "discord-wsj27-bot"
+install_deps /workspaces/wsj27-discord-bot "wsj27-discord-bot"
 
 # --- Claude Code -----------------------------------------------------------
 # Not ghcr.io/anthropics/devcontainer-features/claude-code. That feature runs
