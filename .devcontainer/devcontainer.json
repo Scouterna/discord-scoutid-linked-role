@@ -47,7 +47,24 @@
     // DPAPI on Windows and libsecret on Linux, so a shared directory would
     // have the two platforms clobbering each other's tokens. A named volume
     // also survives a container rebuild. Cost: one `az login` in the container.
-    "source=wsj27-azure-config,target=/home/node/.azure-scouterna,type=volume"
+    "source=wsj27-azure-config,target=/home/node/.azure-scouterna,type=volume",
+
+    // The workspace's own .claude/ is shadowed by a volume so the container
+    // gets its own settings.local.json.
+    //
+    // That file is per-machine but lives inside the bind mount, so host and
+    // container would otherwise share one copy — and it carries an `env` block
+    // that Claude Code applies over devcontainer.json's containerEnv. A single
+    // AZURE_CONFIG_DIR cannot be right for both: the host needs a Windows path,
+    // the container a Linux one, and the wrong value makes every `az` call fail
+    // and silently litter a `C:/Users/...` tree into whichever repo is open.
+    //
+    // Nothing tracked lives in .claude/ (settings.local.json is gitignored), so
+    // shadowing it hides nothing from the repository. Approved-command caches
+    // stop being shared too, which is wanted: they are full of platform-
+    // specific command strings, and that cache is how a live Discord bot token
+    // was once captured and committed.
+    "source=wsj27-claude-local,target=${containerWorkspaceFolder}/.claude,type=volume"
   ],
 
   "containerEnv": {

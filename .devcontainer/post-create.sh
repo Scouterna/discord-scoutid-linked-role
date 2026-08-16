@@ -23,6 +23,19 @@ if compgen -G "$CERT_DIR/*.crt" >/dev/null 2>&1; then
   ok "$(ls -1 "$CERT_DIR"/*.crt | wc -l) certificate(s) installed"
 fi
 
+# --- Named volumes ---------------------------------------------------------
+# Docker creates a named volume owned by root, and everything here runs as
+# `node`. Without this, `az login` fails to write its token cache and Claude
+# Code cannot save approvals — both with a bare permission error that gives no
+# hint that ownership is the cause.
+for vol in /home/node/.azure-scouterna "$(dirname "$0")/../.claude"; do
+  [ -d "$vol" ] || continue
+  if [ "$(stat -c %u "$vol")" != "$(id -u)" ]; then
+    log "Taking ownership of $vol"
+    sudo chown -R "$(id -u):$(id -g)" "$vol" && ok "$vol"
+  fi
+done
+
 # --- Dependencies ----------------------------------------------------------
 # `npm ci` removes node_modules before it installs, so an unreachable registry
 # would leave the tree emptier than it started. Probe first, and skip cleanly.
