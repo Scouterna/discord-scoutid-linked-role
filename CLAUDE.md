@@ -186,7 +186,7 @@ SCOUTNET_SCOUT_ROLE=scout
 SCOUTNET_EVENT_ROLE=wsj-event
 
 # fee_id:category
-SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt
+SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
 
 # category:questionId:roleWithDiv:roleWithoutDiv
 SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande

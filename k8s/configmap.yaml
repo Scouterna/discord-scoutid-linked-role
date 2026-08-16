@@ -16,6 +16,9 @@ data:
 
   SCOUTNET_SCOUT_ROLE: scout
   SCOUTNET_EVENT_ROLE: WSJ-event
-  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt
+  # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
+  # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till
+  # 2026-08-16 efter att en länkad CMT:are blivit utan CMT-roll.
+  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
   SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
   SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,ist-direktresa::IST,cmt::CMT
