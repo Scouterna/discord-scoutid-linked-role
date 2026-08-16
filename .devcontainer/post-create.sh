@@ -28,13 +28,52 @@ fi
 # `node`. Without this, `az login` fails to write its token cache and Claude
 # Code cannot save approvals — both with a bare permission error that gives no
 # hint that ownership is the cause.
-for vol in /home/node/.azure-scouterna "$(dirname "$0")/../.claude"; do
+for vol in /home/node/.azure-scouterna /home/node/.config/gh "$(dirname "$0")/../.claude"; do
   [ -d "$vol" ] || continue
   if [ "$(stat -c %u "$vol")" != "$(id -u)" ]; then
     log "Taking ownership of $vol"
     sudo chown -R "$(id -u):$(id -g)" "$vol" && ok "$vol"
   fi
 done
+
+# --- Repository ownership --------------------------------------------------
+# The workspaces are 9p bind mounts from Windows and arrive owned by root,
+# while everything here runs as `node`. Git refuses to touch a repository owned
+# by another user — "detected dubious ownership" — which breaks every git
+# command, and VS Code shows the folders as unsafe.
+#
+# The fix belongs here rather than in a one-off `git config --global`, because
+# that writes to /home/node/.gitconfig, which is container-local and thrown
+# away by the next rebuild. Marking them on every container creation makes it
+# stick.
+log "Marking workspace repositories as safe for git"
+for repo in /workspaces/*/; do
+  repo="${repo%/}"
+  [ -d "$repo/.git" ] || continue
+  if ! git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$repo"; then
+    git config --global --add safe.directory "$repo"
+  fi
+  ok "$(basename "$repo")"
+done
+
+# --- Pushing over HTTPS ----------------------------------------------------
+# Every remote here is git@github.com:, but there is no SSH key in the
+# container — gh authenticates over HTTPS with a token instead. Rewrite the
+# remotes at git level rather than editing them, so the repositories' own
+# config stays as the host wrote it.
+#
+# This belongs in post-create for the same reason as safe.directory: the Dev
+# Containers extension copies the host's .gitconfig over ~/.gitconfig on every
+# rebuild, which drops anything set by hand in a previous container.
+log "Routing github.com pushes through gh over HTTPS"
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+if gh auth status >/dev/null 2>&1; then
+  gh auth setup-git && ok "gh credential helper configured"
+else
+  warn "gh is not authenticated — run: gh auth login"
+  warn "then: gh auth refresh -h github.com -s workflow"
+  warn "without the workflow scope, pushes touching .github/workflows/** fail."
+fi
 
 # --- Dependencies ----------------------------------------------------------
 # `npm ci` removes node_modules before it installs, so an unreachable registry

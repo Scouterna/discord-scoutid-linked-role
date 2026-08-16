@@ -64,7 +64,18 @@
     // stop being shared too, which is wanted: they are full of platform-
     // specific command strings, and that cache is how a live Discord bot token
     // was once captured and committed.
-    "source=wsj27-claude-local,target=${containerWorkspaceFolder}/.claude,type=volume"
+    "source=wsj27-claude-local,target=${containerWorkspaceFolder}/.claude,type=volume",
+
+    // gh's credentials, on a volume for the same reason as the Azure ones: they
+    // are container-local, so a rebuild would otherwise throw them away and
+    // every rebuild would need another `gh auth login`. Not shared with the
+    // host — the host authenticates over SSH, this container over HTTPS with a
+    // token, and gh stores the two differently.
+    //
+    // The token needs the `workflow` scope as well as `repo`, or any push
+    // touching .github/workflows/** is rejected:
+    //   gh auth refresh -h github.com -s workflow
+    "source=wsj27-gh-config,target=/home/node/.config/gh,type=volume"
   ],
 
   "containerEnv": {
