@@ -11,6 +11,8 @@
     // Reuses the host's Docker daemon, so `docker build` and the repo's
     // docker-compose.yml (app + Azurite + ngrok) work from inside the container.
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    // Claude Code is deliberately NOT the anthropics/claude-code feature —
+    // it is installed by post-create.sh instead. See the comment there.
   },
 
   // The two sibling repos of the multi-root workspace. They are bound
@@ -25,6 +27,15 @@
     // platform (Linux/macOS vs Windows). Setting HOME on Windows too would
     // glue both together into a broken path.
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.kube,target=/home/node/.kube,type=bind,consistency=cached",
+
+    // Claude Code's config, credentials and per-project memory. Bind-mounted
+    // rather than given a container-local volume so that memory written in
+    // here and on the host stay one set of files — memory is the durable
+    // context, and two diverging copies is worse than none.
+    //
+    // Do not run Claude on the host and in the container at the same time:
+    // both write history and settings under this directory.
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
 
     // Azure CLI credentials get their OWN volume rather than sharing the
     // workspace's .azure-scouterna: the MSAL token cache is encrypted with
@@ -51,6 +62,9 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        // Contributed by the claude-code feature until it was dropped; the
+        // extension is still wanted, so it is listed explicitly.
+        "anthropic.claude-code",
         "hashicorp.terraform",
         "ms-kubernetes-tools.vscode-kubernetes-tools",
         "ms-azuretools.vscode-docker",

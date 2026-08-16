@@ -42,6 +42,12 @@ install_deps() {
     return
   fi
 
+  # npm ci wipes node_modules, which fails if a previous run (or the runtime
+  # Dockerfile) created it as root. Fix ownership before npm touches it.
+  if [ -d "$dir/node_modules" ] && [ "$(stat -c %u "$dir/node_modules")" != "$(id -u)" ]; then
+    sudo chown -R "$(id -u):$(id -g)" "$dir/node_modules"
+  fi
+
   (cd "$dir" && npm ci --no-audit --no-fund) || { warn "$name: npm ci failed"; return; }
 
   # npm 10 can die mid-install and still exit 0 (see the runtime Dockerfile),
@@ -56,6 +62,69 @@ install_deps() {
 install_deps /workspaces/discord-scoutid-linked-role "discord-scoutid-linked-role"
 install_deps /workspaces/discord-wsj27-bot "discord-wsj27-bot"
 
+# --- Claude Code -----------------------------------------------------------
+# Not ghcr.io/anthropics/devcontainer-features/claude-code. That feature runs
+# `npm install -g @anthropic-ai/claude-code` at *build* time, hardcoded to
+# registry.npmjs.org (its devcontainer-feature.json declares no options), under
+# `set -eu`. On a network that TLS-intercepts npmjs that is a fatal
+# ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE and the container never builds at all.
+# Here the workspace is mounted, so the mirror in its gitignored .npmrc can be
+# reached — and a failure costs the CLI, not the container.
+log "Claude Code"
+if command -v claude >/dev/null 2>&1; then
+  ok "already installed ($(claude --version 2>/dev/null | awk '{print $1}'))"
+else
+  # `npm install -g` ignores the *project* .npmrc, so cd-ing into the workspace
+  # is not enough: read the registry there and pass it through explicitly.
+  # The image puts the global prefix (/usr/local/share/npm-global) on PATH and
+  # lets `node` write it, so this needs no sudo.
+  npm_cwd=/workspaces/discord-scoutid-linked-role
+  [ -d "$npm_cwd" ] || npm_cwd="$HOME"
+  claude_registry="$(cd "$npm_cwd" && npm config get registry)"
+
+  if npm install -g --no-audit --no-fund --registry="$claude_registry" @anthropic-ai/claude-code >/dev/null 2>&1; then
+    ok "$(claude --version 2>/dev/null | awk '{print $1}') ($claude_registry)"
+  else
+    warn "install failed against $claude_registry — the CLI is missing but the"
+    warn "container is usable. Retry with:"
+    printf '\n    npm install -g --registry=%s @anthropic-ai/claude-code\n' "$claude_registry"
+  fi
+fi
+
+# --- Claude Code project memory --------------------------------------------
+# Claude keys its per-project state on the *path* of the workspace, so the same
+# repository is a different project inside the container than on the host:
+#
+#   host:      c--Users-pe-sad-code-discord-scoutid-linked-role
+#   container: -workspaces-discord-scoutid-linked-role
+#
+# ~/.claude is bind-mounted, but without this the container would start with an
+# empty memory directory and none of the accumulated project context. Link the
+# container's key at the host's, so both read and write one set of files.
+link_claude_memory() {
+  local root="$HOME/.claude/projects"
+  [ -d "$root" ] || { warn "~/.claude not mounted — Claude has no memory or credentials here"; return; }
+
+  local here="${1:-$PWD}"
+  local ckey="${here//\//-}"                      # /workspaces/x -> -workspaces-x
+  [ -e "$root/$ckey" ] && { ok "memory already linked ($ckey)"; return; }
+
+  # Newest host key ending in the same repository name.
+  local hkey
+  hkey="$(ls -1t "$root" 2>/dev/null | grep -iE -- "-$(basename "$here")\$" | grep -v "^$ckey\$" | head -1)"
+  if [ -z "$hkey" ]; then
+    warn "no host project key found for $(basename "$here") — starting with empty memory"
+    return
+  fi
+
+  ln -s "$root/$hkey" "$root/$ckey" 2>/dev/null \
+    && ok "memory linked: $ckey -> $hkey ($(ls -1 "$root/$hkey/memory" 2>/dev/null | wc -l) files)" \
+    || warn "could not link $ckey -> $hkey"
+}
+
+log "Claude Code project memory"
+link_claude_memory /workspaces/discord-scoutid-linked-role
+
 # --- Report ----------------------------------------------------------------
 log "Toolchain"
 printf '  %-12s %s\n' \
@@ -67,7 +136,8 @@ printf '  %-12s %s\n' \
   terraform "$(terraform version -json 2>/dev/null | jq -r .terraform_version || echo MISSING)" \
   gh        "$(gh --version 2>/dev/null | head -1 | awk '{print $3}' || echo MISSING)" \
   docker    "$(docker --version 2>/dev/null | awk '{print $3}' | tr -d , || echo MISSING)" \
-  dig       "$(dig -v 2>&1 | head -1 || echo MISSING)"
+  dig       "$(dig -v 2>&1 | head -1 || echo MISSING)" \
+  claude    "$(claude --version 2>/dev/null | awk '{print $1}' || echo MISSING)"
 
 log "Kubernetes"
 if kubectl config current-context >/dev/null 2>&1; then
