@@ -186,13 +186,13 @@ SCOUTNET_SCOUT_ROLE=scout
 SCOUTNET_EVENT_ROLE=wsj-event
 
 # fee_id:category
-SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
+SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt,46628:cmt
 
 # category:questionId:roleWithDiv:roleWithoutDiv
 SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
-SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,ist-direktresa::IST,cmt::CMT
+SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
 ```
 
 ## Audit och konsistenskontroll
@@ -230,7 +230,15 @@ Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/ws
 | `Deltagare-{nr}` / `Deltagare-Väntande` | `discord_role.participant[*]` / `discord_role.participant_pending` |
 | `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
 | `IST-Patrull-{nr}` / `IST-Väntande` | `discord_role.ist_patrol[*]` / `discord_role.ist_pending` |
-| `IST-Direktresa` | `discord_role.ist_direct_travel` |
 | `CMT` | `discord_role.cmt` |
 
-Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i infra-repot måste täcka alla värden ScoutNet kan returnera för division-frågorna 88168 (deltagare/IST) och 107592 (ledare).
+Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i
+infra-repot måste täcka alla värden ScoutNet kan returnera för
+division-frågorna 88168 (deltagare/IST) och 107592 (ledare).
+
+**IST är delat på två resegrupper som båda har patruller** — rundresa och egen
+resa — men patrullerna delar en numrering, så patrull 07 hör till exakt en av
+grupperna. Därför ser boten ingen skillnad på dem: både `fee_id` 25696 och
+25702 mappas till kategorin `ist` och ger `IST-Patrull-{div}` från fråga 88168.
+Resegruppen finns bara i infra-repot, som avgör vilken kategori patrullens
+kanal ligger i och vilka gruppkanaler den når.

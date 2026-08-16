@@ -19,6 +19,11 @@ data:
   # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
   # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till
   # 2026-08-16 efter att en länkad CMT:are blivit utan CMT-roll.
-  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist-direktresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
+  # 25702 var tidigare `ist-direktresa` och gav en platt IST-Direktresa-roll.
+  # Egen resa har numera patruller precis som rundresan, och patrullerna delar
+  # numrering över båda grupperna — patrull 07 finns i exakt en av dem. Därför
+  # räcker en enda IST-kategori: resegruppen syns inte i rollen alls utan i
+  # vilken kategori patrullens kanal ligger, vilket wsj27-infra äger.
+  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
   SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
-  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,ist-direktresa::IST,cmt::CMT
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
