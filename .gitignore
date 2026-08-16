@@ -29,3 +29,8 @@ scoutid-metadata.json
 # Corporate root CAs for the devcontainer's TLS-intercepted npm mirror.
 # Site-specific, so they stay out of a public repo.
 .devcontainer/certs/
+
+# Local working notes — currently the AKS migration plan. Deliberately not
+# published: this repository is public, and the plan quotes resource names,
+# hostnames and operational detail that do not need to be.
+docs/
