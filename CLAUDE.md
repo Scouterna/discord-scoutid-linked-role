@@ -214,16 +214,19 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 
 1. **Scout-roll utan storage-länk** — användare med Scout-rollen men ingen ScoutID-länkning i Table Storage
 2. **Länkade utan Scout-rollen** — Discord Linked Role har fallit bort (frånkopplad app, lämnad/återansluten server). Användaren måste re-verifiera via `/linked-role` själv eftersom Scout är en managed roll
-3. **Storage-länk utan guild-medlem** — gamla länkningar för användare som lämnat servern
-4. **Avbokade i ScoutNet** — länkade användare med `cancelled_date` satt
-5. **Namnskillnader** — Discord-smeknamn matchar inte ScoutNet-namn
-6. **Saknade statiska roller** — roller boten skulle tilldela som inte finns i guilden
-7. **Saknade division-roller** — `Deltagare-{nr}` etc. som ScoutNet refererar till men som inte finns
-8. **Okända fee_id** — `fee_id` i ScoutNet utan mappning i `SCOUTNET_FEE_ROLES`
-9. **Bot-hierarki/permissions** — roller över botens position, eller saknade `MANAGE_ROLES`/`MANAGE_NICKNAMES`
-10. **Roll-drift** — per användare: vilka roller saknas / vilka borde inte finnas (dry-run sync)
-11. **Multipla division-roller** — användare som har t.ex. `Deltagare-05` och `Deltagare-07` samtidigt
-12. **Fel nickname-suffix** — användare där `(X)` i nicket inte matchar förväntat värde
+3. **Länkade utan sparade Discord-tokens** — länken räcker för roller och smeknamn men inte för att prata med Discord i användarens namn, så `updateMetadata` kan inte pusha Linked Role-metadata. Felet är tyst: allt fungerar till Scout-rollen faller bort, och då kan varken admin eller bot laga det — personen måste själv köra om `/linked-role`. **`/link-scoutid` lagar inte det här**, den skapar bara länken. Exakt vad Redis-wipen 2026-05-26 lämnade efter sig, eftersom länkar och tokens försvann tillsammans
+4. **Storage-länk utan guild-medlem** — gamla länkningar för användare som lämnat servern
+5. **Avbokade i ScoutNet** — länkade användare med `cancelled_date` satt
+6. **Namnskillnader** — Discord-smeknamn matchar inte ScoutNet-namn
+7. **Saknade statiska roller** — roller boten skulle tilldela som inte finns i guilden
+8. **Saknade division-roller** — `Deltagare-{nr}` etc. som ScoutNet refererar till men som inte finns
+9. **Okända fee_id** — `fee_id` i ScoutNet utan mappning i `SCOUTNET_FEE_ROLES`
+10. **Bot-hierarki/permissions** — roller över botens position, eller saknade `MANAGE_ROLES`/`MANAGE_NICKNAMES`
+11. **Roll-drift** — per användare: vilka roller saknas / vilka borde inte finnas (dry-run sync)
+12. **Multipla division-roller** — användare som har t.ex. `Deltagare-05` och `Deltagare-07` samtidigt
+13. **Fel nickname-suffix** — användare där `(X)` i nicket inte matchar förväntat värde
+
+Auditen är helt läsande — inga `addRole`/`removeRole`/nickname-anrop — så den går att köra lokalt mot prod-credentials när slash-kommandot inte räcker.
 
 ### Kommandon
 

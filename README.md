@@ -97,10 +97,16 @@ reports it.
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
 
-`/audit-scoutid` checks for missing roles, orphaned links, cancelled
-registrations, nickname drift, unmapped `fee_id`s, duplicate division roles, and
-bot permission or hierarchy problems. The report is attached as a file when it
-exceeds Discord's 2000-character limit.
+`/audit-scoutid` checks for missing roles, orphaned links, links with no stored
+OAuth tokens, cancelled registrations, nickname drift, unmapped `fee_id`s,
+duplicate division roles, and bot permission or hierarchy problems. The report is
+attached as a file when it exceeds Discord's 2000-character limit.
+
+The token check is the least obvious one. A link is enough to assign roles and
+set a nickname, but pushing Linked Role metadata needs the user's own Discord
+token — so a link without one works right up until Discord drops the `Scout`
+role, at which point neither an admin nor `/link-scoutid` can repair it and the
+person has to open the `/linked-role` URL themselves.
 
 ## Configuration
 

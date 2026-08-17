@@ -123,6 +123,28 @@ export async function getAllLinkedUsers() {
   return users;
 }
 
+/**
+ * Discord user ids that still have stored OAuth tokens, as a Set.
+ *
+ * One paginated listing per partition rather than a point read per user: the
+ * audit needs this for every linked user at once, and the SDK follows the
+ * continuation token here where a per-user loop would cost one request each.
+ *
+ * `type` is "discord-token" or "scoutid-token". Only row keys are needed, so
+ * the token values are never deserialised — nothing sensitive is returned.
+ */
+export async function getUserIdsWithTokens(type) {
+  await ensureTable();
+  const ids = new Set();
+  const entities = client.listEntities({
+    queryOptions: { filter: `PartitionKey eq '${type}'`, select: ["RowKey"] },
+  });
+  for await (const e of entities) {
+    ids.add(e.rowKey);
+  }
+  return ids;
+}
+
 // --- ScoutNet cache (short-lived, in-memory) ---
 //
 // The full event participant list can be several MB, which exceeds Azure

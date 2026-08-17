@@ -167,6 +167,44 @@ export async function runAudit(guildId) {
     });
   }
 
+  // --- 1c. Länkade utan sparade OAuth-tokens ---
+  // Länken räcker för att sätta roller och smeknamn, men inte för att prata med
+  // Discord i användarens namn. Utan Discord-tokenet kan `updateMetadata` inte
+  // pusha Linked Role-metadata, vilket är det som får Discord att (åter)ge
+  // Scout-rollen. Konsekvensen är tyst: allt fungerar tills Scout-rollen faller
+  // bort, och då kan varken admin eller bot laga det — personen måste själv
+  // köra om `/linked-role`.
+  //
+  // Det här är precis vad Redis-wipen 2026-05-26 lämnade efter sig: länkar och
+  // tokens försvann tillsammans, och `/link-scoutid` återskapar bara länken.
+  {
+    const items = [];
+    let discordTokenIds;
+    try {
+      discordTokenIds = await storage.getUserIdsWithTokens("discord-token");
+    } catch (e) {
+      items.push(`(Kunde inte läsa tokens: ${e.message})`);
+    }
+    if (discordTokenIds) {
+      for (const u of linkedUsers) {
+        if (discordTokenIds.has(u.discordUserId)) continue;
+        const member = memberMap.get(u.discordUserId);
+        const name = member
+          ? member.nick || member.user.global_name || member.user.username
+          : "ej i guilden";
+        items.push(
+          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen öppna \`/linked-role\`-URL:en; \`/link-scoutid\` lagar inte det här`,
+        );
+      }
+    }
+    categories.push({
+      id: "linked_no_tokens",
+      title:
+        "Länkade utan sparade Discord-tokens — botten kan inte re-pusha Linked Role-metadata",
+      items,
+    });
+  }
+
   // --- 2. Storage link but not in guild ---
   {
     const stale = linkedUsers.filter((u) => !memberMap.has(u.discordUserId));
