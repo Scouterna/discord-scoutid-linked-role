@@ -52,10 +52,16 @@ The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 | Fee ID                     | Category         | Division question | With division       | Without division     | Nickname suffix |
 | -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------------- |
 | 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | `(12)`          |
-| 25696                      | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `(IST-05)`      |
+| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `(IST-05)`      |
 | 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `(AL12)`        |
-| 25702                      | `ist-direktresa` | —                 | `IST-Direktresa`    | —                    | `(IST)`         |
-| 25697, 25693               | `cmt`            | —                 | `CMT`               | —                    | `(CMT)`         |
+| 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | `(CMT)`         |
+
+IST is split across two travel groups — the contingent tour and travelling on
+your own — and both have patrols. They share one patrol numbering, so patrol 07
+belongs to exactly one group and the role name carries no group. That is why
+both fee ids map to the same `ist` category: the bot cannot tell the groups
+apart and does not need to. The travel group decides only which category a
+patrol's channel sits in, which is Terraform's business, not the bot's.
 
 The roles themselves are owned by a separate Terraform repo,
 [Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`). Its troop
@@ -193,8 +199,9 @@ exceeds Table Storage's 64 KB property limit.
 - **403 when assigning roles** — the target member or the role outranks the bot.
   Check role ordering in Server Settings → Roles.
 - **"Applikationen svarade inte"** — Discord requires an ACK within 3 seconds.
-  Verify the Interactions Endpoint URL, and keep `min_replicas = 1` so no
-  interaction hits a cold start.
+  Verify the Interactions Endpoint URL, and keep at least one replica Ready so
+  no interaction hits a cold start. The Deployment runs two, with
+  `maxUnavailable: 0` on rollouts.
 - **Storage errors from `register.js`** — harmless. It only calls the Discord
   API but imports `config`/`storage` transitively.
 - **`npm error Exit handler never called!` during `docker build`** — npm could
