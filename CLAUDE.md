@@ -150,6 +150,14 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 ## Key design decisions
 
 - Fee-to-role mapping is fully configurable via env vars, not hardcoded
+- **Platta kategorimarkörer (`SCOUTNET_CATEGORY_ROLES`) delas ut utöver
+  divisionsrollen** — en ledare i avdelning 12 får både `Ledare-12` och `Ledare`.
+  De finns för AutoMod i wsj27-infra, som bara kan *undanta* roller och max 20 av
+  dem: "alla utom deltagare" hade krävt 158 per-avdelning roller, men blir sex med
+  markörerna. `deltagare` har med flit ingen markör — frånvaron *är* det som gör
+  att länkfiltret träffar dem. Ändras utdelningen måste ordningen hållas: bot
+  först, `/refresh-scoutid alla:true`, sedan `terraform apply` i infra-repot.
+  Omvänd ordning länkblockerar alla ledare och IST i mellantiden
 - Each fee category can have its own ScoutNet question ID for division assignment
 - Division numbers are zero-padded to minimum 2 digits
 - The bot cannot modify users above it in Discord's role hierarchy (403 is expected for admins)
@@ -191,6 +199,9 @@ SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:led
 # category:questionId:roleWithDiv:roleWithoutDiv
 SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
 
+# category:roleName — platt markör *utöver* divisionsrollen (Ledare-12 + Ledare)
+SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
+
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
 ```
@@ -231,6 +242,7 @@ Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/ws
 | `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
 | `IST-Patrull-{nr}` / `IST-Väntande` | `discord_role.ist_patrol[*]` / `discord_role.ist_pending` |
 | `CMT` | `discord_role.cmt` |
+| `Ledare` / `IST` (platta markörer) | `discord_role.leader_flat` / `discord_role.ist_flat` |
 
 Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i
 infra-repot måste täcka alla värden ScoutNet kan returnera för

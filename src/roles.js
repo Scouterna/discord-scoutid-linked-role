@@ -12,10 +12,16 @@ const UNVERIFIED_ROLE = "Overifierad";
  *   1. Scout role   - always (linked ScoutID)
  *   2. Event role   - if registered in the event
  *   3. Fee role     - based on fee_id → category, with optional division pattern
+ *   4. Flat role    - optional per-category marker, alongside the division role
  *
  * Division roles use per-category question IDs:
  *   deltagare uses q88168, ledare uses q107592, etc.
  *   Categories without a division config use the category name as the role.
+ *
+ * Flat category roles (SCOUTNET_CATEGORY_ROLES) are additive: a leader in troop
+ * 12 gets `Ledare-12` *and* `Ledare`. They exist so Discord AutoMod can address
+ * a whole category — its exempt list holds 20 roles, and there are 151 division
+ * roles. See the parser in config.js.
  *
  * Nickname suffix:
  *   Appended to the user's real name, e.g. "Petter Sandholdt (CMT)".
@@ -60,6 +66,9 @@ export async function getDesiredRoles(scoutnetMemberId) {
     roles.push(config.SCOUTNET_EVENT_ROLE);
 
     if (info.category) {
+      const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[info.category];
+      if (flatRole) roles.push(flatRole);
+
       const divConfig = config.SCOUTNET_DIVISION_ROLES?.[info.category];
       if (divConfig) {
         if (info.division) {
@@ -132,6 +141,11 @@ function getManagedRoleNames() {
       for (const category of new Set(
         Object.values(config.SCOUTNET_FEE_ROLES)
       )) {
+        // Managed, so it is taken away again when someone changes category —
+        // an ex-leader must not keep `Ledare` and its AutoMod exemption.
+        const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[category];
+        if (flatRole) roles.add(flatRole);
+
         const divConfig = config.SCOUTNET_DIVISION_ROLES?.[category];
         if (divConfig) {
           roles.add(divConfig.withoutDiv);

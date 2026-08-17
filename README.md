@@ -32,7 +32,7 @@ re-verify without an admin re-entering their member number.
 
 ## Roles
 
-Three kinds of role are assigned, all named in config and looked up by name
+Four kinds of role are assigned, all named in config and looked up by name
 (case-insensitive). A role that doesn't exist in the guild is silently skipped.
 
 | Role                    | When                                            | Config                       |
@@ -40,6 +40,7 @@ Three kinds of role are assigned, all named in config and looked up by name
 | `scout`                 | ScoutID linked                                  | `SCOUTNET_SCOUT_ROLE`        |
 | `WSJ-event`             | Registered (and not cancelled) in the event     | `SCOUTNET_EVENT_ROLE`        |
 | Fee/division role       | From the participant's `fee_id`, see below      | `SCOUTNET_FEE_ROLES` + `SCOUTNET_DIVISION_ROLES` |
+| Flat category role      | Alongside the division role, for whole-category targeting | `SCOUTNET_CATEGORY_ROLES` |
 
 Each `fee_id` maps to a *category*. A category with a division config gets a
 per-division role from a ScoutNet question, falling back to a waiting role when
@@ -49,12 +50,24 @@ category itself. Division numbers are zero-padded to at least 2 digits
 
 The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 
-| Fee ID                     | Category         | Division question | With division       | Without division     | Nickname suffix |
-| -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------------- |
-| 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | `(12)`          |
-| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `(IST-05)`      |
-| 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `(AL12)`        |
-| 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | `(CMT)`         |
+| Fee ID                     | Category         | Division question | With division       | Without division     | Flat role | Nickname suffix |
+| -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------- | --------------- |
+| 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | —         | `(12)`          |
+| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `IST`     | `(IST-05)`      |
+| 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Ledare`  | `(AL12)`        |
+| 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | —         | `(CMT)`         |
+
+The flat role column is `SCOUTNET_CATEGORY_ROLES`, granted *in addition to* the
+division role: a leader in troop 12 carries both `Ledare-12` and `Ledare`. It
+exists because Discord's AutoMod can only *exempt* roles, never target them, and
+caps the exempt list at 20 — far below the 151 per-division roles that "everyone
+except participants" would otherwise need. `deltagare` has no entry on purpose:
+the missing marker is exactly what makes wsj27-infra's link filter apply to
+participants and nobody else. `cmt` needs none either, since a category without a
+division config already yields a flat role named after itself.
+
+The flat roles are managed like every other assigned role, so an ex-leader loses
+`Ledare` — and with it the exemption — on the next sync.
 
 IST is split across two travel groups — the contingent tour and travelling on
 your own — and both have patrols. They share one patrol numbering, so patrol 07

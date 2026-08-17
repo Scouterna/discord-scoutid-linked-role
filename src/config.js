@@ -60,6 +60,30 @@ function parseDivisionRoles(str) {
   return Object.keys(map).length > 0 ? map : null;
 }
 
+/**
+ * Parse flat per-category roles from env var.
+ * Format: "category:roleName,..."
+ * Example: "ledare:Ledare,ist:IST"
+ *
+ * Granted *in addition to* the category's division role, so a leader in troop
+ * 12 ends up with both `Ledare-12` and `Ledare`. Categories that already get a
+ * flat role because they have no division config (`cmt` → `CMT`) need no entry.
+ *
+ * This exists for Discord AutoMod, which can only *exempt* roles and never
+ * target them, with a hard cap of 20 exempt roles. Expressing "everyone except
+ * participants" through the per-division roles would need 151 of them; through
+ * flat markers it needs two.
+ */
+function parseCategoryRoles(str) {
+  if (!str) return null;
+  const map = {};
+  for (const entry of str.split(",")) {
+    const [category, role] = entry.split(":").map((s) => s.trim());
+    if (category && role) map[category] = role;
+  }
+  return Object.keys(map).length > 0 ? map : null;
+}
+
 const config = {
   // Discord
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
@@ -86,6 +110,9 @@ const config = {
   SCOUTNET_FEE_ROLES: parseFeeRoles(process.env.SCOUTNET_FEE_ROLES),
   SCOUTNET_DIVISION_ROLES: parseDivisionRoles(
     process.env.SCOUTNET_DIVISION_ROLES
+  ),
+  SCOUTNET_CATEGORY_ROLES: parseCategoryRoles(
+    process.env.SCOUTNET_CATEGORY_ROLES
   ),
   SCOUTNET_NICKNAME_SUFFIXES: parseNicknameSuffixes(
     process.env.SCOUTNET_NICKNAME_SUFFIXES

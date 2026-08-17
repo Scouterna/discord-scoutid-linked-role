@@ -33,6 +33,9 @@ function staticManagedRoleNames() {
   }
   if (config.SCOUTNET_EVENT_ID && config.SCOUTNET_FEE_ROLES) {
     for (const category of new Set(Object.values(config.SCOUTNET_FEE_ROLES))) {
+      const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[category];
+      if (flatRole) names.add(flatRole);
+
       const divConfig = config.SCOUTNET_DIVISION_ROLES?.[category];
       if (divConfig) {
         names.add(divConfig.withoutDiv);
