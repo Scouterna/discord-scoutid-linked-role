@@ -46,6 +46,35 @@ kubectl rollout restart deploy/discord-scoutid
 docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
 ```
 
+### CI:s behörigheter — [k8s/rbac-github-deployer.yaml](k8s/rbac-github-deployer.yaml)
+
+`github-deployer`-rollen ger breda verb (`get, list, watch, create`) per
+resurs*typ*, men `update`/`patch` är **pinnade till namngivna objekt**. Lägger du
+till en resurs i `k8s/` som CI ska kunna ändra måste dess namn in i rollen, annars
+misslyckas varje deploy med `... is forbidden`.
+
+Det syns inte förrän det smäller, eftersom `discord-scoutid-backup` aldrig råkade
+ut för det: dess image är en pinnad `azure-cli`-version, så `kubectl apply`
+rapporterade alltid `unchanged` och försökte aldrig patcha.
+`discord-scoutid-memberscan` kör botens egen image, vars tag CI skriver om varje
+gång — så patchen försöks varje deploy, och saknades namnet föll hela deployen.
+
+**Rollen låg inte i något repo.** Den applyades för hand 2026-08-12, och dess
+levande regler hade sedan driftat från sin egen `last-applied-configuration`:
+`batch`-reglerna lades till med `kubectl edit`, så annoteringen beskrev
+fortfarande en roll utan cronjob-åtkomst. Att applya originalfilen igen hade
+tyst tagit bort möjligheten att patcha båda cronjobben. Filen i repot är den
+saknade källan, och att applya den synkar även annoteringen.
+
+Den ligger med flit **inte** i kustomizationen: deployern har inga rättigheter på
+`roles`, och en deployer som kan bredda sin egen åtkomst är inte begränsad.
+Applya för hand, med en kubeconfig som har RBAC-rättigheter:
+
+```bash
+kubectl apply -f k8s/rbac-github-deployer.yaml
+kubectl auth can-i patch cronjobs --as=system:serviceaccount:wsj27:github-deployer -n wsj27
+```
+
 ### Backup and restore
 
 **Table Storage has no soft delete and no point-in-time restore** — unlike blobs.

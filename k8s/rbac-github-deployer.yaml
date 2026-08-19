@@ -1,0 +1,99 @@
+# RBAC for the CI service account that deploys this repository.
+#
+# **Deliberately NOT in kustomization.yaml.** The `github-deployer` service
+# account has no rights on `roles` at all, so a CI apply of this file would fail
+# — and that is the point: a deployer that can widen its own permissions is not
+# a restricted deployer. Apply it by hand, with a kubeconfig that has RBAC
+# rights, the same way `backup-restore-job.yaml` is applied by hand.
+#
+# ## Why this file exists at all
+#
+# The Role was created with `kubectl apply` on 2026-08-12 from a manifest that
+# lives in no repository. Worse, its live rules had since drifted from its own
+# `last-applied-configuration`: the two `batch` rules below were added later with
+# `kubectl edit`, so the annotation still described a Role with no cronjob access.
+# Re-applying that original file would silently have removed the ability to patch
+# either CronJob. This file is the missing source of truth; applying it also
+# brings `last-applied-configuration` back in sync.
+#
+# ## The pattern to follow when adding a resource
+#
+# Broad verbs (`get, list, watch, create`) are granted per resource *type*.
+# Mutating verbs (`update, patch`) are pinned to named resources, so the deployer
+# can only ever modify the objects belonging to this application and never, say,
+# another namespace tenant's Deployment that happens to be reachable.
+#
+# **A new CronJob whose image tag changes on every deploy must be named here.**
+# That is not obvious, because `discord-scoutid-backup` never needed it in
+# practice: its image is a pinned `azure-cli` version, so `kubectl apply` always
+# reported it unchanged and never attempted a patch. `discord-scoutid-memberscan`
+# runs the bot's own image, so CI rewrites its tag on every deploy and the patch
+# is attempted every time. Omitting it made every deploy fail with
+# `cronjobs.batch "discord-scoutid-memberscan" is forbidden`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer
+  namespace: wsj27
+rules:
+  # --- Read and create, per resource type ---
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "pods", "events"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create"]
+  # cert-manager objects are read-only: the certificate is created by the
+  # Ingress annotation, not by CI.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "certificaterequests"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch", "create"]
+
+  # --- Mutate, pinned to this application's named objects ---
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["discord-scoutid"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["discord-scoutid"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["discord-scoutid-config"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["discord-scoutid"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    resourceNames:
+      - discord-scoutid-backup
+      - discord-scoutid-memberscan
+    verbs: ["update", "patch"]
+---
+# Included so the binding is documented alongside the Role it grants. It is
+# unchanged from what is live; applying it is a no-op.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer
+  namespace: wsj27
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer
+    namespace: wsj27

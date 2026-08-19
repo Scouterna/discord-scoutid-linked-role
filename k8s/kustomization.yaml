@@ -13,6 +13,11 @@ resources:
 
 # backup-restore-job.yaml is deliberately NOT listed: it is a one-off, applied
 # by hand when a restore is actually needed.
+#
+# rbac-github-deployer.yaml is NOT listed either, for a stronger reason: it is the
+# Role that grants this very deploy its permissions, and the deployer has no
+# rights on `roles`. A deployer able to widen its own access would not be a
+# restricted deployer. Apply it by hand with an RBAC-capable kubeconfig.
 
 # The Secret is deliberately absent: it is created imperatively (plan P4), the
 # way scoutview-secrets already is. This cluster has no sealed-secrets or
