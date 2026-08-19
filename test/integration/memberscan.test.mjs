@@ -17,18 +17,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// docker-compose exposes Azurite on the host port as well as on the compose
-// network, so both a devcontainer on that network and a plain `npm run` outside it
-// find it. Override with AZURITE_TABLE_HOST when it lives somewhere else.
-const AZURITE =
-  process.env.AZURITE_TABLE_HOST ||
-  (process.env.TABLE_CONNECTION_STRING?.match(/TableEndpoint=https?:\/\/([^/]+)\//)?.[1] ??
-    "127.0.0.1:10002");
-process.env.TABLE_CONNECTION_STRING =
-  "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
-  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
-  `TableEndpoint=http://${AZURITE}/devstoreaccount1;`;
-process.env.TABLE_NAME = `scantest${Date.now().toString().slice(-8)}`;
+import { useAzurite } from "../helpers/azurite.mjs";
+
+await useAzurite("scantest");
 process.env.DISCORD_TOKEN = "fake";
 process.env.DISCORD_GUILD_ID = "G1";
 process.env.LOG_CHANNEL_ID = "C1";
@@ -98,20 +89,11 @@ globalThis.fetch = async (url, opts = {}) => {
   throw new Error(`unexpected fetch: ${u}`);
 };
 
-const storage = await import("../src/storage.js");
-const scan = await import("../src/memberscan.js");
+const storage = await import("../../src/storage.js");
+const scan = await import("../../src/memberscan.js");
 
 // Fail loudly and usefully if the emulator is not up, rather than 15 confusing
 // assertion errors.
-try {
-  await storage.getMemberSnapshot();
-} catch (e) {
-  console.error(
-    `\nCannot reach Azurite at ${AZURITE}: ${e.message}\n` +
-      `Start it with \`docker compose up -d azurite\`, or set AZURITE_TABLE_HOST.\n`,
-  );
-  process.exit(1);
-}
 
 async function runScan(opts) {
   posted.length = 0;

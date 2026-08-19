@@ -399,19 +399,45 @@ npm run test:integration  # hela flödet mot riktig Table Storage
 npm run test:all
 ```
 
-Uppdelningen är avsiktlig. `npm test` täcker formatterare, sammanfattningen och
-audit-pagineringen utan container, nätverk eller credentials, så den blir körd. En
-svit som inte går att köra utan uppsättning är en svit som slutar köras.
-Integrationstestet kör den *riktiga* scanningen mot Azurite flera gånger i följd,
-eftersom det som gått fel har suttit i sekvensen — vad som sparas när, och vad som
-inte får sparas.
+Uppdelningen är avsiktlig. `npm test` behöver ingen container, inget nätverk och
+inga credentials, så den blir körd — en svit som inte går att köra utan
+uppsättning slutar köras. `test/integration/` behöver Azurite, eftersom länken
+mellan Discord och ScoutID ligger i Table Storage och halva logiken grenar på om
+den finns.
 
-Varje fall i integrationstestet finns för att det fångat något riktigt. Buggar de
-hittade: tyst UTF-8-korruption i chunkningen, `process.exit` som kontrollflöde
-mitt i en funktion, ett namnfel som gav `<@undefined>`, en nolla rapporterad för
-en avstängd kategori, dry-run som ändå skrev till kanalen, och första kicken i en
-guild som svaldes av markör-seedningen. Låt dem stå kvar med sina etiketter — de
-beskriver felen, inte bara koden.
+| Fil | Täcker |
+| --- | --- |
+| `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
+| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade |
+| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry, att fel bär sin HTTP-status, att mentions alltid tystas |
+| `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken |
+| `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
+| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen |
+| `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
+| `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
+
+Två egenskaper är värda att förstå innan man ändrar i dem.
+
+**En ren guild måste ge noll fynd** (`integration/audit`). Varje falskt positivt i
+någon av de 13 kategorierna dyker upp direkt, och en brusig audit är en ingen
+läser. Det är ett starkare test än det ser ut.
+
+**Auditen får inte skriva.** Stubben vägrar varje icke-GET och testet påstår att
+listan är tom, så egenskapen upprätthålls i stället för att antas — det är den
+som gör det säkert att köra auditen lokalt mot prod-credentials.
+
+Varje integrationsfall finns för att det fångat något riktigt, och de är märkta
+med vad. Buggar de hittade: tyst UTF-8-korruption i chunkningen, `process.exit`
+som kontrollflöde mitt i en funktion, ett namnfel som gav `<@undefined>`, en nolla
+rapporterad för en avstängd kategori, dry-run som ändå skrev till kanalen, och
+första kicken i en guild som svaldes av markör-seedningen. Låt etiketterna stå —
+de beskriver felen, inte bara koden.
+
+Azurite hittas av [test/helpers/azurite.mjs](test/helpers/azurite.mjs), som provar
+`azurite:10002` (compose-nätverket, inifrån devcontainern) och `127.0.0.1:10002`
+(publicerad port, från värden) och avslutar med instruktioner om ingen svarar.
+`AZURITE_TABLE_HOST` går före. Att byta ut `globalThis.fetch` stör inte lagringen:
+Table Storage-SDK:n går via nodes `http`-modul, inte via global fetch.
 
 ## Audit och konsistenskontroll
 

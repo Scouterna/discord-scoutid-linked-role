@@ -17,9 +17,9 @@ process.env.TABLE_NAME = "unittest";
 process.env.DISCORD_TOKEN = "fake";
 process.env.DISCORD_GUILD_ID = "G1";
 
-const eventlog = await import("../src/eventlog.js");
-const discord = await import("../src/discord.js");
-const scan = await import("../src/memberscan.js");
+const eventlog = await import("../../src/eventlog.js");
+const discord = await import("../../src/discord.js");
+const scan = await import("../../src/memberscan.js");
 
 test("formatMemberJoined flags bots and shows account age", () => {
   const line = eventlog.formatMemberJoined({

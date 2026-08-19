@@ -192,9 +192,30 @@ npm run test:all
 
 The split is deliberate: a suite that cannot run without setup is a suite that
 stops being run, so the majority of the value sits in `npm test`. The integration
-suite runs the actual scan against the emulator several times in sequence, because
-what has gone wrong here has been in the sequence — what gets saved when, and what
-must not get saved.
+suite needs the emulator because the Discord-to-ScoutID link lives in Table
+Storage and half the logic branches on whether one exists.
+
+What is covered:
+
+- **`unit/config`** — the env-var parsers. They turn hand-typed ConfigMap strings
+  into role assignments, so the tests pin down malformed input too.
+- **`unit/roles`** — `getDesiredRoles` and `getNicknameSuffix`: fee to category to
+  division role, zero-padding, flat markers, cancelled registrations.
+- **`unit/discord`** — pagination past the 1000-member page limit, 429 retries,
+  errors carrying their HTTP status, mentions always suppressed.
+- **`unit/eventlog`** — never throws, never delays, never loses the buffer, and
+  splits below Discord's 2000-character limit.
+- **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
+  removal of stale division roles, a 403 from the role hierarchy, the 32-character
+  nickname limit.
+- **`integration/audit`** — all 13 categories, and that the audit never writes.
+- **`integration/memberscan`** — the whole flow in sequence.
+
+Two of those are worth understanding before changing them. **A clean guild must
+report zero issues**, which surfaces a false positive in any of the 13 audit
+categories at once — a noisy audit is one nobody reads. And **the audit must not
+write**: the stub refuses every non-GET and the test asserts none happened, which
+is what makes it safe to run against production credentials.
 
 Each integration case exists because it caught something real, and they are
 labelled with what. Between them they found silent UTF-8 corruption in the
