@@ -9,6 +9,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+// dotenv prints a banner to stdout on every config() call, and the test runner
+// uses that same stream for its own protocol. Quiet it before config.js loads.
+process.env.DOTENV_CONFIG_QUIET = "true";
+
 process.env.TABLE_CONNECTION_STRING =
   "DefaultEndpointsProtocol=https;AccountName=unittest;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net";
 process.env.TABLE_NAME = "unittest";

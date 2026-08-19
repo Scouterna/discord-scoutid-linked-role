@@ -2,11 +2,16 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
+// The parsers below are exported alongside the assembled config so they can be
+// tested directly. They are pure string-to-object functions, and testing them
+// through repeated re-imports of this module meant dotenv printing its banner to
+// stdout once per case — which corrupted the test runner's own output stream.
+
 /**
  * Parse fee roles from env var format "feeId:category,feeId:category"
  * Example: "25694:deltagare,27561:deltagare,25696:ist,25702:IST-Direktresa,33293:ledare,34850:ledare,25697:cmt,25693:cmt"
  */
-function parseFeeRoles(str) {
+export function parseFeeRoles(str) {
   if (!str) return null;
   const map = {};
   for (const pair of str.split(",")) {
@@ -24,7 +29,7 @@ function parseFeeRoles(str) {
  * {div} is replaced with the zero-padded division number.
  * Empty string means no suffix for that case.
  */
-function parseNicknameSuffixes(str) {
+export function parseNicknameSuffixes(str) {
   if (!str) return null;
   const map = {};
   for (const entry of str.split(",")) {
@@ -44,7 +49,7 @@ function parseNicknameSuffixes(str) {
  * Each category has its own question ID for the division number.
  * {div} is replaced with the zero-padded (2-digit min) division number.
  */
-function parseDivisionRoles(str) {
+export function parseDivisionRoles(str) {
   if (!str) return null;
   const map = {};
   for (const entry of str.split(",")) {
@@ -74,7 +79,7 @@ function parseDivisionRoles(str) {
  * participants" through the per-division roles would need 151 of them; through
  * flat markers it needs two.
  */
-function parseCategoryRoles(str) {
+export function parseCategoryRoles(str) {
   if (!str) return null;
   const map = {};
   for (const entry of str.split(",")) {
@@ -100,7 +105,7 @@ function parseCategoryRoles(str) {
  * Audit Log** on the bot's role. With it missing the scan logs a warning and
  * skips role changes; everything else is unaffected.
  */
-function parseMemberEvents(str) {
+export function parseMemberEvents(str) {
   const raw = (str ?? "join,leave,nickname").trim().toLowerCase();
   if (raw === "" || raw === "off" || raw === "none") return new Set();
   const known = ["join", "leave", "nickname", "roles"];

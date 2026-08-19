@@ -16,6 +16,10 @@
  * through global fetch. That is why the tests can stub it wholesale.
  */
 
+// dotenv writes a banner to stdout on every config() call, and the test runner
+// parses that stream as its own protocol. Silence it before src/config.js loads.
+process.env.DOTENV_CONFIG_QUIET = "true";
+
 const CANDIDATES = ["azurite:10002", "127.0.0.1:10002", "localhost:10002"];
 const DEV_KEY =
   "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
