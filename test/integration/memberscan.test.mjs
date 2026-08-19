@@ -250,9 +250,17 @@ test("an unreadable audit log skips roles but still reports departures", async (
 test("the snapshot survives being larger than one Table Storage property", async () => {
   // A property holds 32K UTF-16 *characters*, not 64K bytes: exactly 32768 is
   // rejected, and at 16384 Azurite returned silently corrupted data — an `ä` came
-  // back as two replacement characters. Hence 8192, and hence the length check.
+  // back as two replacement characters. Hence the 8192 chunk size, and hence the
+  // length check on read.
+  //
+  // 800 members rather than 2500. The point is to span many properties, and 800
+  // spans eight; 2500 additionally made the request body ~365 KB, which Azurite
+  // handled over a docker bridge and mishandled over a published port in CI —
+  // dropping the trailing `chunks` property so the read came back empty. Real
+  // Table Storage takes a 1 MB entity, so that was the emulator's limit, not the
+  // code's, and a test that fails on the emulator's framing tests the emulator.
   const big = {};
-  for (let i = 0; i < 2500; i++) {
+  for (let i = 0; i < 800; i++) {
     big[`10000000000000${String(i).padStart(4, "0")}`] = [
       `Förnamn Efternamn ${i} (AL07)`,
       `användarnamn${i}`,
@@ -260,17 +268,42 @@ test("the snapshot survives being larger than one Table Storage property", async
   }
   const chars = JSON.stringify(big).length;
   assert.ok(chars > 32768, `test data only ${chars} chars — not over the property cap`);
+  assert.ok(chars > 4 * 8192, "test data should span more than four chunks");
 
   const cursors = { 25: "12345678901234567890" };
   await storage.storeMemberSnapshot(big, cursors);
   const back = await storage.getMemberSnapshot();
 
+  // Named separately: a null here means the metadata did not survive the write,
+  // which is a different failure from the contents not matching.
+  assert.ok(back, "snapshot came back as absent — the chunk metadata did not survive");
   assert.deepEqual(back.members, big, "large snapshot did not round-trip intact");
   assert.equal(
     back.auditCursors[25],
     "12345678901234567890",
     "a snowflake cursor must survive as an exact string, not a rounded number",
   );
+});
+
+test("a snapshot whose metadata did not land is treated as absent", async () => {
+  // The failure CI found: the chunk data was written but the trailing `chunks`
+  // property was not, so the read produced an empty string and returned null —
+  // silently, which is indistinguishable from "no snapshot yet". Absent means
+  // "seed a baseline"; corrupt means something ate the data. They must not look
+  // alike, or a storage problem reads as a fresh install.
+  await storage.storeMemberSnapshot({ "1": ["Nick", "user"] }, {});
+
+  const { TableClient } = await import("@azure/data-tables");
+  const client = TableClient.fromConnectionString(
+    process.env.TABLE_CONNECTION_STRING,
+    process.env.TABLE_NAME,
+    { allowInsecureConnection: true },
+  );
+  const e = await client.getEntity("membersnapshot", "current");
+  delete e.chunks;
+  await client.upsertEntity(e, "Replace");
+
+  assert.equal(await storage.getMemberSnapshot(), null);
 });
 
 test("a truncated snapshot is treated as absent rather than diffed", async () => {

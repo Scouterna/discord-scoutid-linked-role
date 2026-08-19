@@ -248,9 +248,27 @@ export async function getMemberSnapshot() {
   await ensureTable();
   const e = await getEntity("membersnapshot", "current");
   if (!e) return null;
+
+  // An entity that exists but carries no chunk count is corrupt, not absent, and
+  // the two must not look alike: absent means "first run, seed a baseline",
+  // corrupt means something ate the data. Returning null for both silently is
+  // how a storage problem gets mistaken for a fresh install.
+  if (!e.chunks) {
+    console.error(
+      "Member snapshot exists but has no chunk count — treating it as absent. " +
+        "The write that produced it did not land completely.",
+    );
+    return null;
+  }
+
   let json = "";
-  for (let i = 0; i < (e.chunks ?? 0); i++) json += e[`chunk${i}`] ?? "";
-  if (!json) return null;
+  for (let i = 0; i < e.chunks; i++) json += e[`chunk${i}`] ?? "";
+  if (!json) {
+    console.error(
+      `Member snapshot claims ${e.chunks} chunk(s) but none of them are readable.`,
+    );
+    return null;
+  }
   if (e.chars != null && json.length !== e.chars) {
     console.error(
       `Member snapshot is truncated or corrupt: expected ${e.chars} characters, ` +
