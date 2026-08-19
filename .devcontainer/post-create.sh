@@ -187,6 +187,8 @@ printf '  %-12s %s\n' \
   kustomize "$(kustomize version 2>/dev/null || echo MISSING)" \
   terraform "$(terraform version -json 2>/dev/null | jq -r .terraform_version || echo MISSING)" \
   gh        "$(gh --version 2>/dev/null | head -1 | awk '{print $3}' || echo MISSING)" \
+  actionlint "$(actionlint --version 2>/dev/null | head -1 || echo MISSING)" \
+  yq        "$(yq --version 2>/dev/null | awk '{print $NF}' || echo MISSING)" \
   docker    "$(docker --version 2>/dev/null | awk '{print $3}' | tr -d , || echo MISSING)" \
   dig       "$(dig -v 2>&1 | head -1 || echo MISSING)" \
   claude    "$(claude --version 2>/dev/null | awk '{print $1}' || echo MISSING)"

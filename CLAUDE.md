@@ -390,6 +390,24 @@ dess roll har `402653184`, alltså Manage Roles + Manage Nicknames och varken
 View Channels eller Send Messages. **En 403 här betyder att overwriten saknas,
 inte att token är fel.**
 
+## Verktyg i devcontainern
+
+`actionlint` granskar `.github/workflows/` statiskt — odefinierade `needs`,
+felstavade `${{ secrets.* }}`, ogiltiga `runs-on`-etiketter — och kör
+`shellcheck` på varje `run`-block. **Kör den innan du pushar en
+workflow-ändring.** Den lades till efter att en sådan ändring fick valideras
+genom att pushas till en gren och se vad som hände, vilket är ett långsamt sätt
+att hitta ett stavfel. Samma binär körs numera också som första steg i CI, för en
+linter som bara finns lokalt blir överhoppad.
+
+```bash
+actionlint                 # hela .github/workflows/
+yq '.spec.template.spec.containers[0].image' k8s/deployment.yaml
+```
+
+`yq` finns för k8s-manifesten och kustomize-utdata. `python3-yaml` finns som
+fallback — imagen har inget `pip`, så apt är enda vägen till en YAML-parser.
+
 ## Tester
 
 ```bash
