@@ -7,11 +7,15 @@ data:
   TABLE_NAME: scoutidlinks
 
   # Channel the verification event log is written to — #server-logg, owned by
-  # Scouterna/wsj27-infra (discord/main.tf). Empty means the log is off, which is
-  # the safe default: the channel has to exist and the bot's role needs the
-  # overwrite granted there before this is worth setting. Get the id with
+  # Scouterna/wsj27-infra (discord/main.tf), where the id comes from
   # `terraform -chdir=discord output -raw server_log_channel_id`.
-  LOG_CHANNEL_ID: ""
+  #
+  # Empty means the log is off and everything else behaves identically, so this
+  # stays empty until the channel exists *and* the bot's role has the overwrite
+  # granted there. The bot's role has no global View Channels, so the overwrite
+  # is the only thing that lets it write: a 403 here means the overwrite is
+  # missing, not that the token is wrong.
+  LOG_CHANNEL_ID: "1539589887563669505"
 
   # Which member events the scheduled scan reports (memberscan-cronjob.yaml).
   # "off" or empty turns the scan off; it exits without touching anything.
