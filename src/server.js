@@ -8,6 +8,7 @@ import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 import * as roles from "./roles.js";
 import * as audit from "./audit.js";
+import * as eventlog from "./eventlog.js";
 import { getSuccessPageHTML } from "./templates.js";
 
 const app = express();
@@ -98,12 +99,14 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     await updateMetadata(discordUserId);
 
     // Assign Discord roles
+    let assignedRoles = [];
     try {
       const guildId = config.DISCORD_GUILD_ID;
       if (guildId) {
         const desiredRoles = await roles.getDesiredRoles(scoutIDUser.scoutid);
         if (desiredRoles.length > 0) {
           await addDiscordRoles(discordUserId, desiredRoles);
+          assignedRoles = desiredRoles;
         }
       }
     } catch (e) {
@@ -115,6 +118,13 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       const suffix = await roles.getNicknameSuffix(scoutIDUser.scoutid);
       await updateNickname(discordUserId, scoutIDUser.name + suffix);
     }
+
+    eventlog.logLinked({
+      discordUserId,
+      scoutId: scoutIDUser.scoutid,
+      name: scoutIDUser.name,
+      roles: assignedRoles,
+    });
 
     res.send(getSuccessPageHTML());
   } catch (e) {
@@ -231,6 +241,7 @@ async function handleRefreshCommand(interaction) {
       );
 
       const results = await roles.syncAllUserRoles(guildId);
+      eventlog.logSyncAll({ callerId, results });
       if (results.length === 0) {
         await discord.editInteractionResponse(
           token,
@@ -304,6 +315,7 @@ async function handleRefreshCommand(interaction) {
 
       await storage.clearScoutNetCache();
       const result = await roles.syncUserRoles(guildId, targetUserId);
+      eventlog.logSync({ discordUserId: targetUserId, callerId, result });
 
       if (result.error) {
         await discord.editInteractionResponse(
@@ -320,6 +332,7 @@ async function handleRefreshCommand(interaction) {
       // No arguments - refresh yourself
       await storage.clearScoutNetCache();
       const result = await roles.syncUserRoles(guildId, callerId);
+      eventlog.logSync({ discordUserId: callerId, callerId, result });
 
       if (result.error) {
         await discord.editInteractionResponse(
@@ -498,6 +511,7 @@ async function handleAuditCommand(interaction) {
 async function handleLinkCommand(interaction) {
   const guildId = interaction.guild_id;
   const token = interaction.token;
+  const callerId = interaction.member.user.id;
   const callerPermissions = BigInt(interaction.member.permissions);
   const isAdmin = (callerPermissions & ADMIN_PERMISSION) === ADMIN_PERMISSION;
 
@@ -557,6 +571,16 @@ async function handleLinkCommand(interaction) {
     await storage.setLinkedScoutIDUserId(targetUserId, scoutIdInput);
     await storage.clearScoutNetCache();
     const result = await roles.syncUserRoles(guildId, targetUserId);
+
+    // Who linked whom is the part worth keeping: a manual link is an admin
+    // vouching for an identity the OAuth flow never confirmed.
+    eventlog.logManualLink({
+      discordUserId: targetUserId,
+      scoutId: scoutIdInput,
+      previousScoutId: existing && existing !== scoutIdInput ? existing : null,
+      callerId,
+      result,
+    });
 
     if (result.error) {
       messageParts.push(`Fel vid rolluppdatering: ${result.error}`);
@@ -731,6 +755,15 @@ function shutdown(signal) {
         console.log(`waiting for ${pendingWork.size} background task(s)`);
       }
       return Promise.allSettled([...pendingWork]);
+    })
+    .then(() => {
+      // Event-log lines are buffered for a few seconds before being written, so
+      // they have to be flushed *after* the background work that produces them.
+      // Ordering matters: flushing first would miss whatever a slash command
+      // logs on its way out.
+      // It swallows its own errors, but a rejection here would exit 1 and make
+      // a clean rollout look like a failed one.
+      return eventlog.flushEventLog().catch(() => {});
     })
     .then(() => {
       console.log("drain complete, exiting");

@@ -6,6 +6,22 @@ data:
   PORT: "3000"
   TABLE_NAME: scoutidlinks
 
+  # Channel the verification event log is written to — #server-logg, owned by
+  # Scouterna/wsj27-infra (discord/main.tf). Empty means the log is off, which is
+  # the safe default: the channel has to exist and the bot's role needs the
+  # overwrite granted there before this is worth setting. Get the id with
+  # `terraform -chdir=discord output -raw server_log_channel_id`.
+  LOG_CHANNEL_ID: ""
+
+  # Which member events the scheduled scan reports (memberscan-cronjob.yaml).
+  # "off" or empty turns the scan off; it exits without touching anything.
+  #
+  # `roles` is deliberately absent. The bot already logs every role change it
+  # makes, at the moment it makes it, so adding `roles` here mostly duplicates
+  # that — a `/refresh-scoutid alla:true` would be reported twice. It is worth
+  # turning on only to catch roles edited by hand in the Discord UI.
+  LOG_MEMBER_EVENTS: join,leave,nickname
+
   DISCORD_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback
   DISCORD_VALIDATION_URL: https://discord-scoutid.wsj27.scouterna.net/linked-role
   SCOUTID_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/scoutid-oauth-callback

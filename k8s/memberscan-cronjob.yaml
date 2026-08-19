@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discord-scoutid-memberscan
+  labels:
+    app: discord-scoutid-memberscan
+spec:
+  # Every 10 minutes. This is a *poll*, not an event stream: the bot speaks HTTP
+  # interactions and has no gateway connection, so joins and leaves are found by
+  # comparing the member list against the previous run. The interval is therefore
+  # the reporting delay.
+  #
+  # A consequence worth knowing: a new member who links quickly gets their
+  # "✅ länkade" line — posted live by the running server — *before* the scan
+  # notices them. That is why the join line is phrased "finns i servern" and not
+  # "gick med": it reports a state that was observed, not a moment.
+  #
+  # Ten minutes rather than one because each run costs a full member-list fetch,
+  # and rather than an hour because "who left" is the question people ask soon
+  # after it happens.
+  schedule: "*/10 * * * *"
+  # A second run while one is in flight would diff against a snapshot the first
+  # is about to replace, and report the same change twice.
+  concurrencyPolicy: Forbid
+  # 144 runs a day. Keeping one success is enough to confirm it is alive; keep
+  # more failures, because those are what need reading.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A run missed by more than five minutes is not worth catching up on — the next
+  # one produces the same diff, since the snapshot has not moved.
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      # Retries are safe: the snapshot is only advanced after the report is
+      # written, so a failed run leaves the next one with the same work to do.
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: discord-scoutid-memberscan
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: memberscan
+              # Same image as the bot; CI rewrites this tag through the
+              # kustomization's `images:` transformer, exactly as for the
+              # Deployment. Never :latest.
+              image: ghcr.io/scouterna/discord-scoutid-linked-role:PLACEHOLDER-set-by-ci
+              command: ["node", "src/memberscan.js"]
+              # The same pair the Deployment uses: LOG_CHANNEL_ID and
+              # LOG_MEMBER_EVENTS come from the ConfigMap, DISCORD_TOKEN,
+              # DISCORD_GUILD_ID and TABLE_CONNECTION_STRING from the Secret.
+              envFrom:
+                - configMapRef:
+                    name: discord-scoutid-config
+                - secretRef:
+                    name: discord-scoutid-secrets
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi

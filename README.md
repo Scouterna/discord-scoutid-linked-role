@@ -108,6 +108,61 @@ token — so a link without one works right up until Discord drops the `Scout`
 role, at which point neither an admin nor `/link-scoutid` can repair it and the
 person has to open the `/linked-role` URL themselves.
 
+## Event log
+
+With `LOG_CHANNEL_ID` set, the bot writes what it did — and when — to
+`#server-logg`, a moderator-only channel owned by
+[wsj27-infra](https://github.com/Scouterna/wsj27-infra). Unset means the log is
+off and everything else is unchanged.
+
+```
+09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → WSJ-event, Ledare-12, Ledare
+09:20 🔗 @moderator länkade @erik till scoutid `777` (ersatte `666`) — + Deltagare-05
+09:31 🔒 @kim saknar Scout-rollen — roller strippade, Overifierad satt
+      (måste re-verifiera via /linked-role själv)
+10:02 🔁 @moderator körde /refresh-scoutid alla:true — 143 användare, 7 ändrade, 0 fel
+```
+
+Until now this existed only in `kubectl logs`, which means it existed for as
+long as the pod did: every deploy discarded the record of who linked, what they
+got, and who lost the `Scout` role. `/audit-scoutid` answers the *state*
+question. Nothing answered the history one, because nothing kept history.
+
+### Member events
+
+Joins and leaves land in the same channel, from `src/memberscan.js` — a CronJob
+that fetches the member list every 10 minutes and diffs it against the previous
+run, with the snapshot in Table Storage.
+
+A poll rather than live events, because this bot speaks HTTP interactions and has
+no gateway connection to receive `guildMemberAdd` on. The trade is a reporting
+delay of up to one interval, and no way to tell a kick from a voluntary leave —
+that needs the audit log. What it avoids is a second bot, a privileged gateway
+intent, and the failure mode where a process that was down for an hour has lost
+that hour permanently. This one just reports the change on its next run.
+
+It is a CronJob and not a timer in the server because the Deployment runs
+`replicas: 2` — an interval inside it would report every join twice.
+
+`LOG_MEMBER_EVENTS` picks what it reports: any of `join`, `leave`, `nickname`,
+`roles`; `off` or empty disables the scan entirely. `roles` is off by default
+because the bot already logs every role change it makes as it makes it, so it
+mostly duplicates — turn it on to catch roles edited by hand in the Discord UI.
+
+```bash
+node src/memberscan.js --dry-run   # print what it would report, save nothing
+```
+
+The snapshot is saved only after the report is written. A failed write leaves it
+untouched so the next run reports the same diff — in an audit trail a duplicate
+on retry is cheaper than a hole. The first run ever seeds a baseline silently
+rather than announcing every existing member as a new arrival.
+
+Writes are buffered for a few seconds and packed into as few messages as
+Discord's 2000-character limit allows, so a 143-user resync cannot outrun the
+channel's five-messages-per-five-seconds rate limit. A failed write is logged
+and dropped; it never surfaces to the user whose link just succeeded.
+
 ## Configuration
 
 All configuration is environment variables — see [.env.example](.env.example)
@@ -203,6 +258,8 @@ src/
 ├── scoutnet.js    ScoutNet participants API
 ├── roles.js       Role/nickname determination and sync
 ├── audit.js       Consistency checks behind /audit-scoutid and /status-scoutid
+├── eventlog.js    Buffered event log → #server-logg
+├── memberscan.js  Scheduled member diff (joins, leaves, renames)
 ├── storage.js     Azure Table Storage (links, tokens, OAuth state)
 ├── register.js    One-time metadata + slash command registration
 └── templates/     Success page served after linking

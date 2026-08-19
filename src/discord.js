@@ -278,6 +278,43 @@ export async function removeRoleFromUser(guildId, userId, roleId) {
   });
 }
 
+// --- Channel messages ---
+
+/**
+ * Post a plain message to a channel as the bot.
+ *
+ * `allowed_mentions: { parse: [] }` is not optional. Log lines carry `<@id>` so
+ * a moderator can click through to the person, and without this every entry
+ * would ping them — turning an audit trail into a notification storm aimed at
+ * whoever was just synced.
+ *
+ * The bot's role grants only Manage Roles and Manage Nicknames, so it can write
+ * here purely on the channel overwrite granted in wsj27-infra. A 403 therefore
+ * means the overwrite is missing, not that the token is wrong.
+ */
+export async function postChannelMessage(channelId, content) {
+  const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+  return await retryWithBackoff(async () => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${config.DISCORD_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content,
+        allowed_mentions: { parse: [] },
+      }),
+    });
+    if (response.ok) return true;
+    const error = new Error(
+      `Error posting to channel ${channelId}: [${response.status}]`,
+    );
+    error.status = response.status;
+    throw error;
+  });
+}
+
 // --- Slash commands ---
 
 export async function registerGuildCommand(guildId) {

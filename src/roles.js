@@ -210,7 +210,10 @@ export async function syncUserRoles(guildId, discordUserId) {
   const divPrefixes = getDivisionPrefixes();
   const desiredSet = new Set(desiredRoles.map((r) => r.toLowerCase()));
 
-  // Update nickname from ScoutNet name + suffix
+  // Update nickname from ScoutNet name + suffix.
+  // `nicknameSet` is returned so callers can log it: the rename is the change
+  // users notice first, and until now it was visible only in the pod log.
+  let nicknameSet = null;
   try {
     const currentNick = member.nick || member.user?.global_name || "";
     const participant = isVerified ? await scoutnet.getParticipant(scoutId) : null;
@@ -227,6 +230,7 @@ export async function syncUserRoles(guildId, discordUserId) {
       const newNick = (baseName + nicknameSuffix).substring(0, 32);
       if (newNick !== currentNick) {
         await discord.updateGuildMemberNickname(guildId, discordUserId, newNick);
+        nicknameSet = newNick;
       }
     }
   } catch (e) {
@@ -291,7 +295,7 @@ export async function syncUserRoles(guildId, discordUserId) {
     }
   }
 
-  return { added, removed };
+  return { added, removed, nickname: nicknameSet };
 }
 
 /**

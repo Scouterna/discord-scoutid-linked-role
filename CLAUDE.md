@@ -145,7 +145,12 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   Nothing applies it automatically: CI there validates but does not plan or
   apply, so applying is a deliberate manual act
 - Docker build pulls from registry.npmjs.org unless a gitignored `.npmrc` overrides it (installed in a separate build stage, so it never lands in the image). On a network that TLS-intercepts npmjs, `npm ci` half-installs while still exiting 0 — so a local `.npmrc` pointing at a reachable mirror is required there. The Dockerfile verifies every dependency landed and fails the build otherwise
-- Local dev uses the Azurite storage emulator (see `docker-compose.yml`)
+- Local dev uses the Azurite storage emulator (see `docker-compose.yml`). The
+  Table Storage SDK refuses a plain-http endpoint unless
+  `allowInsecureConnection` is passed, so `storage.js` sets it — but only when
+  the connection string itself says http, which the real account never does.
+  Without that, every local run died on "Cannot connect to
+  http://azurite:10002/... while allowInsecureConnection is false"
 
 ## Key design decisions
 
@@ -189,6 +194,11 @@ bort när Container App avvecklades: Terraform hanterar inte längre något som
 boten läser.
 
 ```
+# Kanal för händelseloggen (#server-logg). Tomt = loggning av.
+LOG_CHANNEL_ID=
+# Vad medlemsscannern rapporterar. join,leave,nickname,roles — "off" = av.
+LOG_MEMBER_EVENTS=join,leave,nickname
+
 # Marker-roller (alla länkade / alla event-anmälda)
 SCOUTNET_SCOUT_ROLE=scout
 SCOUTNET_EVENT_ROLE=wsj-event
@@ -205,6 +215,83 @@ SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
 ```
+
+## Händelselogg till Discord
+
+[src/eventlog.js](src/eventlog.js) skriver vad boten *gjorde*, när det hände,
+till `#server-logg` — en moderator-only kanal som ägs av
+[wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/main.tf`).
+`LOG_CHANNEL_ID` styr den; tomt värde betyder att loggen är av och allt annat
+beter sig identiskt.
+
+**Varför den finns:** informationen fanns bara i `kubectl logs`, alltså bara så
+länge poden. Varje deploy kastade bort vem som länkat sig, vilka roller de fick,
+och vem som tappat Scout-rollen och blivit strippad — precis de frågor som
+ställs efteråt, när någon inte ser en kanal och ingen minns om personen ens
+verifierat sig. `/audit-scoutid` svarar på *tillstånds*frågan, aldrig på
+historiken, för ingenting sparade historik.
+
+Loggas: lyckad `/linked-role`-länkning (med tilldelade roller), `/link-scoutid`
+med vem som länkade vem, rollsynk per användare, och `/refresh-scoutid
+alla:true` som en sammanfattningsrad plus en rad per *ändrad* användare.
+`Overifierad` satt får en egen tydligare rad, eftersom det är det enda felet en
+admin inte kan laga för användaren.
+
+### Medlemshändelser — [src/memberscan.js](src/memberscan.js)
+
+Joins och leaves i samma kanal, från ett CronJob som hämtar medlemslistan var
+tionde minut och jämför mot förra körningen. Snapshoten ligger i Table Storage.
+
+**Pollning, inte events**, eftersom boten pratar HTTP-interactions och inte har
+någon gateway att ta emot `guildMemberAdd` på. Priset är upp till ett intervalls
+fördröjning och att kick inte går att skilja från frivilligt utträde — det kräver
+audit-loggen. Vinsten är att det inte behövs en andra bot, ingen privilegierad
+gateway-intent, och ingen process som måste ha varit ansluten i rätt sekund: en
+gateway-bot som legat nere en timme har tappat den timmen för alltid, den här
+rapporterar ändringen vid nästa körning.
+
+**CronJob och inte en timer i servern** eftersom Deployment kör `replicas: 2` —
+ett intervall inne i den skulle rapportera varje join dubbelt. Det är också
+därför snapshoten måste ligga i Table Storage och inte i processminnet.
+
+`LOG_MEMBER_EVENTS` väljer vad som rapporteras: `join`, `leave`, `nickname`,
+`roles`; `off` eller tomt stänger av scannern helt. **`roles` är av som default**
+— boten loggar redan varje rolländring den själv gör, i samma stund, så det mest
+dubblerar (en `/refresh-scoutid alla:true` skulle rapporteras två gånger). Slå på
+det bara för att fånga roller som ändrats för hand i Discords gränssnitt.
+
+Två egenskaper som måste hålla:
+
+- **Snapshoten sparas först efter att rapporten är skriven.** Misslyckas
+  skrivningen lämnas den orörd, så nästa körning rapporterar samma diff igen. I
+  en granskningslogg är en dubblett vid omförsök billigare än ett hål. Därför
+  kastar koden ett fel i stället för att `process.exit(1)` mitt i funktionen —
+  sparningen är nästa sats, och kontrollflöde som förlitar sig på att exit
+  avbryter är en refaktorering från att skriva ändå.
+- **Första körningen seedar en baslinje tyst.** Att annonsera varje befintlig
+  medlem som nyanländ skulle begrava kanalen och lära alla att ignorera den.
+
+```bash
+node src/memberscan.js --dry-run      # skriv ut vad den skulle rapportera
+kubectl get cronjob discord-scoutid-memberscan
+kubectl create job manual-scan --from=cronjob/discord-scoutid-memberscan
+```
+
+Tre egenskaper som måste hålla om filen ändras:
+
+- **Kastar aldrig vidare till anroparen.** En misslyckad loggskrivning får inte
+  förvandla en lyckad länkning till ett fel för användaren.
+- **Fördröjer aldrig anroparen.** `logEvent` buffrar och returnerar; skrivningen
+  sker på en timer, så ett trögt Discord-API kan inte bromsa
+  `/refresh-scoutid`.
+- **Buffern töms vid avstängning.** `flushEventLog()` awaitas i SIGTERM-kedjan i
+  [src/server.js](src/server.js), *efter* `pendingWork` — flushar man före
+  missas det ett slash-kommando loggar på vägen ut.
+
+Boten kan skriva i kanalen enbart tack vare en channel overwrite i infra-repot:
+dess roll har `402653184`, alltså Manage Roles + Manage Nicknames och varken
+View Channels eller Send Messages. **En 403 här betyder att overwriten saknas,
+inte att token är fel.**
 
 ## Audit och konsistenskontroll
 

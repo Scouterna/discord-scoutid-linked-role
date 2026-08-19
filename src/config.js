@@ -84,6 +84,33 @@ function parseCategoryRoles(str) {
   return Object.keys(map).length > 0 ? map : null;
 }
 
+/**
+ * Parse the member-event switch.
+ * Format: comma-separated event names, e.g. "join,leave,nickname".
+ *
+ * Accepted: join, leave, nickname, roles. Empty, "off" or "none" disables the
+ * scheduled member scan entirely.
+ *
+ * `roles` is off by default on purpose, and it is the one worth explaining. The
+ * bot already logs every role change *it* makes, at the moment it makes it —
+ * turning this on means a scan that also reports the same changes a second time,
+ * and a `/refresh-scoutid alla:true` would echo as one line per changed user.
+ * What it buys is the only thing the event log genuinely cannot see: roles
+ * edited by a human in the Discord UI. Worth it for some servers, noise for
+ * others, so it is a choice rather than a default.
+ */
+function parseMemberEvents(str) {
+  const raw = (str ?? "join,leave,nickname").trim().toLowerCase();
+  if (raw === "" || raw === "off" || raw === "none") return new Set();
+  const known = ["join", "leave", "nickname", "roles"];
+  const wanted = new Set();
+  for (const name of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+    if (known.includes(name)) wanted.add(name);
+    else console.warn(`Unknown LOG_MEMBER_EVENTS value "${name}", ignoring`);
+  }
+  return wanted;
+}
+
 const config = {
   // Discord
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
@@ -93,6 +120,14 @@ const config = {
   DISCORD_REDIRECT_URI: process.env.DISCORD_REDIRECT_URI,
   DISCORD_VALIDATION_URL: process.env.DISCORD_VALIDATION_URL,
   DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
+
+  // Channel the verification event log is written to (#server-logg, created by
+  // Scouterna/wsj27-infra). Unset means the log is off, and everything else
+  // behaves identically — see src/eventlog.js.
+  LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
+
+  // Which member events the scheduled scan reports. Empty Set = no scan.
+  LOG_MEMBER_EVENTS: parseMemberEvents(process.env.LOG_MEMBER_EVENTS),
 
   // ScoutID (OIDC)
   SCOUTID_CLIENT_ID: process.env.SCOUTID_CLIENT_ID,

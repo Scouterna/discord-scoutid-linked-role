@@ -9,6 +9,7 @@ resources:
   - service.yaml
   - ingress.yaml
   - backup-cronjob.yaml
+  - memberscan-cronjob.yaml
 
 # backup-restore-job.yaml is deliberately NOT listed: it is a one-off, applied
 # by hand when a restore is actually needed.
