@@ -1,0 +1,76 @@
+name: Tests
+
+# Defined once and used from two places: directly on pull requests and branch
+# pushes, and via `workflow_call` from deploy.yml so a red suite blocks a deploy.
+# Duplicating the job in both files would let them drift, and the copy that
+# mattered would be the one nobody updated.
+#
+# No credentials are needed or granted. The repository is public, so fork and
+# Dependabot pull requests get none — which is exactly why the tests must not
+# depend on any. They stub Discord and ScoutNet, and use the Azurite emulator for
+# storage.
+
+on:
+  pull_request:
+  push:
+    # main is covered through deploy.yml, which calls this workflow before it
+    # builds. Running both here as well would double every run on main.
+    branches-ignore: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the Dockerfile, so a version-specific failure shows up here
+          # rather than in the image.
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        # No container, no network, no credentials — if this needs setup one day,
+        # something has moved into the wrong suite.
+        run: npm test
+
+      - name: Start the Azurite table emulator
+        # `docker run` rather than a `services:` block: the image's default command
+        # starts all three storage services, and a service container cannot
+        # override the command to start only the table one on 0.0.0.0.
+        run: |
+          docker run -d --name azurite -p 10002:10002 \
+            mcr.microsoft.com/azure-storage/azurite \
+            azurite-table --tableHost 0.0.0.0
+          # An unsigned request answering at all is enough to prove it is up; 403
+          # is the expected reply and means the endpoint is live.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://127.0.0.1:10002/devstoreaccount1/Tables" || true)
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "azurite answering with HTTP $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "azurite did not start within 30s"
+          docker logs azurite
+          exit 1
+
+      - name: Integration tests
+        # Set explicitly so the helper does not spend a DNS lookup on the
+        # devcontainer's `azurite` hostname first.
+        env:
+          AZURITE_TABLE_HOST: 127.0.0.1:10002
+        run: npm run test:integration
+
+      - name: Azurite logs on failure
+        if: failure()
+        run: docker logs azurite || true

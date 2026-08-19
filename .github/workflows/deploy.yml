@@ -6,6 +6,9 @@ name: Deploy
 # No Azure credentials are involved any more: the image goes to GHCR and the
 # deploy goes to Kubernetes. Azure keeps only the DNS zone and the storage
 # account the pod talks to at runtime.
+#
+# The test suite runs first, from .github/workflows/tests.yml, and nothing is
+# built or applied unless it passes.
 
 on:
   push:
@@ -29,7 +32,14 @@ env:
   KUSTOMIZE_VERSION: 5.4.3
 
 jobs:
+  # Gate the deploy on a green suite. Defined in tests.yml so pull requests run
+  # exactly the same job, and placed before the build so the reviewer approving
+  # the prod environment sees the result first rather than after the fact.
+  test:
+    uses: ./.github/workflows/tests.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     # Requires a reviewer on the prod environment before anything is pushed.
     environment: prod
