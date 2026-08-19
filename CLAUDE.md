@@ -72,7 +72,13 @@ Applya för hand, med en kubeconfig som har RBAC-rättigheter:
 
 ```bash
 kubectl apply -f k8s/rbac-github-deployer.yaml
-kubectl auth can-i patch cronjobs --as=system:serviceaccount:wsj27:github-deployer -n wsj27
+
+# Namnge resursen i kontrollen. `can-i patch cronjobs` utan namn frågar om
+# *vilket som helst* cronjob och svarar därför korrekt "no" även när grantet
+# sitter — grantet är namn-scopat. Den frågan får en att tro att applyen inte tog.
+SA=system:serviceaccount:wsj27:github-deployer
+kubectl auth can-i patch cronjobs/discord-scoutid-memberscan --as=$SA -n wsj27   # yes
+kubectl auth can-i --list --as=$SA -n wsj27 | grep cronjobs                      # ser resourceNames
 ```
 
 ### Backup and restore
