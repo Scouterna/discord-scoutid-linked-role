@@ -20,12 +20,17 @@ data:
   # Which member events the scheduled scan reports (memberscan-cronjob.yaml).
   # "off" or empty turns the scan off; it exits without touching anything.
   #
-  # `roles` is deliberately absent. It reports only changes made by someone other
-  # than the bot, read from the Discord audit log — which needs View Audit Log on
-  # the bot's role (+128 → 402653312), set by hand in Server Settings → Roles.
-  # Add `roles` here once that bit is set; until then the scan warns and skips
-  # the category. What it buys is roles edited by hand in the Discord UI, named.
-  LOG_MEMBER_EVENTS: join,leave,nickname
+  # `roles` reports only changes made by someone other than the bot, read from the
+  # Discord audit log. It needs View Audit Log on the bot's role — granted
+  # 2026-08-19, so the role now carries 402653312 rather than 402653184. That bit
+  # is set by hand in Server Settings → Roles, because the role is a managed
+  # integration role Terraform does not own; if it is ever reset, this category
+  # starts warning and skipping instead of failing.
+  #
+  # The filter is not cosmetic. Every one of the five most recent
+  # MEMBER_ROLE_UPDATE entries in this guild was written by the bot itself, so
+  # without it the category would be almost entirely the bot's own echo.
+  LOG_MEMBER_EVENTS: join,leave,nickname,roles
 
   DISCORD_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback
   DISCORD_VALIDATION_URL: https://discord-scoutid.wsj27.scouterna.net/linked-role
