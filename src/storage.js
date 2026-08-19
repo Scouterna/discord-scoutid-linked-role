@@ -10,7 +10,7 @@ import config from "./config.js";
  *   discord-token  userId          JSON
  *   scoutid-token  userId          JSON
  *   state          state           JSON   + expiresAt   (OAuth, 10 min)
- *   membersnapshot current         chunk0..chunkN + chunks   (see below)
+ *   membersnapshot current         chunk0..chunkN + chunks + lastAuditId
  *
  * Table Storage has no native TTL, so state rows carry an `expiresAt`
  * (epoch ms) and are treated as absent past that time (lazy expiry).
@@ -168,42 +168,69 @@ export async function getUserIdsWithTokens(type) {
 // the web deployment runs two replicas and the scan runs as a CronJob, so
 // process memory would be both duplicated and lost between runs.
 //
-// **Why it is chunked.** A single Table Storage property caps at 64 KB. Measured
-// against the live guild, a member costs ~88 bytes here (id, nick, role ids), so
-// one property would hold roughly 740 members and then start failing — the sort
-// of ceiling that is invisible until a big intake pushes past it. Splitting
-// across properties of one entity moves the limit to the 1 MB per-entity cap,
-// about 11 000 members, which is far beyond any contingent this will ever hold.
+// **Why it is chunked.** A single Table Storage string property holds at most
+// **32K UTF-16 characters** — that is what the documented "64 KB" means, since
+// the service counts two bytes per character. Measured against the live guild a
+// member costs ~60 characters here (id, nick, username), so one property would
+// hold roughly 500 members and then start failing — the sort of ceiling that is
+// invisible until a big intake pushes past it. Splitting across properties of
+// one entity moves the limit to the 1 MB per-entity cap, well beyond any
+// contingent this will ever hold.
+//
+// The chunk size is in characters, not bytes, and deliberately far below the
+// maximum. Two things were measured, not assumed. A chunk of exactly 32768
+// characters is rejected outright with `PropertyValueTooLarge`. Worse, at 16384
+// characters Azurite returned the data *silently corrupted* — a multi-byte `ä`
+// came back as two replacement characters, mid-property — while 8192 round-tripped
+// 2500 members byte-identically. Whether the real service shares that behaviour
+// was not established; the margin costs nothing but property count, and the 1 MB
+// entity cap binds long before the 252-property one.
+//
+// Because that corruption was silent, `chars` records the expected length and
+// the read side checks it. A snapshot that fails the check is treated as absent,
+// so the scan reseeds a baseline instead of reporting a diff full of members who
+// never joined and never left.
 //
 // Written and read as one entity, so the snapshot can never be torn: a partial
 // write would produce a diff full of bogus joins and leaves. `chunks` records
 // how many properties to read back, and stale chunks from a previously larger
 // snapshot are harmless because "Replace" drops properties not written.
+//
+// `lastAuditId` rides along in the same entity for the same reason: it is the
+// Discord audit-log cursor for role-change reporting, and it has to advance in
+// the same atomic write as the member list. Two entities could disagree after a
+// partial failure, and the disagreement would either duplicate or lose entries.
 
-const SNAPSHOT_CHUNK_BYTES = 32 * 1024;
+const SNAPSHOT_CHUNK_CHARS = 8 * 1024;
 
 /**
- * Store the member snapshot. `snapshot` is `{ [discordUserId]: [nick, roleIds] }`
+ * Store the member snapshot. `members` is `{ [discordUserId]: [nick, username] }`
  * — arrays rather than objects because the key names would otherwise be repeated
  * once per member and roughly double the size.
+ *
+ * `lastAuditId` is the newest Discord audit-log entry already accounted for.
  */
-export async function storeMemberSnapshot(snapshot) {
+export async function storeMemberSnapshot(members, lastAuditId = null) {
   await ensureTable();
-  const json = JSON.stringify(snapshot);
+  const json = JSON.stringify(members);
   const entity = { partitionKey: "membersnapshot", rowKey: "current" };
   let chunks = 0;
-  for (let i = 0; i < json.length; i += SNAPSHOT_CHUNK_BYTES) {
-    entity[`chunk${chunks++}`] = json.slice(i, i + SNAPSHOT_CHUNK_BYTES);
+  for (let i = 0; i < json.length; i += SNAPSHOT_CHUNK_CHARS) {
+    entity[`chunk${chunks++}`] = json.slice(i, i + SNAPSHOT_CHUNK_CHARS);
   }
   entity.chunks = chunks;
+  entity.chars = json.length;
   entity.savedAt = Date.now();
+  // Stored as a string: audit-log ids are snowflakes, which exceed the exact
+  // range of a double and would come back rounded as an Edm.Int64 number.
+  entity.lastAuditId = lastAuditId == null ? "" : String(lastAuditId);
   await client.upsertEntity(entity, "Replace");
 }
 
 /**
- * Read the member snapshot back, or null if there has never been one. A null
- * return is the signal to seed a baseline rather than report every current
- * member as a new arrival.
+ * Read the snapshot back as `{ members, lastAuditId }`, or null if there has
+ * never been one. A null return is the signal to seed a baseline rather than
+ * report every current member as a new arrival.
  */
 export async function getMemberSnapshot() {
   await ensureTable();
@@ -212,8 +239,15 @@ export async function getMemberSnapshot() {
   let json = "";
   for (let i = 0; i < (e.chunks ?? 0); i++) json += e[`chunk${i}`] ?? "";
   if (!json) return null;
+  if (e.chars != null && json.length !== e.chars) {
+    console.error(
+      `Member snapshot is truncated or corrupt: expected ${e.chars} characters, ` +
+        `read ${json.length}. Treating it as absent so the next scan reseeds.`,
+    );
+    return null;
+  }
   try {
-    return JSON.parse(json);
+    return { members: JSON.parse(json), lastAuditId: e.lastAuditId || null };
   } catch (err) {
     // A snapshot we cannot parse is worse than none: it would diff into
     // nonsense. Treat it as absent and let the next run reseed.

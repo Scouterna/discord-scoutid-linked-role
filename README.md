@@ -96,6 +96,7 @@ reports it.
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
+| `/scan-scoutid`                     | Admin    | Run the member scan now; `torrkor:true` for a dry run      |
 
 `/audit-scoutid` checks for missing roles, orphaned links, links with no stored
 OAuth tokens, cancelled registrations, nickname drift, unmapped `fee_id`s,
@@ -145,13 +146,24 @@ It is a CronJob and not a timer in the server because the Deployment runs
 `replicas: 2` — an interval inside it would report every join twice.
 
 `LOG_MEMBER_EVENTS` picks what it reports: any of `join`, `leave`, `nickname`,
-`roles`; `off` or empty disables the scan entirely. `roles` is off by default
-because the bot already logs every role change it makes as it makes it, so it
-mostly duplicates — turn it on to catch roles edited by hand in the Discord UI.
+`roles`; `off` or empty disables the scan entirely.
+
+`roles` reports only changes made by **someone other than the bot**, read from
+the Discord audit log — the one source that knows who did it. The bot already
+logs its own role changes as it makes them, so this adds exactly what is
+otherwise invisible: a moderator editing roles in the Discord UI, named.
+
+It needs **View Audit Log** on the bot's role (+128 → `402653312`), set by hand
+in Server Settings → Roles since the role is a managed integration role Terraform
+does not own. Without the bit the scan warns and skips role changes; nothing else
+is affected. That is why it is off by default.
 
 ```bash
 node src/memberscan.js --dry-run   # print what it would report, save nothing
 ```
+
+`/scan-scoutid` runs the same code from Discord for anyone who does not want to
+wait for the schedule, with `torrkor:true` for a dry run.
 
 The snapshot is saved only after the report is written. A failed write leaves it
 untouched so the next run reports the same diff — in an audit trail a duplicate

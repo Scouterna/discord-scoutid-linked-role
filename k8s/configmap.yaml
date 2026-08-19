@@ -16,10 +16,11 @@ data:
   # Which member events the scheduled scan reports (memberscan-cronjob.yaml).
   # "off" or empty turns the scan off; it exits without touching anything.
   #
-  # `roles` is deliberately absent. The bot already logs every role change it
-  # makes, at the moment it makes it, so adding `roles` here mostly duplicates
-  # that — a `/refresh-scoutid alla:true` would be reported twice. It is worth
-  # turning on only to catch roles edited by hand in the Discord UI.
+  # `roles` is deliberately absent. It reports only changes made by someone other
+  # than the bot, read from the Discord audit log — which needs View Audit Log on
+  # the bot's role (+128 → 402653312), set by hand in Server Settings → Roles.
+  # Add `roles` here once that bit is set; until then the scan warns and skips
+  # the category. What it buys is roles edited by hand in the Discord UI, named.
   LOG_MEMBER_EVENTS: join,leave,nickname
 
   DISCORD_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback

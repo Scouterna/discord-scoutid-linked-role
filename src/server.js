@@ -9,6 +9,7 @@ import * as storage from "./storage.js";
 import * as roles from "./roles.js";
 import * as audit from "./audit.js";
 import * as eventlog from "./eventlog.js";
+import { runMemberScan, formatScanSummary } from "./memberscan.js";
 import { getSuccessPageHTML } from "./templates.js";
 
 const app = express();
@@ -198,6 +199,12 @@ app.post(
     if (interaction.type === 2 && interaction.data.name === "audit-scoutid") {
       res.json({ type: 5, data: { flags: 64 } });
       scheduleBackground(() => handleAuditCommand(interaction));
+      return;
+    }
+
+    if (interaction.type === 2 && interaction.data.name === "scan-scoutid") {
+      res.json({ type: 5, data: { flags: 64 } });
+      scheduleBackground(() => handleScanCommand(interaction));
       return;
     }
 
@@ -505,6 +512,45 @@ async function handleAuditCommand(interaction) {
   } catch (e) {
     console.error("Error handling audit command:", e);
     await discord.editInteractionResponse(token, `Fel: ${e.message}`);
+  }
+}
+
+/**
+ * `/scan-scoutid` — run the member scan now instead of waiting for the CronJob.
+ *
+ * The detail lines go to #server-logg like a scheduled run; the reply is the
+ * summary. A manual run can overlap the CronJob, and the worst case is that the
+ * same change is reported twice — which is the trade this whole log makes
+ * deliberately, since the alternative is a missing entry.
+ */
+async function handleScanCommand(interaction) {
+  const token = interaction.token;
+  const callerId = interaction.member.user.id;
+  const callerPermissions = BigInt(interaction.member.permissions);
+  const isAdmin = (callerPermissions & ADMIN_PERMISSION) === ADMIN_PERMISSION;
+
+  if (!isAdmin) {
+    await discord.editInteractionResponse(
+      token,
+      "Du måste vara admin för att använda det här kommandot.",
+    );
+    return;
+  }
+
+  const dryRun =
+    interaction.data.options?.find((o) => o.name === "torrkor")?.value === true;
+
+  try {
+    const result = await runMemberScan({ dryRun });
+    if (!dryRun && !result.disabled) {
+      eventlog.logEvent(
+        `🔎 <@${callerId}> körde \`/scan-scoutid\` — ${result.seeded != null ? `baslinje för ${result.seeded} medlemmar` : `${result.total} ändring(ar)`}`,
+      );
+    }
+    await discord.editInteractionResponse(token, formatScanSummary(result));
+  } catch (e) {
+    console.error("Error handling scan command:", e);
+    await discord.editInteractionResponse(token, `Fel vid scanning: ${e.message}`);
   }
 }
 

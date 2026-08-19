@@ -197,6 +197,7 @@ boten läser.
 # Kanal för händelseloggen (#server-logg). Tomt = loggning av.
 LOG_CHANNEL_ID=
 # Vad medlemsscannern rapporterar. join,leave,nickname,roles — "off" = av.
+# roles kräver View Audit Log på botens roll och rapporterar bara andras ändringar.
 LOG_MEMBER_EVENTS=join,leave,nickname
 
 # Marker-roller (alla länkade / alla event-anmälda)
@@ -255,10 +256,29 @@ ett intervall inne i den skulle rapportera varje join dubbelt. Det är också
 därför snapshoten måste ligga i Table Storage och inte i processminnet.
 
 `LOG_MEMBER_EVENTS` väljer vad som rapporteras: `join`, `leave`, `nickname`,
-`roles`; `off` eller tomt stänger av scannern helt. **`roles` är av som default**
-— boten loggar redan varje rolländring den själv gör, i samma stund, så det mest
-dubblerar (en `/refresh-scoutid alla:true` skulle rapporteras två gånger). Slå på
-det bara för att fånga roller som ändrats för hand i Discords gränssnitt.
+`roles`; `off` eller tomt stänger av scannern helt.
+
+**`roles` rapporterar bara rolländringar som någon *annan än boten* gjort**, läst
+ur Discords audit-logg och filtrerad på botens eget user-id. Boten loggar redan
+sina egna ändringar i samma stund de sker, så en diff-baserad rapport hade mest
+upprepat sig själv — en `/refresh-scoutid alla:true` skulle blivit en rad per
+användare, två gånger. Kvar blir det enda händelseloggen aldrig kan se: en
+moderator som ändrar roller i Discords gränssnitt, med namn på vem.
+
+Audit-loggen är också enda källan som *vet* vem som gjorde något, och det kräver
+**View Audit Log** på botens roll (+128 → `402653312`). Rollen är en managed
+integrationsroll, så biten sätts för hand i Server Settings → Roles; Terraform
+äger den inte. Saknas den loggar scannern en varning och hoppar över kategorin —
+inget annat påverkas. Den ligger av som default just därför.
+
+**Markören är ett audit-logg-id, inte en tidsstämpel**, och den sparas i samma
+entity som snapshoten. Två entities hade kunnat hamna i otakt efter ett halvt
+misslyckande, och otakten hade antingen dubblerat eller tappat poster.
+Pagineringen går *bakåt* med `before`: Discord returnerar nyast först, så
+`?after=X&limit=100` ger de 100 nyaste posterna över X — hade 150 hunnit samlas
+saknas de 50 närmast X, och att flytta markören förbi dem hoppar över dem för
+alltid. En `/refresh-scoutid alla:true` skriver en post per ändrad användare, så
+att fylla ett 100-fönster är en vanlig tisdag här.
 
 Två egenskaper som måste hålla:
 
@@ -271,11 +291,26 @@ Två egenskaper som måste hålla:
 - **Första körningen seedar en baslinje tyst.** Att annonsera varje befintlig
   medlem som nyanländ skulle begrava kanalen och lära alla att ignorera den.
 
+`/scan-scoutid` kör samma `runMemberScan` som CronJobbet, direkt, för den som
+inte vill vänta på schemat. `torrkor:true` visar vad den skulle rapportera utan
+att posta eller flytta snapshoten. En manuell körning kan överlappa CronJobbet;
+värsta fallet är att samma ändring rapporteras två gånger, vilket är den
+avvägning hela loggen gör med flit.
+
 ```bash
 node src/memberscan.js --dry-run      # skriv ut vad den skulle rapportera
 kubectl get cronjob discord-scoutid-memberscan
 kubectl create job manual-scan --from=cronjob/discord-scoutid-memberscan
 ```
+
+**Snapshoten är chunkad över properties och kontrollsummeras på längd.** En
+Table Storage-property tar 32K UTF-16-*tecken*, inte 64K byte som det ofta
+skrivs. Exakt 32768 tecken avvisas med `PropertyValueTooLarge`; vid 16384 tecken
+returnerade Azurite datan *tyst korrumperad* (ett `ä` kom tillbaka som två
+ersättningstecken), medan 8192 rundgick 2500 medlemmar identiskt. Därför 8192,
+och därför sparas `chars`: en snapshot som inte har rätt längd behandlas som
+frånvarande, så scannern seedar en ny baslinje i stället för att rapportera en
+diff full av medlemmar som aldrig gått med och aldrig lämnat.
 
 Tre egenskaper som måste hålla om filen ändras:
 
@@ -318,6 +353,7 @@ Auditen är helt läsande — inga `addRole`/`removeRole`/nickname-anrop — så
 ### Kommandon
 
 - `/audit-scoutid` — full rapport (admin). Filattachment om >2000 tecken.
+- `/scan-scoutid` — kör medlemsscannern nu (admin). `torrkor:true` = visa utan att posta.
 - `/status-scoutid` — utan argument: server-sammanfattning. Med `person`: detaljerad status för en användare.
 
 ## Krav på Discord-servern

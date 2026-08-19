@@ -4,7 +4,8 @@ import * as discord from "./discord.js";
 /**
  * One-time registration script:
  * 1. Registers linked role metadata schema with Discord
- * 2. Registers the /refresh-scoutid slash command
+ * 2. Registers the slash commands (/refresh-, /status-, /audit-, /scan-,
+ *    /link-scoutid)
  *
  * Run with: node src/register.js
  */
@@ -59,6 +60,14 @@ if (config.DISCORD_GUILD_ID) {
   console.log("Registering /audit-scoutid command...");
   try {
     const result = await discord.registerAuditCommand(config.DISCORD_GUILD_ID);
+    console.log("Command registered:", result.name);
+  } catch (e) {
+    console.error("Command registration failed:", e.message);
+  }
+
+  console.log("Registering /scan-scoutid command...");
+  try {
+    const result = await discord.registerScanCommand(config.DISCORD_GUILD_ID);
     console.log("Command registered:", result.name);
   } catch (e) {
     console.error("Command registration failed:", e.message);

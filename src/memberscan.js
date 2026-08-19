@@ -1,17 +1,24 @@
 /**
- * Scheduled member scan — reports who arrived and who is gone.
+ * Member scan — reports who arrived, who is gone, and who changed someone's
+ * roles by hand.
  *
- * This bot speaks HTTP interactions, not the gateway, so it cannot *receive*
- * `guildMemberAdd` / `guildMemberRemove`. What it can do is fetch the member
- * list, compare it against the previous fetch, and report the difference. The
- * events are the same ones; they arrive one scan interval late and a kick cannot
- * be told from a voluntary leave.
+ * Two different sources, because they answer different questions:
  *
- * That trade buys a lot: no second bot, no privileged gateway intent to keep
- * enabled, no extra deployment to keep alive, and no dependence on a process
- * having been connected at the moment something happened. A gateway bot that was
- * down for an hour has lost that hour permanently — this one just reports the
- * change on its next run.
+ * - **Joins, leaves and nicknames** come from diffing the member list against
+ *   the previous run. This bot speaks HTTP interactions, not the gateway, so it
+ *   cannot *receive* `guildMemberAdd` / `guildMemberRemove`. The events are the
+ *   same ones; they arrive one scan interval late, and a kick cannot be told
+ *   from a voluntary leave.
+ * - **Role changes** come from the Discord audit log, which is the only source
+ *   that knows *who* made a change. That matters more than it sounds: the bot
+ *   already logs every role change it makes, at the moment it makes it, so a
+ *   diff-based report would mostly repeat itself. Filtering the audit log to
+ *   "not this bot" leaves exactly what is otherwise invisible — a moderator
+ *   editing roles in the Discord UI — and names them while doing it.
+ *
+ * The audit log needs View Audit Log on the bot's role. Without it, role
+ * reporting is skipped with a warning rather than falling back to the diff:
+ * quietly reporting the bot's own changes is the noise this was built to avoid.
  *
  * ## Why a CronJob and not a timer in the server
  *
@@ -31,6 +38,8 @@
  * Usage:
  *   node src/memberscan.js              # scan, report, save
  *   node src/memberscan.js --dry-run    # print what it would report, save nothing
+ *
+ * `/scan-scoutid` in Discord runs the same `runMemberScan` this file exports.
  */
 
 import config from "./config.js";
@@ -52,15 +61,11 @@ function accountCreatedAt(userId) {
   }
 }
 
-/** `[nick, username, roleIds]` — see storage.js for why it is this compact. */
+/** `[nick, username]` — see storage.js for why it is this compact. */
 function toSnapshot(members) {
   const snap = {};
   for (const m of members) {
-    snap[m.user.id] = [
-      m.nick ?? "",
-      m.user.global_name || m.user.username || "",
-      (m.roles ?? []).join(","),
-    ];
+    snap[m.user.id] = [m.nick ?? "", m.user.global_name || m.user.username || ""];
   }
   return snap;
 }
@@ -86,47 +91,108 @@ function emit(label, items, render) {
   for (const item of items) render(item);
 }
 
-async function main() {
-  const dryRun = process.argv.includes("--dry-run");
-  if (dryRun) eventlog.setDryRun(true);
+/**
+ * Turn audit-log entries into role changes made by someone other than the bot.
+ *
+ * Entries carry `$add` / `$remove` change keys with the role objects, so the
+ * names come from the entry itself and need no role lookup.
+ */
+function roleChangesFromAuditLog(entries, botUserId) {
+  const changes = [];
+  for (const entry of entries) {
+    if (entry.user_id === botUserId) continue;
+    const added = [];
+    const removed = [];
+    for (const change of entry.changes ?? []) {
+      const names = (change.new_value ?? []).map((r) => r.name ?? r.id);
+      if (change.key === "$add") added.push(...names);
+      else if (change.key === "$remove") removed.push(...names);
+    }
+    if (added.length === 0 && removed.length === 0) continue;
+    changes.push({
+      discordUserId: entry.target_id,
+      actorId: entry.user_id,
+      added,
+      removed,
+      reason: entry.reason ?? null,
+    });
+  }
+  return changes;
+}
+
+/**
+ * Run one scan. Returns what it found so a caller can report a summary.
+ *
+ * `{ disabled, seeded, counts, truncated, auditUnavailable }` — `seeded` means
+ * this was a first run that established a baseline and deliberately reported
+ * nothing.
+ */
+export async function runMemberScan({ dryRun = false } = {}) {
   const wanted = config.LOG_MEMBER_EVENTS;
   const guildId = config.DISCORD_GUILD_ID;
 
   if (!guildId) throw new Error("DISCORD_GUILD_ID is not set — nothing to scan");
-  if (wanted.size === 0) {
-    console.log("LOG_MEMBER_EVENTS is off — member scan disabled, exiting");
-    return;
-  }
+  if (wanted.size === 0) return { disabled: "LOG_MEMBER_EVENTS is off" };
   if (!config.LOG_CHANNEL_ID && !dryRun) {
-    console.log("LOG_CHANNEL_ID is not set — nowhere to report, exiting");
-    return;
+    return { disabled: "LOG_CHANNEL_ID is not set — nowhere to report" };
   }
-  console.log(`Scanning guild ${guildId} for: ${[...wanted].join(", ")}`);
 
-  const [members, guildRoles] = await Promise.all([
-    discord.getGuildMembers(guildId),
-    discord.getGuildRoles(guildId),
-  ]);
-  const roleNames = new Map(guildRoles.map((r) => [r.id, r.name]));
-  const nameOf = (id) => roleNames.get(id) ?? id;
-  const botIds = new Set(members.filter((m) => m.user?.bot).map((m) => m.user.id));
-
+  const members = await discord.getGuildMembers(guildId);
   const current = toSnapshot(members);
-  const previous = await storage.getMemberSnapshot();
+  const stored = await storage.getMemberSnapshot();
+  const previous = stored?.members ?? null;
+
+  // Role reporting needs both the audit log and the bot's own id to filter by.
+  // A 403 here means the bot's role lacks View Audit Log; anything else is a
+  // real failure and should stop the run.
+  let auditUnavailable = false;
+  let auditEntries = [];
+  let auditTruncated = false;
+  let newAuditCursor = stored?.lastAuditId ?? null;
+  let botUserId = null;
+
+  if (wanted.has("roles")) {
+    try {
+      botUserId = await discord.getCurrentBotUserId();
+      if (newAuditCursor == null) {
+        // First run with roles enabled: start from now rather than replaying
+        // however much history Discord still retains.
+        newAuditCursor = await discord.getNewestAuditLogId(
+          guildId,
+          discord.AUDIT_MEMBER_ROLE_UPDATE,
+        );
+      } else {
+        const result = await discord.getAuditLogEntries(guildId, {
+          actionType: discord.AUDIT_MEMBER_ROLE_UPDATE,
+          after: newAuditCursor,
+        });
+        auditEntries = result.entries;
+        auditTruncated = result.truncated;
+        if (auditEntries.length > 0) {
+          newAuditCursor = auditEntries[auditEntries.length - 1].id;
+        }
+      }
+    } catch (e) {
+      if (e?.status !== 403) throw e;
+      auditUnavailable = true;
+      console.warn(
+        "Cannot read the audit log (403) — role reporting needs View Audit Log " +
+          "on the bot's role. Skipping role changes; nothing else is affected.",
+      );
+    }
+  }
 
   // First run, or a snapshot that could not be parsed. Seeding silently is the
   // point: reporting every existing member as a new arrival would bury the
   // channel and teach everyone to ignore it.
   if (!previous) {
-    console.log(`No previous snapshot — seeding baseline of ${members.length} members`);
-    if (!dryRun) await storage.storeMemberSnapshot(current);
-    return;
+    if (!dryRun) await storage.storeMemberSnapshot(current, newAuditCursor);
+    return { seeded: members.length, auditUnavailable };
   }
 
   const joined = [];
   const gone = [];
   const renamed = [];
-  const roleChanges = [];
 
   for (const [id, entry] of Object.entries(current)) {
     const before = previous[id];
@@ -137,19 +203,12 @@ async function main() {
     if (wanted.has("nickname") && before[0] !== entry[0]) {
       renamed.push({ id, from: before[0], to: entry[0] });
     }
-    if (wanted.has("roles") && before[2] !== entry[2]) {
-      const had = new Set(before[2] ? before[2].split(",") : []);
-      const has = new Set(entry[2] ? entry[2].split(",") : []);
-      const added = [...has].filter((r) => !had.has(r)).map(nameOf);
-      const removed = [...had].filter((r) => !has.has(r)).map(nameOf);
-      if (added.length > 0 || removed.length > 0) {
-        roleChanges.push({ id, added, removed });
-      }
-    }
   }
   for (const [id, entry] of Object.entries(previous)) {
     if (!current[id]) gone.push({ id, entry });
   }
+
+  const roleChanges = roleChangesFromAuditLog(auditEntries, botUserId);
 
   // Only looked up for members who left, so an unchanged guild costs no storage
   // reads at all beyond the snapshot itself.
@@ -158,6 +217,8 @@ async function main() {
     const links = await storage.getAllLinkedUsers();
     linkedIds = new Set(links.map((l) => l.discordUserId));
   }
+
+  const botIds = new Set(members.filter((m) => m.user?.bot).map((m) => m.user.id));
 
   if (wanted.has("join")) {
     emit("📥 Nya medlemmar", joined, ({ id, entry }) =>
@@ -181,27 +242,31 @@ async function main() {
   emit("✏️ Ändrade smeknamn", renamed, ({ id, from, to }) =>
     eventlog.logMemberRenamed({ discordUserId: id, from, to }),
   );
-  emit("🏷️ Ändrade roller", roleChanges, ({ id, added, removed }) =>
-    eventlog.logMemberRolesChanged({ discordUserId: id, added, removed }),
+  emit("🏷️ Rolländringar gjorda för hand", roleChanges, (change) =>
+    eventlog.logManualRoleChange(change),
   );
-
-  const total =
-    joined.length + gone.length + renamed.length + roleChanges.length;
-  console.log(
-    `${members.length} members: ${joined.length} new, ${gone.length} gone, ` +
-      `${renamed.length} renamed, ${roleChanges.length} role changes`,
-  );
-
-  if (dryRun) {
-    console.log("--dry-run: nothing posted, snapshot not saved");
-    return;
+  if (auditTruncated) {
+    eventlog.logEvent(
+      "⚠️ Audit-loggen hade fler poster än som hämtades — äldre rolländringar kan saknas i den här rapporten.",
+    );
   }
+
+  const counts = {
+    joined: joined.length,
+    gone: gone.length,
+    renamed: renamed.length,
+    roleChanges: roleChanges.length,
+  };
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  if (dryRun) return { counts, total, dryRun: true, auditUnavailable };
 
   if (total === 0) {
     // Nothing to report, but the snapshot still advances — otherwise a member
-    // who joined and left between two scans would be reported forever.
-    await storage.storeMemberSnapshot(current);
-    return;
+    // who joined and left between two scans would be reported forever, and the
+    // audit cursor would never move past the bot's own entries.
+    await storage.storeMemberSnapshot(current, newAuditCursor);
+    return { counts, total, auditUnavailable };
   }
 
   const posted = await eventlog.flushEventLog();
@@ -215,11 +280,50 @@ async function main() {
         "next run reports this diff again",
     );
   }
-  await storage.storeMemberSnapshot(current);
-  console.log("Reported and snapshot saved");
+  await storage.storeMemberSnapshot(current, newAuditCursor);
+  return { counts, total, auditUnavailable };
 }
 
-main().catch((e) => {
-  console.error("Member scan failed:", e);
-  process.exit(1);
-});
+/** One-line summary, used by both the CLI and the `/scan-scoutid` reply. */
+export function formatScanSummary(result) {
+  if (result.disabled) return `Scannern är av: ${result.disabled}.`;
+  if (result.seeded != null) {
+    return (
+      `Baslinje sparad för ${result.seeded} medlemmar. Inget rapporterat — ` +
+      `första körningen jämför inte mot något. Nästa körning rapporterar ändringar.`
+    );
+  }
+  const c = result.counts;
+  const parts = [
+    `${c.joined} nya`,
+    `${c.gone} borta`,
+    `${c.renamed} namnbyten`,
+    `${c.roleChanges} rolländringar för hand`,
+  ];
+  let text = `${parts.join(", ")}.`;
+  if (result.total === 0) text += " Inget att rapportera.";
+  if (result.auditUnavailable) {
+    text +=
+      "\n⚠️ Rolländringar hoppades över: botens roll saknar **View Audit Log**.";
+  }
+  if (result.dryRun) text += "\n(dry-run: inget postat, snapshot inte sparad)";
+  return text;
+}
+
+// --- CLI entrypoint ---
+//
+// Guarded so importing this module from server.js does not start a scan.
+
+const isCli = process.argv[1]?.endsWith("memberscan.js");
+
+if (isCli) {
+  const dryRun = process.argv.includes("--dry-run");
+  if (dryRun) eventlog.setDryRun(true);
+  try {
+    const result = await runMemberScan({ dryRun });
+    console.log(formatScanSummary(result));
+  } catch (e) {
+    console.error("Member scan failed:", e);
+    process.exit(1);
+  }
+}

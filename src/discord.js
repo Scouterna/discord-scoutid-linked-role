@@ -315,6 +315,108 @@ export async function postChannelMessage(channelId, content) {
   });
 }
 
+// --- Audit log ---
+
+/** Discord audit-log action type for a member's roles being added or removed. */
+export const AUDIT_MEMBER_ROLE_UPDATE = 25;
+
+/**
+ * The id of the newest audit-log entry, or null if the log is empty.
+ *
+ * Used to seed the cursor on a first run: the point is to start reporting from
+ * now on, not to replay however much history Discord still holds.
+ */
+export async function getNewestAuditLogId(guildId, actionType) {
+  const params = new URLSearchParams({ limit: "1" });
+  if (actionType != null) params.set("action_type", String(actionType));
+  return await retryWithBackoff(async () => {
+    const response = await fetch(
+      `https://discord.com/api/v10/guilds/${guildId}/audit-logs?${params}`,
+      { headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` } },
+    );
+    if (response.ok) {
+      const body = await response.json();
+      return body.audit_log_entries?.[0]?.id ?? null;
+    }
+    const error = new Error(
+      `Error fetching audit log for guild ${guildId}: [${response.status}]`,
+    );
+    error.status = response.status;
+    throw error;
+  });
+}
+
+/**
+ * Audit-log entries newer than `after`, oldest first. `after` is required — pass
+ * `getNewestAuditLogId` first to establish one, or this would page through the
+ * guild's whole retained history.
+ *
+ * This is the only source that knows *who* made a change. A snapshot diff can
+ * see that roles moved; only the audit log can say a moderator did it rather
+ * than this bot, which is the whole point of reporting role changes at all.
+ *
+ * **Pagination runs backwards on purpose.** Discord returns entries newest-first
+ * and `after` does not change that: `?after=X&limit=100` yields the 100 *newest*
+ * entries above X, so if 150 accumulated, the 50 closest to X are simply absent.
+ * Advancing the cursor past them would skip them forever. A single
+ * `/refresh-scoutid alla:true` writes one entry per changed user, so filling a
+ * 100-entry window is an ordinary Tuesday here, not a rare edge case. Instead
+ * page down with `before` until an entry at or below the cursor appears.
+ *
+ * Returns `{ entries, truncated }`. `truncated` means the hard cap was reached
+ * before the cursor — the caller must say so rather than imply it saw everything.
+ *
+ * Throws with `status = 403` when the bot's role lacks View Audit Log.
+ */
+export async function getAuditLogEntries(guildId, { actionType, after, cap = 500 }) {
+  if (after == null) throw new Error("getAuditLogEntries requires an `after` cursor");
+  const entries = [];
+  let before = null;
+  let truncated = false;
+  const afterId = BigInt(after);
+
+  while (true) {
+    const params = new URLSearchParams({ limit: "100" });
+    if (actionType != null) params.set("action_type", String(actionType));
+    if (before) params.set("before", before);
+
+    const page = await retryWithBackoff(async () => {
+      const response = await fetch(
+        `https://discord.com/api/v10/guilds/${guildId}/audit-logs?${params}`,
+        { headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` } },
+      );
+      if (response.ok) return await response.json();
+      const error = new Error(
+        `Error fetching audit log for guild ${guildId}: [${response.status}]`,
+      );
+      error.status = response.status;
+      throw error;
+    });
+
+    const batch = page.audit_log_entries ?? [];
+    if (batch.length === 0) break;
+
+    let reachedCursor = false;
+    for (const entry of batch) {
+      if (BigInt(entry.id) <= afterId) {
+        reachedCursor = true;
+        break;
+      }
+      entries.push(entry);
+    }
+    if (reachedCursor || batch.length < 100) break;
+    if (entries.length >= cap) {
+      truncated = true;
+      break;
+    }
+    before = batch[batch.length - 1].id;
+  }
+
+  // Oldest first, so the log reads in the order things happened.
+  entries.reverse();
+  return { entries, truncated };
+}
+
 // --- Slash commands ---
 
 export async function registerGuildCommand(guildId) {
@@ -453,6 +555,40 @@ export async function registerLinkCommand(guildId) {
 }
 
 // --- Interaction verification ---
+
+export async function registerScanCommand(guildId) {
+  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
+  const command = {
+    name: "scan-scoutid",
+    description: "Kör medlemsscannern nu i stället för att vänta på schemat (admin)",
+    default_member_permissions: "8", // ADMINISTRATOR
+    options: [
+      {
+        name: "torrkor",
+        description: "Visa vad som skulle rapporteras utan att posta eller spara",
+        type: 5, // BOOLEAN
+        required: false,
+      },
+    ],
+  };
+
+  return await retryWithBackoff(async () => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${config.DISCORD_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+    if (response.ok) return await response.json();
+    const error = new Error(
+      `Error registering scan command: [${response.status}] ${await response.text()}`,
+    );
+    error.status = response.status;
+    throw error;
+  });
+}
 
 export function verifyInteraction(publicKey, signature, timestamp, body) {
   const ed25519DerPrefix = "302a300506032b6570032100";

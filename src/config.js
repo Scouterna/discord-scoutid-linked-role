@@ -91,13 +91,14 @@ function parseCategoryRoles(str) {
  * Accepted: join, leave, nickname, roles. Empty, "off" or "none" disables the
  * scheduled member scan entirely.
  *
- * `roles` is off by default on purpose, and it is the one worth explaining. The
- * bot already logs every role change *it* makes, at the moment it makes it —
- * turning this on means a scan that also reports the same changes a second time,
- * and a `/refresh-scoutid alla:true` would echo as one line per changed user.
- * What it buys is the only thing the event log genuinely cannot see: roles
- * edited by a human in the Discord UI. Worth it for some servers, noise for
- * others, so it is a choice rather than a default.
+ * `roles` reports only role changes made by *someone other than this bot*, read
+ * from the Discord audit log — the bot already logs its own as it makes them, and
+ * a `/refresh-scoutid alla:true` would otherwise echo as one line per user. What
+ * is left is a moderator editing roles by hand, named.
+ *
+ * It is off by default because it needs a permission the others do not: **View
+ * Audit Log** on the bot's role. With it missing the scan logs a warning and
+ * skips role changes; everything else is unaffected.
  */
 function parseMemberEvents(str) {
   const raw = (str ?? "join,leave,nickname").trim().toLowerCase();

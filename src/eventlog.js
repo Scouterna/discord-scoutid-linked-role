@@ -247,13 +247,18 @@ export function logMemberRenamed({ discordUserId, from, to }) {
 }
 
 /**
- * Roles changed between two scans. Off unless `roles` is in LOG_MEMBER_EVENTS:
- * the bot already logs its own role changes as they happen, so this mostly
- * repeats them. What it uniquely catches is a human editing roles in the Discord
- * UI — see the note on `parseMemberEvents` in config.js.
+ * A role change someone other than the bot made, from the Discord audit log.
+ *
+ * The actor is the reason this line exists. The bot's own role changes are
+ * already logged as they happen, so what is left is a moderator editing roles by
+ * hand — and "who did it" is the first question asked about one of those.
  */
-export function logMemberRolesChanged({ discordUserId, added, removed }) {
-  logEvent(`🏷️ <@${discordUserId}> — ${describeChanges({ added, removed })}`);
+export function logManualRoleChange({ discordUserId, actorId, added, removed, reason }) {
+  const by = actorId ? ` (av <@${actorId}>)` : "";
+  const why = reason ? ` — anledning: ${reason}` : "";
+  logEvent(
+    `🏷️ <@${discordUserId}>${by} — ${describeChanges({ added, removed })}${why}`,
+  );
 }
 
 /**
