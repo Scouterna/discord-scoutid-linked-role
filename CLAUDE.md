@@ -430,15 +430,29 @@ den finns.
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry, att fel bär sin HTTP-status, att mentions alltid tystas |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
+| `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
 
-Två egenskaper är värda att förstå innan man ändrar i dem.
+**`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad
+binder den ingen port och installerar ingen signalhanterare, så testerna kan
+starta den på en egen efemär port och köra rutterna precis som de deployas —
+utan att lägga till en HTTP-klient som beroende. Skulle grinden någon gång bli
+fel märks det direkt: podden skulle avslutas utan att lyssna, `rollout status`
+falla, och `maxUnavailable: 0` hålla de gamla poddarna kvar i trafik.
+
+Tre egenskaper är värda att förstå innan man ändrar i dem.
 
 **En ren guild måste ge noll fynd** (`integration/audit`). Varje falskt positivt i
 någon av de 13 kategorierna dyker upp direkt, och en brusig audit är en ingen
 läser. Det är ett starkare test än det ser ut.
+
+**Signaturkontrollen testas från båda hållen.** Testet genererar ett riktigt
+ed25519-nyckelpar och signerar som Discord gör, så både den giltiga och den
+förfalskade vägen körs. Ett av fallen signerar en kropp och skickar en annan —
+det är den kontrollen som står mellan `/interactions` och vem som helst på
+internet som postar ett påhittat admin-kommando.
 
 **Auditen får inte skriva.** Stubben vägrar varje icke-GET och testet påstår att
 listan är tom, så egenskapen upprätthålls i stället för att antas — det är den

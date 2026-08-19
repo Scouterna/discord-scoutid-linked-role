@@ -205,6 +205,9 @@ What is covered:
   errors carrying their HTTP status, mentions always suppressed.
 - **`unit/eventlog`** — never throws, never delays, never loses the buffer, and
   splits below Discord's 2000-character limit.
+- **`unit/server`** — the interactions endpoint, driven over a real socket with a
+  real ed25519 keypair: forged signatures rejected, PING answered, every command
+  acknowledged within Discord's 3-second window, and the admin gate enforced.
 - **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
   nickname limit.

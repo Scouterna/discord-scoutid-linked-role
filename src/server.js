@@ -768,10 +768,21 @@ async function addDiscordRoles(userId, roleNames) {
   }
 }
 
+// Exported so tests can drive the routes without the module taking over the
+// process. Everything below only happens when this file is the entrypoint —
+// under `node src/server.js`, which is what the Dockerfile's exec-form CMD runs.
+// Importing it binds no port and installs no signal handler.
+export { app };
+
+const isEntrypoint = process.argv[1]?.endsWith("server.js");
+
 const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
-  console.log(`App listening on port ${port}`);
-});
+let server = null;
+if (isEntrypoint) {
+  server = app.listen(port, () => {
+    console.log(`App listening on port ${port}`);
+  });
+}
 
 // --- Graceful shutdown ---
 //
@@ -833,5 +844,7 @@ function shutdown(signal) {
     });
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+if (isEntrypoint) {
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
