@@ -137,10 +137,15 @@ run, with the snapshot in Table Storage.
 
 A poll rather than live events, because this bot speaks HTTP interactions and has
 no gateway connection to receive `guildMemberAdd` on. The trade is a reporting
-delay of up to one interval, and no way to tell a kick from a voluntary leave —
-that needs the audit log. What it avoids is a second bot, a privileged gateway
+delay of up to one interval. What it avoids is a second bot, a privileged gateway
 intent, and the failure mode where a process that was down for an hour has lost
 that hour permanently. This one just reports the change on its next run.
+
+Kicks and bans are told apart from a voluntary leave using the audit log, so a
+departure reads `kickad av @X — anledning: …` rather than just "gone". With no
+audit entry the departure is genuinely unknown, which covers both a voluntary
+leave and an unreadable audit log, so the line says `är inte längre medlem` and
+asserts nothing. A ban outranks a kick for the same person.
 
 It is a CronJob and not a timer in the server because the Deployment runs
 `replicas: 2` — an interval inside it would report every join twice.
@@ -163,7 +168,8 @@ node src/memberscan.js --dry-run   # print what it would report, save nothing
 ```
 
 `/scan-scoutid` runs the same code from Discord for anyone who does not want to
-wait for the schedule, with `torrkor:true` for a dry run.
+wait for the schedule. `torrkor:true` returns the lines in the reply instead of
+posting them, and leaves the snapshot where it is.
 
 The snapshot is saved only after the report is written. A failed write leaves it
 untouched so the next run reports the same diff — in an audit trail a duplicate
@@ -174,6 +180,28 @@ Writes are buffered for a few seconds and packed into as few messages as
 Discord's 2000-character limit allows, so a 143-user resync cannot outrun the
 channel's five-messages-per-five-seconds rate limit. A failed write is logged
 and dropped; it never surfaces to the user whose link just succeeded.
+
+## Tests
+
+```bash
+npm test                  # pure logic — no container, no network, no credentials
+docker compose up -d azurite
+npm run test:integration  # the real scan against real Table Storage
+npm run test:all
+```
+
+The split is deliberate: a suite that cannot run without setup is a suite that
+stops being run, so the majority of the value sits in `npm test`. The integration
+suite runs the actual scan against the emulator several times in sequence, because
+what has gone wrong here has been in the sequence — what gets saved when, and what
+must not get saved.
+
+Each integration case exists because it caught something real, and they are
+labelled with what. Between them they found silent UTF-8 corruption in the
+snapshot chunking, `process.exit` used as control flow mid-function, a field-name
+mismatch that rendered `<@undefined>`, a zero reported for a switched-off
+category, a dry run that still wrote to the channel, and the first kick in a guild
+being swallowed by cursor seeding.
 
 ## Configuration
 
@@ -271,7 +299,7 @@ src/
 ├── roles.js       Role/nickname determination and sync
 ├── audit.js       Consistency checks behind /audit-scoutid and /status-scoutid
 ├── eventlog.js    Buffered event log → #server-logg
-├── memberscan.js  Scheduled member diff (joins, leaves, renames)
+├── memberscan.js  Scheduled member diff (joins, leaves, renames, kicks, bans)
 ├── storage.js     Azure Table Storage (links, tokens, OAuth state)
 ├── register.js    One-time metadata + slash command registration
 └── templates/     Success page served after linking

@@ -317,8 +317,10 @@ export async function postChannelMessage(channelId, content) {
 
 // --- Audit log ---
 
-/** Discord audit-log action type for a member's roles being added or removed. */
+/** Discord audit-log action types this bot reads. */
 export const AUDIT_MEMBER_ROLE_UPDATE = 25;
+export const AUDIT_MEMBER_KICK = 20;
+export const AUDIT_MEMBER_BAN_ADD = 22;
 
 /**
  * The id of the newest audit-log entry, or null if the log is empty.

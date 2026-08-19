@@ -10,7 +10,7 @@ import config from "./config.js";
  *   discord-token  userId          JSON
  *   scoutid-token  userId          JSON
  *   state          state           JSON   + expiresAt   (OAuth, 10 min)
- *   membersnapshot current         chunk0..chunkN + chunks + lastAuditId
+ *   membersnapshot current         chunk0..chunkN + chunks + auditCursors
  *
  * Table Storage has no native TTL, so state rows carry an `expiresAt`
  * (epoch ms) and are treated as absent past that time (lazy expiry).
@@ -196,10 +196,17 @@ export async function getUserIdsWithTokens(type) {
 // how many properties to read back, and stale chunks from a previously larger
 // snapshot are harmless because "Replace" drops properties not written.
 //
-// `lastAuditId` rides along in the same entity for the same reason: it is the
-// Discord audit-log cursor for role-change reporting, and it has to advance in
-// the same atomic write as the member list. Two entities could disagree after a
-// partial failure, and the disagreement would either duplicate or lose entries.
+// `auditCursors` rides along in the same entity for the same reason: they are the
+// Discord audit-log cursors, and they have to advance in the same atomic write as
+// the member list. Two entities could disagree after a partial failure, and the
+// disagreement would either duplicate or lose entries.
+//
+// One cursor **per action type**, as a JSON map of `actionType -> entry id`, not
+// one shared cursor over the whole log. A shared cursor would let a burst of one
+// type crowd out another: `/refresh-scoutid alla:true` writes an entry per changed
+// user, and a kick that happened in the same window would sit below the cap and
+// be skipped forever once the cursor moved past it. Per-type cursors also mean
+// each fetch can filter server-side, so a noisy type costs nothing to a quiet one.
 
 const SNAPSHOT_CHUNK_CHARS = 8 * 1024;
 
@@ -208,9 +215,9 @@ const SNAPSHOT_CHUNK_CHARS = 8 * 1024;
  * — arrays rather than objects because the key names would otherwise be repeated
  * once per member and roughly double the size.
  *
- * `lastAuditId` is the newest Discord audit-log entry already accounted for.
+ * `auditCursors` maps audit-log action type to the newest entry already reported.
  */
-export async function storeMemberSnapshot(members, lastAuditId = null) {
+export async function storeMemberSnapshot(members, auditCursors = null) {
   await ensureTable();
   const json = JSON.stringify(members);
   const entity = { partitionKey: "membersnapshot", rowKey: "current" };
@@ -221,16 +228,21 @@ export async function storeMemberSnapshot(members, lastAuditId = null) {
   entity.chunks = chunks;
   entity.chars = json.length;
   entity.savedAt = Date.now();
-  // Stored as a string: audit-log ids are snowflakes, which exceed the exact
-  // range of a double and would come back rounded as an Edm.Int64 number.
-  entity.lastAuditId = lastAuditId == null ? "" : String(lastAuditId);
+  // Stored as a JSON string, so the snowflake ids stay exact: they exceed the
+  // range a double represents precisely and would come back rounded if written
+  // as numbers.
+  entity.auditCursors = JSON.stringify(auditCursors ?? {});
   await client.upsertEntity(entity, "Replace");
 }
 
 /**
- * Read the snapshot back as `{ members, lastAuditId }`, or null if there has
+ * Read the snapshot back as `{ members, auditCursors }`, or null if there has
  * never been one. A null return is the signal to seed a baseline rather than
  * report every current member as a new arrival.
+ *
+ * Reads the pre-existing single `lastAuditId` as the role-update cursor when
+ * `auditCursors` is absent, so the snapshot written before per-type cursors
+ * existed does not cause the whole role history to be replayed once.
  */
 export async function getMemberSnapshot() {
   await ensureTable();
@@ -247,7 +259,10 @@ export async function getMemberSnapshot() {
     return null;
   }
   try {
-    return { members: JSON.parse(json), lastAuditId: e.lastAuditId || null };
+    let auditCursors = {};
+    if (e.auditCursors) auditCursors = JSON.parse(e.auditCursors);
+    else if (e.lastAuditId) auditCursors = { 25: e.lastAuditId };
+    return { members: JSON.parse(json), auditCursors };
   } catch (err) {
     // A snapshot we cannot parse is worse than none: it would diff into
     // nonsense. Treat it as absent and let the next run reseed.

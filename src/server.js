@@ -547,7 +547,19 @@ async function handleScanCommand(interaction) {
         `🔎 <@${callerId}> körde \`/scan-scoutid\` — ${result.seeded != null ? `baslinje för ${result.seeded} medlemmar` : `${result.total} ändring(ar)`}`,
       );
     }
-    await discord.editInteractionResponse(token, formatScanSummary(result));
+
+    // A dry run posts nothing, so the lines have to come back in the reply or
+    // they are lost — the whole point is seeing them before they are written.
+    let reply = formatScanSummary(result);
+    const lines = result.lines ?? [];
+    if (lines.length > 0) {
+      const body = lines.join("\n");
+      reply +=
+        body.length <= 1600
+          ? `\n\n${body}`
+          : `\n\n${lines.length} rader, för långa för ett svar — kör \`node src/memberscan.js --dry-run\` för hela listan.`;
+    }
+    await discord.editInteractionResponse(token, reply);
   } catch (e) {
     console.error("Error handling scan command:", e);
     await discord.editInteractionResponse(token, `Fel vid scanning: ${e.message}`);

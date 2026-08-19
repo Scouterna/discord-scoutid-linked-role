@@ -39,19 +39,8 @@ const queue = [];
 let timer = null;
 let flushing = false;
 let dropped = 0;
-let dryRun = false;
-
-/**
- * Print lines to stdout instead of sending them. Used by `memberscan.js
- * --dry-run` so a scan can be inspected before it is scheduled, including on a
- * machine where LOG_CHANNEL_ID is not set at all.
- */
-export function setDryRun(on) {
-  dryRun = Boolean(on);
-}
-
 function enabled() {
-  return dryRun || Boolean(config.LOG_CHANNEL_ID);
+  return Boolean(config.LOG_CHANNEL_ID);
 }
 
 /** Discord renders this in each viewer's own timezone. */
@@ -67,11 +56,6 @@ function stamp() {
  */
 export function logEvent(line) {
   if (!enabled()) return;
-  if (dryRun) {
-    // `<t:...>` only renders inside Discord; a terminal wants a real clock.
-    console.log(`[dry-run] ${new Date().toISOString().slice(11, 19)} ${line}`);
-    return;
-  }
   if (queue.length >= MAX_QUEUE_LINES) {
     dropped++;
     return;
@@ -215,35 +199,57 @@ function humanAge(ms) {
  * visible: a Discord account created minutes ago joining a server for 14–18 year
  * olds is worth a second look, and it is invisible in the member list.
  */
-export function logMemberJoined({ discordUserId, name, accountCreatedAt, isBot }) {
+// These four **return** their line instead of logging it. The scan needs to be
+// able to build a report without writing one: `/scan-scoutid torrkor:true` used
+// to format its lines through `logEvent`, which queued them and let the flush
+// timer post them a few seconds later — a dry run that was not dry. Handing the
+// caller a string moves that decision to the caller, where it belongs, and
+// removes the need for a process-global dry-run flag that would have swallowed
+// unrelated events happening concurrently in the same pod.
+
+/**
+ * Someone new in the guild. The account age is there to make throwaway accounts
+ * visible: a Discord account created minutes ago joining a server for 14–18 year
+ * olds is worth a second look, and it is invisible in the member list.
+ */
+export function formatMemberJoined({ discordUserId, name, accountCreatedAt, isBot }) {
   const age = accountCreatedAt
     ? ` — konto skapat för ${humanAge(Date.now() - accountCreatedAt)} sedan`
     : "";
-  logEvent(
-    `📥 **${name}** (<@${discordUserId}>)${isBot ? " 🤖 bot" : ""} finns i servern${age}`,
-  );
+  return `📥 **${name}** (<@${discordUserId}>)${isBot ? " 🤖 bot" : ""} finns i servern${age}`;
 }
 
 /**
- * Someone is gone. Voluntary leave, kick and ban are indistinguishable here —
- * telling them apart needs the audit log, and the bot has no View Audit Log
- * permission. Say "borta", not "lämnade", rather than assert something unknown.
+ * Someone is gone, and — since the bot gained View Audit Log — *how*.
+ *
+ * `removal` is `{ kind: "kick" | "ban", actorId, reason }` when the audit log
+ * shows the departure was involuntary, and null when it does not. Null genuinely
+ * means "no such entry", which covers a voluntary leave and an unreadable audit
+ * log alike, so the wording stays "är inte längre medlem" rather than asserting
+ * a leave that was never observed.
  *
  * `stillLinked` matters: a link left behind is what `/audit-scoutid` will report
  * as an orphan later, so naming it here saves the connection being made twice.
  */
-export function logMemberGone({ discordUserId, name, stillLinked }) {
+export function formatMemberGone({ discordUserId, name, stillLinked, removal }) {
   const link = stillLinked
     ? " — länkningen kvarstår i storage (`/audit-scoutid` listar den som orphan)"
     : "";
-  logEvent(`📤 **${name}** (<@${discordUserId}>) är inte längre medlem${link}`);
+  const why = removal?.reason ? ` — anledning: ${removal.reason}` : "";
+  const by = removal?.actorId ? ` av <@${removal.actorId}>` : "";
+
+  if (removal?.kind === "kick") {
+    return `👟 **${name}** (<@${discordUserId}>) **kickad**${by}${why}${link}`;
+  }
+  if (removal?.kind === "ban") {
+    return `⛔ **${name}** (<@${discordUserId}>) **bannad**${by}${why}${link}`;
+  }
+  return `📤 **${name}** (<@${discordUserId}>) är inte längre medlem${link}`;
 }
 
 /** A nickname changed between two scans, whoever changed it. */
-export function logMemberRenamed({ discordUserId, from, to }) {
-  logEvent(
-    `✏️ <@${discordUserId}> — smeknamn: \`${from || "—"}\` → \`${to || "—"}\``,
-  );
+export function formatMemberRenamed({ discordUserId, from, to }) {
+  return `✏️ <@${discordUserId}> — smeknamn: \`${from || "—"}\` → \`${to || "—"}\``;
 }
 
 /**
@@ -253,12 +259,10 @@ export function logMemberRenamed({ discordUserId, from, to }) {
  * already logged as they happen, so what is left is a moderator editing roles by
  * hand — and "who did it" is the first question asked about one of those.
  */
-export function logManualRoleChange({ discordUserId, actorId, added, removed, reason }) {
+export function formatManualRoleChange({ discordUserId, actorId, added, removed, reason }) {
   const by = actorId ? ` (av <@${actorId}>)` : "";
   const why = reason ? ` — anledning: ${reason}` : "";
-  logEvent(
-    `🏷️ <@${discordUserId}>${by} — ${describeChanges({ added, removed })}${why}`,
-  );
+  return `🏷️ <@${discordUserId}>${by} — ${describeChanges({ added, removed })}${why}`;
 }
 
 /**

@@ -15,10 +15,16 @@
  *   diff-based report would mostly repeat itself. Filtering the audit log to
  *   "not this bot" leaves exactly what is otherwise invisible — a moderator
  *   editing roles in the Discord UI — and names them while doing it.
+ * - **Kicks and bans** come from the audit log too, and turn a departure from
+ *   "is no longer a member" into "kicked by X, reason Y". The member list cannot
+ *   tell an involuntary removal from someone leaving on their own; nothing in the
+ *   diff distinguishes them.
  *
- * The audit log needs View Audit Log on the bot's role. Without it, role
- * reporting is skipped with a warning rather than falling back to the diff:
- * quietly reporting the bot's own changes is the noise this was built to avoid.
+ * The audit log needs View Audit Log on the bot's role. The two categories
+ * degrade differently without it, on purpose. Role changes are **skipped** with a
+ * warning, because falling back to the diff would report the bot's own changes —
+ * the noise this was built to avoid. Departures still report, just without the
+ * kick/ban distinction, because the plain line is true either way.
  *
  * ## Why a CronJob and not a timer in the server
  *
@@ -80,15 +86,62 @@ function displayName(entry) {
  * A cap that hides what it dropped reads as "nothing else happened", so the
  * summary always names the count.
  */
-function emit(label, items, render) {
+function emit(sink, label, items, render) {
   if (items.length === 0) return;
   if (items.length > MAX_LINES_PER_CATEGORY) {
-    eventlog.logEvent(
+    sink(
       `${label}: **${items.length}** stycken — för många att lista rad för rad, kör \`/audit-scoutid\` för detaljer`,
     );
     return;
   }
-  for (const item of items) render(item);
+  for (const item of items) sink(render(item));
+}
+
+/**
+ * Fetch new entries of one action type and return them with the advanced cursor.
+ *
+ * A missing cursor seeds from the newest entry and returns nothing: the point of
+ * a first run is to start reporting from now, not to replay however much history
+ * Discord still retains.
+ */
+async function fetchAuditType(guildId, actionType, cursor) {
+  if (cursor == null) {
+    const newest = await discord.getNewestAuditLogId(guildId, actionType);
+    // An empty log for this type seeds to the beginning, not to "now". Kicks and
+    // bans are rare, so a guild that has never had one returns null here — and
+    // seeding null would leave the cursor null, making the *next* run seed again
+    // on the very first kick that ever happens and swallow it. There is no
+    // history to skip when there is no history.
+    return { entries: [], cursor: newest ?? "0", truncated: false };
+  }
+  const { entries, truncated } = await discord.getAuditLogEntries(guildId, {
+    actionType,
+    after: cursor,
+  });
+  return {
+    entries,
+    cursor: entries.length > 0 ? entries[entries.length - 1].id : cursor,
+    truncated,
+  };
+}
+
+/**
+ * Index kick and ban entries by the member they targeted, so a departure can be
+ * annotated with how it happened.
+ *
+ * Bans win over kicks when both exist for one person: a ban is the stronger and
+ * later fact, and reporting "kicked" for someone who ended up banned understates
+ * what happened.
+ */
+function removalsByUser(kickEntries, banEntries) {
+  const map = new Map();
+  for (const e of kickEntries) {
+    map.set(e.target_id, { kind: "kick", actorId: e.user_id, reason: e.reason ?? null });
+  }
+  for (const e of banEntries) {
+    map.set(e.target_id, { kind: "ban", actorId: e.user_id, reason: e.reason ?? null });
+  }
+  return map;
 }
 
 /**
@@ -142,51 +195,53 @@ export async function runMemberScan({ dryRun = false } = {}) {
   const stored = await storage.getMemberSnapshot();
   const previous = stored?.members ?? null;
 
-  // Role reporting needs both the audit log and the bot's own id to filter by.
-  // A 403 here means the bot's role lacks View Audit Log; anything else is a
-  // real failure and should stop the run.
+  // Which audit-log types this run needs. `leave` wants kicks and bans so a
+  // departure can say how it happened; `roles` wants role updates.
+  const cursors = { ...(stored?.auditCursors ?? {}) };
+  const types = [];
+  if (wanted.has("roles")) types.push(discord.AUDIT_MEMBER_ROLE_UPDATE);
+  if (wanted.has("leave")) {
+    types.push(discord.AUDIT_MEMBER_KICK, discord.AUDIT_MEMBER_BAN_ADD);
+  }
+
+  // A 403 means the bot's role lacks View Audit Log; anything else is a real
+  // failure and should stop the run.
   let auditUnavailable = false;
-  let auditEntries = [];
   let auditTruncated = false;
-  let newAuditCursor = stored?.lastAuditId ?? null;
+  const byType = new Map();
   let botUserId = null;
 
-  if (wanted.has("roles")) {
+  if (types.length > 0) {
     try {
       botUserId = await discord.getCurrentBotUserId();
-      if (newAuditCursor == null) {
-        // First run with roles enabled: start from now rather than replaying
-        // however much history Discord still retains.
-        newAuditCursor = await discord.getNewestAuditLogId(
-          guildId,
-          discord.AUDIT_MEMBER_ROLE_UPDATE,
-        );
-      } else {
-        const result = await discord.getAuditLogEntries(guildId, {
-          actionType: discord.AUDIT_MEMBER_ROLE_UPDATE,
-          after: newAuditCursor,
-        });
-        auditEntries = result.entries;
-        auditTruncated = result.truncated;
-        if (auditEntries.length > 0) {
-          newAuditCursor = auditEntries[auditEntries.length - 1].id;
-        }
+      for (const type of types) {
+        const r = await fetchAuditType(guildId, type, cursors[type] ?? null);
+        byType.set(type, r.entries);
+        cursors[type] = r.cursor;
+        auditTruncated = auditTruncated || r.truncated;
       }
     } catch (e) {
       if (e?.status !== 403) throw e;
       auditUnavailable = true;
+      byType.clear();
       console.warn(
-        "Cannot read the audit log (403) — role reporting needs View Audit Log " +
-          "on the bot's role. Skipping role changes; nothing else is affected.",
+        "Cannot read the audit log (403) — needs View Audit Log on the bot's " +
+          "role. Role changes are skipped; departures still report, without the " +
+          "kick/ban distinction.",
       );
     }
   }
+  const auditEntries = byType.get(discord.AUDIT_MEMBER_ROLE_UPDATE) ?? [];
+  const removals = removalsByUser(
+    byType.get(discord.AUDIT_MEMBER_KICK) ?? [],
+    byType.get(discord.AUDIT_MEMBER_BAN_ADD) ?? [],
+  );
 
   // First run, or a snapshot that could not be parsed. Seeding silently is the
   // point: reporting every existing member as a new arrival would bury the
   // channel and teach everyone to ignore it.
   if (!previous) {
-    if (!dryRun) await storage.storeMemberSnapshot(current, newAuditCursor);
+    if (!dryRun) await storage.storeMemberSnapshot(current, cursors);
     return { seeded: members.length, auditUnavailable, enabled: [...wanted] };
   }
 
@@ -220,9 +275,16 @@ export async function runMemberScan({ dryRun = false } = {}) {
 
   const botIds = new Set(members.filter((m) => m.user?.bot).map((m) => m.user.id));
 
+  // A dry run collects its lines and writes nothing. Routing through a sink
+  // rather than a global flag keeps this run's choice local to this run: the
+  // server handles requests concurrently, and a process-wide dry-run switch would
+  // have silenced an unrelated linking that happened to be logging at the time.
+  const lines = [];
+  const sink = dryRun ? (line) => lines.push(line) : eventlog.logEvent;
+
   if (wanted.has("join")) {
-    emit("📥 Nya medlemmar", joined, ({ id, entry }) =>
-      eventlog.logMemberJoined({
+    emit(sink, "📥 Nya medlemmar", joined, ({ id, entry }) =>
+      eventlog.formatMemberJoined({
         discordUserId: id,
         name: displayName(entry),
         accountCreatedAt: accountCreatedAt(id),
@@ -231,43 +293,49 @@ export async function runMemberScan({ dryRun = false } = {}) {
     );
   }
   if (wanted.has("leave")) {
-    emit("📤 Borta ur servern", gone, ({ id, entry }) =>
-      eventlog.logMemberGone({
+    emit(sink, "📤 Borta ur servern", gone, ({ id, entry }) =>
+      eventlog.formatMemberGone({
         discordUserId: id,
         name: displayName(entry),
         stillLinked: linkedIds.has(id),
+        removal: removals.get(id) ?? null,
       }),
     );
   }
-  emit("✏️ Ändrade smeknamn", renamed, ({ id, from, to }) =>
-    eventlog.logMemberRenamed({ discordUserId: id, from, to }),
+  emit(sink, "✏️ Ändrade smeknamn", renamed, ({ id, from, to }) =>
+    eventlog.formatMemberRenamed({ discordUserId: id, from, to }),
   );
-  emit("🏷️ Rolländringar gjorda för hand", roleChanges, (change) =>
-    eventlog.logManualRoleChange(change),
+  emit(sink, "🏷️ Rolländringar gjorda för hand", roleChanges, (change) =>
+    eventlog.formatManualRoleChange(change),
   );
   if (auditTruncated) {
-    eventlog.logEvent(
-      "⚠️ Audit-loggen hade fler poster än som hämtades — äldre rolländringar kan saknas i den här rapporten.",
+    sink(
+      "⚠️ Audit-loggen hade fler poster än som hämtades — äldre poster kan saknas i den här rapporten.",
     );
   }
 
+  const removed = gone.filter((g) => removals.has(g.id)).length;
   const counts = {
     joined: joined.length,
     gone: gone.length,
+    // Of those gone, how many the audit log shows were kicked or banned. Counted
+    // rather than folded into `gone` so the summary can say "3 borta (1 kickad)"
+    // instead of hiding a moderation action inside a departure count.
+    removedByMod: removed,
     renamed: renamed.length,
     roleChanges: roleChanges.length,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   if (dryRun) {
-    return { counts, total, dryRun: true, auditUnavailable, enabled: [...wanted] };
+    return { counts, total, dryRun: true, auditUnavailable, enabled: [...wanted], lines };
   }
 
   if (total === 0) {
     // Nothing to report, but the snapshot still advances — otherwise a member
     // who joined and left between two scans would be reported forever, and the
     // audit cursor would never move past the bot's own entries.
-    await storage.storeMemberSnapshot(current, newAuditCursor);
+    await storage.storeMemberSnapshot(current, cursors);
     return { counts, total, auditUnavailable, enabled: [...wanted] };
   }
 
@@ -282,7 +350,7 @@ export async function runMemberScan({ dryRun = false } = {}) {
         "next run reports this diff again",
     );
   }
-  await storage.storeMemberSnapshot(current, newAuditCursor);
+  await storage.storeMemberSnapshot(current, cursors);
   return { counts, total, auditUnavailable, enabled: [...wanted] };
 }
 
@@ -304,7 +372,10 @@ export function formatScanSummary(result) {
   const on = new Set(result.enabled ?? []);
   const parts = [];
   if (on.has("join")) parts.push(`${c.joined} nya`);
-  if (on.has("leave")) parts.push(`${c.gone} borta`);
+  if (on.has("leave")) {
+    const mod = c.removedByMod > 0 ? ` (varav ${c.removedByMod} kickad/bannad)` : "";
+    parts.push(`${c.gone} borta${mod}`);
+  }
   if (on.has("nickname")) parts.push(`${c.renamed} namnbyten`);
   if (on.has("roles") && !result.auditUnavailable) {
     parts.push(`${c.roleChanges} rolländringar för hand`);
@@ -330,9 +401,9 @@ const isCli = process.argv[1]?.endsWith("memberscan.js");
 
 if (isCli) {
   const dryRun = process.argv.includes("--dry-run");
-  if (dryRun) eventlog.setDryRun(true);
   try {
     const result = await runMemberScan({ dryRun });
+    for (const line of result.lines ?? []) console.log(`  ${line}`);
     console.log(formatScanSummary(result));
   } catch (e) {
     console.error("Member scan failed:", e);

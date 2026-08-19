@@ -306,6 +306,26 @@ integrationsroll, så biten sätts för hand i Server Settings → Roles; Terraf
 äger den inte. Saknas den loggar scannern en varning och hoppar över kategorin —
 inget annat påverkas. Den ligger av som default just därför.
 
+**Kick och ban skiljs från frivilligt utträde** med samma behörighet. Saknas en
+audit-post är avgången genuint okänd — det täcker både frivilligt utträde och en
+oläsbar audit-logg — så raden säger `är inte längre medlem` och påstår ingenting.
+Med en post blir det `kickad av @X — anledning: …` eller `bannad av @X`. Ban slår
+kick när båda finns för samma person; att rapportera "kickad" för någon som
+slutade bannad underdriver vad som hände. Kategorierna degraderar **olika** utan
+behörigheten, med flit: rolländringar *hoppas över* (fallback till diffen hade gett
+botens eget eko), medan avgångar rapporteras ändå, bara utan uppdelningen.
+
+**En markör per action-typ**, inte en delad över hela loggen. En delad hade låtit
+en skur av en typ tränga ut en annan: `/refresh-scoutid alla:true` skriver en post
+per ändrad användare, och en kick i samma fönster hade legat under taket och
+hoppats över för alltid när markören flyttades förbi. Per typ kan varje hämtning
+dessutom filtrera på serversidan, så en pratig typ kostar en tyst ingenting.
+
+**En tom logg seedar till början, inte till "nu".** Kickar och bannar är sällsynta,
+så en guild som aldrig haft någon returnerar `null` — och att seeda `null` lämnar
+markören `null`, vilket gör att nästa körning seedar igen på den allra första
+kicken som händer och sväljer den. Finns ingen historik finns inget att hoppa över.
+
 **Markören är ett audit-logg-id, inte en tidsstämpel**, och den sparas i samma
 entity som snapshoten. Två entities hade kunnat hamna i otakt efter ett halvt
 misslyckande, och otakten hade antingen dubblerat eller tappat poster.
@@ -328,7 +348,14 @@ Två egenskaper som måste hålla:
 
 `/scan-scoutid` kör samma `runMemberScan` som CronJobbet, direkt, för den som
 inte vill vänta på schemat. `torrkor:true` visar vad den skulle rapportera utan
-att posta eller flytta snapshoten. En manuell körning kan överlappa CronJobbet;
+att posta eller flytta snapshoten — raderna kommer tillbaka i svaret i stället.
+
+**Dry-run samlar rader i en sink, inte via en global flagga.** Formatterarna
+returnerar strängar (`formatMemberJoined` osv.) i stället för att logga själva.
+Tidigare loggade de internt, så `torrkor:true` köade raderna och flush-timern
+postade dem några sekunder senare — en dry-run som inte var torr. En
+processglobal dry-run-flagga hade varit fel lösning: servern hanterar
+förfrågningar samtidigt, så den hade tystat en länkning som råkade logga just då. En manuell körning kan överlappa CronJobbet;
 värsta fallet är att samma ändring rapporteras två gånger, vilket är den
 avvägning hela loggen gör med flit.
 
@@ -362,6 +389,29 @@ Boten kan skriva i kanalen enbart tack vare en channel overwrite i infra-repot:
 dess roll har `402653184`, alltså Manage Roles + Manage Nicknames och varken
 View Channels eller Send Messages. **En 403 här betyder att overwriten saknas,
 inte att token är fel.**
+
+## Tester
+
+```bash
+npm test                  # ren logik, ingen uppsättning
+docker compose up -d azurite
+npm run test:integration  # hela flödet mot riktig Table Storage
+npm run test:all
+```
+
+Uppdelningen är avsiktlig. `npm test` täcker formatterare, sammanfattningen och
+audit-pagineringen utan container, nätverk eller credentials, så den blir körd. En
+svit som inte går att köra utan uppsättning är en svit som slutar köras.
+Integrationstestet kör den *riktiga* scanningen mot Azurite flera gånger i följd,
+eftersom det som gått fel har suttit i sekvensen — vad som sparas när, och vad som
+inte får sparas.
+
+Varje fall i integrationstestet finns för att det fångat något riktigt. Buggar de
+hittade: tyst UTF-8-korruption i chunkningen, `process.exit` som kontrollflöde
+mitt i en funktion, ett namnfel som gav `<@undefined>`, en nolla rapporterad för
+en avstängd kategori, dry-run som ändå skrev till kanalen, och första kicken i en
+guild som svaldes av markör-seedningen. Låt dem stå kvar med sina etiketter — de
+beskriver felen, inte bara koden.
 
 ## Audit och konsistenskontroll
 
