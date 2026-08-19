@@ -187,7 +187,7 @@ export async function runMemberScan({ dryRun = false } = {}) {
   // channel and teach everyone to ignore it.
   if (!previous) {
     if (!dryRun) await storage.storeMemberSnapshot(current, newAuditCursor);
-    return { seeded: members.length, auditUnavailable };
+    return { seeded: members.length, auditUnavailable, enabled: [...wanted] };
   }
 
   const joined = [];
@@ -259,14 +259,16 @@ export async function runMemberScan({ dryRun = false } = {}) {
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (dryRun) return { counts, total, dryRun: true, auditUnavailable };
+  if (dryRun) {
+    return { counts, total, dryRun: true, auditUnavailable, enabled: [...wanted] };
+  }
 
   if (total === 0) {
     // Nothing to report, but the snapshot still advances — otherwise a member
     // who joined and left between two scans would be reported forever, and the
     // audit cursor would never move past the bot's own entries.
     await storage.storeMemberSnapshot(current, newAuditCursor);
-    return { counts, total, auditUnavailable };
+    return { counts, total, auditUnavailable, enabled: [...wanted] };
   }
 
   const posted = await eventlog.flushEventLog();
@@ -281,7 +283,7 @@ export async function runMemberScan({ dryRun = false } = {}) {
     );
   }
   await storage.storeMemberSnapshot(current, newAuditCursor);
-  return { counts, total, auditUnavailable };
+  return { counts, total, auditUnavailable, enabled: [...wanted] };
 }
 
 /** One-line summary, used by both the CLI and the `/scan-scoutid` reply. */
@@ -293,15 +295,25 @@ export function formatScanSummary(result) {
       `första körningen jämför inte mot något. Nästa körning rapporterar ändringar.`
     );
   }
+  // Only count the categories that were actually examined. Printing "0
+  // rolländringar" for a switched-off category reads as "we looked and found
+  // none", which is exactly the wrong conclusion — and it did mislead once, when
+  // a scheduled run started 82 seconds before the ConfigMap enabling `roles`
+  // landed and still reported a zero for it.
   const c = result.counts;
-  const parts = [
-    `${c.joined} nya`,
-    `${c.gone} borta`,
-    `${c.renamed} namnbyten`,
-    `${c.roleChanges} rolländringar för hand`,
-  ];
-  let text = `${parts.join(", ")}.`;
-  if (result.total === 0) text += " Inget att rapportera.";
+  const on = new Set(result.enabled ?? []);
+  const parts = [];
+  if (on.has("join")) parts.push(`${c.joined} nya`);
+  if (on.has("leave")) parts.push(`${c.gone} borta`);
+  if (on.has("nickname")) parts.push(`${c.renamed} namnbyten`);
+  if (on.has("roles") && !result.auditUnavailable) {
+    parts.push(`${c.roleChanges} rolländringar för hand`);
+  }
+  let text = parts.length > 0 ? `${parts.join(", ")}.` : "Inga kategorier på.";
+  if (result.total === 0 && parts.length > 0) text += " Inget att rapportera.";
+
+  const off = ["join", "leave", "nickname", "roles"].filter((k) => !on.has(k));
+  if (off.length > 0) text += ` (avstängt: ${off.join(", ")})`;
   if (result.auditUnavailable) {
     text +=
       "\n⚠️ Rolländringar hoppades över: botens roll saknar **View Audit Log**.";
