@@ -212,3 +212,43 @@ test("a whole-guild resync is one summary plus only the changed users", async ()
   assert.doesNotMatch(all, /<@2>/);
   assert.doesNotMatch(all, /<@3>/);
 });
+
+test("a rename alone counts as a change", async () => {
+  // It did not, so a sync whose only effect was correcting someone's name from
+  // ScoutNet reported "0 ändrade" and printed no line at all. Invisible while a
+  // human ran the command and watched the reply; permanently invisible once the
+  // CronJob runs it at four in the morning.
+  eventlog.logSyncAll({
+    callerId: "42",
+    results: [
+      { discordUserId: "1", added: [], removed: [], nickname: "Anna A (AL12)" },
+    ],
+  });
+  const { posts: sent } = await drain();
+  const all = sent.map((p) => p.content).join("\n");
+  assert.match(all, /1 ändrade/);
+  assert.match(all, /<@1>/);
+  assert.match(all, /Anna A \(AL12\)/);
+});
+
+test("the scheduled sync logs a summary even when nothing changed", async () => {
+  // Deliberately different from the per-user lines, which stay silent. A
+  // scheduled job that logs nothing is indistinguishable from a scheduled job
+  // that stopped running — and this one exists precisely so nobody has to
+  // remember it, so its heartbeat has to be visible. One line a night.
+  eventlog.logScheduledSyncAll({
+    results: [
+      { discordUserId: "1", added: [], removed: [] },
+      { discordUserId: "2", added: [], removed: [] },
+    ],
+  });
+  const { posts: sent } = await drain();
+  const all = sent.map((p) => p.content).join("\n");
+  assert.match(all, /Nattlig rollsynk/);
+  assert.match(all, /2 användare, 0 ändrade, 0 fel/);
+  // Still no per-user noise.
+  assert.doesNotMatch(all, /<@1>/);
+  // And no caller, because there was none — this is where `<@undefined>` would
+  // show up if the summary line were copied from logSyncAll.
+  assert.doesNotMatch(all, /undefined/);
+});
