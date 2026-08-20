@@ -227,6 +227,10 @@ What is covered:
 - **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
   nickname limit, and that a ScoutNet outage changes nothing at all.
+- **`integration/metadata`** — that the Linked Role push carries `verified: true`,
+  that a dead ScoutID token costs the user only the display fields and never that
+  flag, and that "no stored token" is reported apart from "failed" — they need
+  different remedies and only one of them has one.
 - **`integration/syncall`** — `syncAllUserRoles`: that guild state is fetched
   *once* per run rather than once per user, that an unchanged server writes
   nothing, and that a dry run writes nothing at all. Cost properties rather than
