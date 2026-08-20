@@ -82,6 +82,15 @@ jobs:
           chmod 600 "$RUNNER_TEMP/.kube/config"
           echo "KUBECONFIG=$RUNNER_TEMP/.kube/config" >> "$GITHUB_ENV"
 
+      - name: Check for RBAC drift
+        # k8s/rbac-github-deployer.yaml is the source of truth for CI's own
+        # permissions, but it is applied by hand — the deployer has no rights on
+        # `roles`, and one that could widen its own access would not be
+        # restricted. Nothing keeps the two in step, and they drifted once
+        # already. Warns, never fails: the test gate protects production from bad
+        # code, and permission drift is not that.
+        run: scripts/check-rbac-drift.sh
+
       - name: Apply manifests
         run: |
           # Edits the ephemeral checkout only; the committed kustomization.yaml

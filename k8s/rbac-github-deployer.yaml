@@ -23,6 +23,11 @@
 # can only ever modify the objects belonging to this application and never, say,
 # another namespace tenant's Deployment that happens to be reachable.
 #
+# The deploy warns when the live Role stops matching this file, which is only
+# possible because of the self-read grant below. It warns rather than fails: the
+# test gate exists to keep bad code out of production, and coupling that to
+# documentation drift would block an unrelated deploy.
+#
 # **A new CronJob whose image tag changes on every deploy must be named here.**
 # That is not obvious, because `discord-scoutid-backup` never needed it in
 # practice: its image is a pinned `azure-cli` version, so `kubectl apply` always
@@ -57,6 +62,19 @@ rules:
   - apiGroups: ["batch"]
     resources: ["cronjobs", "jobs"]
     verbs: ["get", "list", "watch", "create"]
+
+  # Read this Role, and only this Role. Not escalation — knowing your own
+  # permissions does not widen them — and it is what lets the deploy compare the
+  # live rules against this file and warn when they diverge. They diverged once
+  # already: the `batch` rules were added with `kubectl edit`, so nothing recorded
+  # that the file had gone stale until a deploy failed.
+  #
+  # Deliberately `get` and not `list`: a list would return every Role in the
+  # namespace, which is more than this needs to know.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    resourceNames: ["github-deployer"]
+    verbs: ["get"]
 
   # --- Mutate, pinned to this application's named objects ---
   - apiGroups: ["apps"]

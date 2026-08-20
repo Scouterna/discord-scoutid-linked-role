@@ -68,6 +68,17 @@ saknade källan, och att applya den synkar även annoteringen.
 
 Den ligger med flit **inte** i kustomizationen: deployern har inga rättigheter på
 `roles`, och en deployer som kan bredda sin egen åtkomst är inte begränsad.
+**Deployen varnar när klustret slutat matcha filen** — det är vad regeln som
+låter deployern läsa sin *egen* roll finns till för. Att veta sina egna
+rättigheter är ingen utökning av dem, och `kubectl diff` går inte: det kräver
+server-dry-run, alltså patch. Kontrollen varnar men fäller aldrig deployen;
+testgrinden finns för att hålla trasig kod borta från produktion, och
+behörighetsdrift är inte det.
+
+```bash
+scripts/check-rbac-drift.sh          # jämför levande roll mot filen
+```
+
 Applya för hand, med en kubeconfig som har RBAC-rättigheter:
 
 ```bash
