@@ -201,7 +201,7 @@ function humanAge(ms) {
  * olds is worth a second look, and it is invisible in the member list.
  */
 // These four **return** their line instead of logging it. The scan needs to be
-// able to build a report without writing one: `/scan-scoutid torrkor:true` used
+// able to build a report without writing one: `/scan-scoutid dryrun:true` used
 // to format its lines through `logEvent`, which queued them and let the flush
 // timer post them a few seconds later — a dry run that was not dry. Handing the
 // caller a string moves that decision to the caller, where it belongs, and
@@ -287,14 +287,52 @@ export function formatManualRoleChange({
  * a run over 150 unchanged users must not produce 150 log entries.
  */
 export function logSyncAll({ callerId, results }) {
-  const errors = results.filter((r) => r.error);
-  const changed = results.filter(
-    (r) =>
-      !r.error && ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
-  );
+  const { changed, errors } = partitionSyncResults(results);
   logEvent(
     `🔁 <@${callerId}> körde \`/refresh-scoutid alla:true\` — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,
   );
+  logSyncDetail(changed, errors);
+}
+
+/**
+ * The same report for the nightly CronJob, which has no caller to name.
+ *
+ * The summary line is written **even when nothing changed**, unlike the
+ * per-user lines. A scheduled job that logs nothing is indistinguishable from a
+ * scheduled job that stopped running, and this one exists precisely so that
+ * nobody has to remember it — so its heartbeat has to be visible. One line a
+ * night is a price worth paying for that.
+ */
+export function logScheduledSyncAll({ results }) {
+  const { changed, errors } = partitionSyncResults(results);
+  logEvent(
+    `🌙 Nattlig rollsynk — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,
+  );
+  logSyncDetail(changed, errors);
+}
+
+/**
+ * A rename counts as a change, the same way `logSync` already counts it. It did
+ * not, so a sync whose only effect was fixing someone's name from ScoutNet
+ * reported "0 ändrade" and printed no line at all. Tolerable while this only ran
+ * when an admin typed the command and watched the reply; not once it runs
+ * nightly with nobody watching.
+ */
+function partitionSyncResults(results) {
+  return {
+    errors: results.filter((r) => r.error),
+    changed: results.filter(
+      (r) =>
+        !r.error &&
+        ((r.added?.length ?? 0) > 0 ||
+          (r.removed?.length ?? 0) > 0 ||
+          Boolean(r.nickname)),
+    ),
+  };
+}
+
+/** One line per changed user, then one per error. Unchanged users stay silent. */
+function logSyncDetail(changed, errors) {
   for (const r of changed) {
     if (wasStripped(r)) {
       logEvent(

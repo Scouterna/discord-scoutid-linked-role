@@ -20,7 +20,10 @@ hardcoded.
    the user's real name plus a category suffix, e.g. `Ida Sandholdt (12)`.
 
 Roles are re-synced by `/refresh-scoutid`, so a user who gets a troop assigned in
-ScoutNet later can move themselves off the waiting role without admin help.
+ScoutNet later can move themselves off the waiting role without admin help — and
+a nightly CronJob runs the same sync across the whole server, so nobody has to
+remember to. Before it existed, a participant who got a troop assigned sat on the
+waiting role until an admin happened to run the command.
 
 ### Security boundary
 
@@ -96,7 +99,8 @@ reports it.
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
-| `/scan-scoutid`                     | Admin    | Run the member scan now; `torrkor:true` for a dry run      |
+| `/scan-scoutid`                     | Admin    | Run the member scan now; `dryrun:true` for a dry run      |
+| `/refresh-scoutid dryrun:true`      | —        | Show what would change without changing it                |
 
 `/audit-scoutid` checks for missing roles, orphaned links, links with no stored
 OAuth tokens, cancelled registrations, nickname drift, unmapped `fee_id`s,
@@ -168,7 +172,7 @@ node src/memberscan.js --dry-run   # print what it would report, save nothing
 ```
 
 `/scan-scoutid` runs the same code from Discord for anyone who does not want to
-wait for the schedule. `torrkor:true` returns the lines in the reply instead of
+wait for the schedule. `dryrun:true` returns the lines in the reply instead of
 posting them, and leaves the snapshot where it is.
 
 The snapshot is saved only after the report is written. A failed write leaves it
@@ -220,6 +224,11 @@ What is covered:
 - **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
   nickname limit, and that a ScoutNet outage changes nothing at all.
+- **`integration/syncall`** — `syncAllUserRoles`: that guild state is fetched
+  *once* per run rather than once per user, that an unchanged server writes
+  nothing, and that a dry run writes nothing at all. Cost properties rather than
+  correctness ones, because they are what decide whether it can run on a
+  schedule.
 - **`integration/health`** — `/readyz` against a real table, which is the only
   way to test the answer that matters: 200 when storage genuinely works.
 - **`integration/audit`** — all 13 categories, and that the audit never writes.

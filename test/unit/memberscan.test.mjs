@@ -104,7 +104,7 @@ test("formatManualRoleChange names the actor", () => {
 
 test("the member formatters return strings and never write", () => {
   // Regression: these used to call logEvent internally, which made
-  // `/scan-scoutid torrkor:true` post its lines a few seconds later via the
+  // `/scan-scoutid dryrun:true` post its lines a few seconds later via the
   // flush timer — a dry run that was not dry.
   for (const fn of [
     "formatMemberJoined",

@@ -443,6 +443,15 @@ export async function registerGuildCommand(guildId) {
         type: 5, // BOOLEAN
         required: false,
       },
+      {
+        // `dryrun` and not `torrkor`: the option name is a public interface
+        // that admins type, and it is the same word in every CLI they have
+        // used. Descriptions stay Swedish — those are prose.
+        name: "dryrun",
+        description: "Visa vad som skulle ändras utan att ändra något",
+        type: 5, // BOOLEAN
+        required: false,
+      },
     ],
   };
 
@@ -575,7 +584,9 @@ export async function registerScanCommand(guildId) {
     default_member_permissions: "8", // ADMINISTRATOR
     options: [
       {
-        name: "torrkor",
+        // Renamed from `torrkor` when `/refresh-scoutid` gained the same option:
+        // two words for one concept in one command set is worse than either.
+        name: "dryrun",
         description:
           "Visa vad som skulle rapporteras utan att posta eller spara",
         type: 5, // BOOLEAN
