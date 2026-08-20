@@ -59,7 +59,13 @@ const ROLES = [
   { id: "r-d07", name: "Deltagare-07", managed: false, position: 8 },
   { id: "r-l12", name: "Ledare-12", managed: false, position: 9 },
   // The permission bits are read from the *role*, not from the member object.
-  { id: "r-bot", name: "ScoutID bot", managed: true, position: 20, permissions: BOT_PERMS },
+  {
+    id: "r-bot",
+    name: "ScoutID bot",
+    managed: true,
+    position: 20,
+    permissions: BOT_PERMS,
+  },
   { id: "r-admin", name: "Discord Admin", managed: false, position: 30 },
 ];
 
@@ -96,7 +102,6 @@ globalThis.fetch = async (url, opts = {}) => {
 const storage = await import("../../src/storage.js");
 const audit = await import("../../src/audit.js");
 
-
 const M = (id, nick, roleIds) => ({
   user: { id, username: id, global_name: nick },
   nick,
@@ -107,7 +112,10 @@ const M = (id, nick, roleIds) => ({
 async function link(userId, scoutId, { withTokens = true } = {}) {
   await storage.setLinkedScoutIDUserId(userId, scoutId);
   if (withTokens) {
-    await storage.storeDiscordTokens(userId, { access_token: "a", refresh_token: "r" });
+    await storage.storeDiscordTokens(userId, {
+      access_token: "a",
+      refresh_token: "r",
+    });
     await storage.storeScoutIDTokens(userId, { access_token: "a" });
   }
 }
@@ -116,13 +124,30 @@ const counts = (result) => result.totals.byCategory;
 
 test("a consistent guild reports zero issues", async () => {
   members = [
-    M("u1", "Anna Andersson (AL12)", ["r-scout", "r-event", "r-ledare", "r-l12"]),
+    M("u1", "Anna Andersson (AL12)", [
+      "r-scout",
+      "r-event",
+      "r-ledare",
+      "r-l12",
+    ]),
     M("u2", "Erik Svensson (07)", ["r-scout", "r-event", "r-d07"]),
     M(BOT_USER, "ScoutID", ["r-bot"]),
   ];
   participants = {
-    111: { fee_id: 33293, cancelled_date: null, first_name: "Anna", last_name: "Andersson", questions: { 107592: "12" } },
-    222: { fee_id: 25694, cancelled_date: null, first_name: "Erik", last_name: "Svensson", questions: { 88168: "7" } },
+    111: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: { 107592: "12" },
+    },
+    222: {
+      fee_id: 25694,
+      cancelled_date: null,
+      first_name: "Erik",
+      last_name: "Svensson",
+      questions: { 88168: "7" },
+    },
   };
   await storage.clearScoutNetCache();
   await link("u1", "111");
@@ -157,7 +182,11 @@ test("a link whose Scout role fell off is reported", async () => {
   members = [...members, M("u4", "Tappad Person", ["r-event"])];
   await link("u4", "444");
   participants["444"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Tappad", last_name: "Person", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Tappad",
+    last_name: "Person",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -168,10 +197,17 @@ test("a link whose Scout role fell off is reported", async () => {
 test("a link with no stored Discord tokens is reported", async () => {
   // The quiet failure: roles and nicknames keep working, but the bot cannot push
   // Linked Role metadata, and only the user can repair it. `/link-scoutid` cannot.
-  members = [...members, M("u5", "Utan Token (07)", ["r-scout", "r-event", "r-d07"])];
+  members = [
+    ...members,
+    M("u5", "Utan Token (07)", ["r-scout", "r-event", "r-d07"]),
+  ];
   await link("u5", "555", { withTokens: false });
   participants["555"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Utan", last_name: "Token", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Utan",
+    last_name: "Token",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -186,10 +222,17 @@ test("a link for someone who left the guild is reported", async () => {
 });
 
 test("a cancelled participant is reported", async () => {
-  members = [...members, M("u7", "Avbokad Person (07)", ["r-scout", "r-event", "r-d07"])];
+  members = [
+    ...members,
+    M("u7", "Avbokad Person (07)", ["r-scout", "r-event", "r-d07"]),
+  ];
   await link("u7", "777");
   participants["777"] = {
-    fee_id: 25694, cancelled_date: "2026-06-01", first_name: "Avbokad", last_name: "Person", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: "2026-06-01",
+    first_name: "Avbokad",
+    last_name: "Person",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -199,10 +242,17 @@ test("a cancelled participant is reported", async () => {
 
 test("a Discord name unrelated to the ScoutNet name is reported", async () => {
   // The signal for a mislink: someone linked to the wrong scoutid.
-  members = [...members, M("u8", "HeltAnnatNamn (07)", ["r-scout", "r-event", "r-d07"])];
+  members = [
+    ...members,
+    M("u8", "HeltAnnatNamn (07)", ["r-scout", "r-event", "r-d07"]),
+  ];
   await link("u8", "888");
   participants["888"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Karin", last_name: "Larsson", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Karin",
+    last_name: "Larsson",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -217,7 +267,11 @@ test("two division roles at once are reported", async () => {
   ];
   await link("u9", "999");
   participants["999"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Dubbel", last_name: "Person", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Dubbel",
+    last_name: "Person",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -226,10 +280,17 @@ test("two division roles at once are reported", async () => {
 });
 
 test("a wrong nickname suffix is reported", async () => {
-  members = [...members, M("u10", "Fel Suffix (99)", ["r-scout", "r-event", "r-d07"])];
+  members = [
+    ...members,
+    M("u10", "Fel Suffix (99)", ["r-scout", "r-event", "r-d07"]),
+  ];
   await link("u10", "1010");
   participants["1010"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Fel", last_name: "Suffix", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Fel",
+    last_name: "Suffix",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -241,17 +302,28 @@ test("a division role ScoutNet references but Discord lacks is reported", async 
   // The infra repo's `troops` must cover every value ScoutNet can return. This is
   // how a missing one surfaces before a member notices they see nothing.
   participants["1111"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Saknad", last_name: "Roll", questions: { 88168: "31" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Saknad",
+    last_name: "Roll",
+    questions: { 88168: "31" },
   };
   await storage.clearScoutNetCache();
 
   const result = await audit.runAudit(GUILD);
-  assert.ok(counts(result).missing_division_roles >= 1, "Deltagare-31 does not exist in the guild");
+  assert.ok(
+    counts(result).missing_division_roles >= 1,
+    "Deltagare-31 does not exist in the guild",
+  );
 });
 
 test("an unmapped fee id is reported", async () => {
   participants["1212"] = {
-    fee_id: 654321, cancelled_date: null, first_name: "Okänd", last_name: "Avgift", questions: {},
+    fee_id: 654321,
+    cancelled_date: null,
+    first_name: "Okänd",
+    last_name: "Avgift",
+    questions: {},
   };
   await storage.clearScoutNetCache();
 
@@ -267,7 +339,11 @@ test("a member the bot cannot modify is left out of role drift", async () => {
   members = [...members, M("u13", "Chef Person", ["r-scout", "r-admin"])];
   await link("u13", "1313");
   participants["1313"] = {
-    fee_id: 25694, cancelled_date: null, first_name: "Chef", last_name: "Person", questions: { 88168: "7" },
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Chef",
+    last_name: "Person",
+    questions: { 88168: "7" },
   };
   await storage.clearScoutNetCache();
 
@@ -297,7 +373,11 @@ test("a bot role missing MANAGE_ROLES is reported", async () => {
 });
 
 test("still no writes after every failure case", async () => {
-  assert.deepEqual(mutations, [], `the audit issued writes: ${mutations.join(", ")}`);
+  assert.deepEqual(
+    mutations,
+    [],
+    `the audit issued writes: ${mutations.join(", ")}`,
+  );
 });
 
 test("the report renders and summarises what it found", async () => {

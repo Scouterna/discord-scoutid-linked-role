@@ -33,9 +33,10 @@ const SCOUTNET_TTL_MS = 10 * 60 * 1000;
 // anything in production: the real account is https, the flag stays false there,
 // and a misconfiguration that downgraded prod to http would still be refused —
 // it would have to say so in the connection string to get here.
-const insecureEndpoint = /(^|;)\s*(TableEndpoint\s*=\s*http:\/\/|DefaultEndpointsProtocol\s*=\s*http\s*(;|$))/i.test(
-  config.TABLE_CONNECTION_STRING ?? "",
-);
+const insecureEndpoint =
+  /(^|;)\s*(TableEndpoint\s*=\s*http:\/\/|DefaultEndpointsProtocol\s*=\s*http\s*(;|$))/i.test(
+    config.TABLE_CONNECTION_STRING ?? "",
+  );
 
 const client = TableClient.fromConnectionString(
   config.TABLE_CONNECTION_STRING,
@@ -70,6 +71,20 @@ async function setValue(partitionKey, rowKey, value, expiresAt) {
   await client.upsertEntity(entity, "Replace");
 }
 
+/**
+ * A cheap round trip to Table Storage, for the readiness probe.
+ *
+ * A 404 is the expected answer and counts as healthy: what is being proved is
+ * that the request was signed, routed and answered — not that anything is
+ * stored under that key. A wrong account key answers 403 and an unreachable
+ * endpoint does not answer at all, and `getEntity` turns both into a throw.
+ */
+export async function ping() {
+  await ensureTable();
+  await getEntity("health", "probe");
+  return true;
+}
+
 // --- Discord tokens ---
 
 export async function storeDiscordTokens(userId, tokens) {
@@ -100,7 +115,12 @@ export async function getScoutIDTokens(userId) {
 
 export async function storeStateData(state, data) {
   await ensureTable();
-  await setValue("state", state, JSON.stringify(data), Date.now() + STATE_TTL_MS);
+  await setValue(
+    "state",
+    state,
+    JSON.stringify(data),
+    Date.now() + STATE_TTL_MS,
+  );
 }
 
 export async function getStateData(state) {
@@ -300,7 +320,10 @@ export async function getMemberSnapshot() {
 const scoutNetCache = new Map(); // type -> { value, expiresAt }
 
 export async function storeScoutNetData(type, data) {
-  scoutNetCache.set(type, { value: data, expiresAt: Date.now() + SCOUTNET_TTL_MS });
+  scoutNetCache.set(type, {
+    value: data,
+    expiresAt: Date.now() + SCOUTNET_TTL_MS,
+  });
 }
 
 export async function getScoutNetData(type) {

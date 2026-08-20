@@ -107,10 +107,15 @@ jobs:
           kubectl rollout status deploy/discord-scoutid --timeout=180s
 
       - name: Verify the new revision serves traffic
+        # /readyz rather than /: it answers 200 only when the pod has also
+        # reached Table Storage, so this proves the whole path from the public
+        # ingress to the data — which is what "serves traffic" has to mean for
+        # this app. `rollout status` above already required a Ready pod, so a
+        # failure here means the route or the certificate, not the app.
         run: |
           HOST=https://discord-scoutid.wsj27.scouterna.net
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$HOST/")
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$HOST/readyz")
             if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
             echo "attempt $i: HTTP $code"; sleep 10
           done

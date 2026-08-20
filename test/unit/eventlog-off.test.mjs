@@ -34,10 +34,22 @@ const eventlog = await import("../../src/eventlog.js");
 
 test("an unset channel means no API calls and no errors", async () => {
   eventlog.logEvent("ska inte skickas");
-  eventlog.logLinked({ discordUserId: "1", scoutId: "1", name: "Anna", roles: [] });
-  eventlog.logSyncAll({ callerId: "1", results: [{ discordUserId: "2", added: ["CMT"], removed: [] }] });
+  eventlog.logLinked({
+    discordUserId: "1",
+    scoutId: "1",
+    name: "Anna",
+    roles: [],
+  });
+  eventlog.logSyncAll({
+    callerId: "1",
+    results: [{ discordUserId: "2", added: ["CMT"], removed: [] }],
+  });
 
-  assert.equal(await eventlog.flushEventLog(), true, "flushing a disabled log should succeed");
+  assert.equal(
+    await eventlog.flushEventLog(),
+    true,
+    "flushing a disabled log should succeed",
+  );
   assert.equal(calls, 0, "nothing should have been sent");
 });
 

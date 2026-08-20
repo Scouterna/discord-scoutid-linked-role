@@ -6,6 +6,7 @@ namespace: wsj27
 resources:
   - configmap.yaml
   - deployment.yaml
+  - pdb.yaml
   - service.yaml
   - ingress.yaml
   - backup-cronjob.yaml

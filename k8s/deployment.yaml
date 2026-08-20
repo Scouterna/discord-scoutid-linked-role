@@ -36,6 +36,27 @@ spec:
                 labelSelector:
                   matchLabels:
                     app: discord-scoutid
+      # The image already drops to the unprivileged `node` user (see the
+      # Dockerfile). Stating it here as well is what makes it enforced rather
+      # than merely intended: `runAsNonRoot` refuses to start a container whose
+      # image was changed to run as root, and the rest of the block is what a
+      # `restricted` Pod Security Standard requires. This namespace enforces no
+      # PSS today, so none of it changes behaviour — it means the workload keeps
+      # deploying unchanged on the day the shared cluster turns enforcement on.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        # The root filesystem is read-only below, so give node a writable /tmp.
+        # Nothing here writes files on purpose, but node itself may — and
+        # discovering which library needs a scratch directory is not something
+        # to do during an incident.
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: app
           # Tag is set by CI (`kustomize edit set image`). Never :latest — it
@@ -58,6 +79,14 @@ spec:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 10"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           # Sized against 93-97% actual node memory. Do not oversize.
           resources:
             requests:
@@ -66,16 +95,29 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-          # GET / returns 200 and is the only health endpoint the app has.
+          # Readiness checks Table Storage; liveness deliberately does not.
+          #
+          # A pod that cannot reach the table answers every interaction with an
+          # error, so removing it from the Service is right — but *restarting* it
+          # would not fix anything, and hanging liveness on a shared dependency
+          # means one storage blip restarts every replica at once. See the
+          # comment above the routes in src/server.js.
+          #
+          # failureThreshold 3 × 10s: roughly 30 seconds of unreachable storage
+          # before a pod leaves the endpoint list, so a single slow request
+          # cannot evict a healthy pod. The app caches the probe result for 5s,
+          # so this costs about one table read per pod per 10 seconds.
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             initialDelaySeconds: 30
             periodSeconds: 30

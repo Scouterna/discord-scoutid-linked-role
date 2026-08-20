@@ -110,7 +110,10 @@ export function parseMemberEvents(str) {
   if (raw === "" || raw === "off" || raw === "none") return new Set();
   const known = ["join", "leave", "nickname", "roles"];
   const wanted = new Set();
-  for (const name of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+  for (const name of raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     if (known.includes(name)) wanted.add(name);
     else console.warn(`Unknown LOG_MEMBER_EVENTS value "${name}", ignoring`);
   }
@@ -150,13 +153,13 @@ const config = {
   SCOUTNET_EVENT_ROLE: process.env.SCOUTNET_EVENT_ROLE || "participant",
   SCOUTNET_FEE_ROLES: parseFeeRoles(process.env.SCOUTNET_FEE_ROLES),
   SCOUTNET_DIVISION_ROLES: parseDivisionRoles(
-    process.env.SCOUTNET_DIVISION_ROLES
+    process.env.SCOUTNET_DIVISION_ROLES,
   ),
   SCOUTNET_CATEGORY_ROLES: parseCategoryRoles(
-    process.env.SCOUTNET_CATEGORY_ROLES
+    process.env.SCOUTNET_CATEGORY_ROLES,
   ),
   SCOUTNET_NICKNAME_SUFFIXES: parseNicknameSuffixes(
-    process.env.SCOUTNET_NICKNAME_SUFFIXES
+    process.env.SCOUTNET_NICKNAME_SUFFIXES,
   ),
 
   // General

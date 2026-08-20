@@ -5,14 +5,17 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "description": "A Linked Role bot for Discord that links to ScoutID.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test test/unit/",
-    "test:integration": "node --test test/integration/",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test test/unit/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.mjs",
     "test:all": "npm test && npm run test:integration"
   },
   "keywords": [],
@@ -22,5 +25,11 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
+    "prettier": "^3.9.6"
   }
 }

@@ -39,7 +39,11 @@ test("formatMemberJoined flags bots and shows account age", () => {
   assert.doesNotMatch(line, /🤖/);
 
   assert.match(
-    eventlog.formatMemberJoined({ discordUserId: "2", name: "Botty", isBot: true }),
+    eventlog.formatMemberJoined({
+      discordUserId: "2",
+      name: "Botty",
+      isBot: true,
+    }),
     /🤖/,
   );
 });
@@ -111,7 +115,11 @@ test("the member formatters return strings and never write", () => {
     assert.equal(typeof eventlog[fn], "function", `${fn} should be exported`);
   }
   assert.equal(
-    typeof eventlog.formatMemberRenamed({ discordUserId: "1", from: "a", to: "b" }),
+    typeof eventlog.formatMemberRenamed({
+      discordUserId: "1",
+      from: "a",
+      to: "b",
+    }),
     "string",
   );
 });
@@ -177,7 +185,8 @@ test("summary explains a seeded baseline", () => {
 /** Fake audit log holding `count` entries with ids 10001..10000+count. */
 function fakeAuditLog(count) {
   const entries = [];
-  for (let i = count; i >= 1; i--) entries.push({ id: String(10000 + i), user_id: "u" });
+  for (let i = count; i >= 1; i--)
+    entries.push({ id: String(10000 + i), user_id: "u" });
   const requests = [];
   globalThis.fetch = async (url) => {
     const p = new URL(String(url)).searchParams;
@@ -187,7 +196,11 @@ function fakeAuditLog(count) {
     const list = before
       ? entries.filter((e) => BigInt(e.id) < BigInt(before))
       : entries;
-    return { ok: true, status: 200, json: async () => ({ audit_log_entries: list.slice(0, limit) }) };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ audit_log_entries: list.slice(0, limit) }),
+    };
   };
   return { requests };
 }
@@ -198,7 +211,11 @@ test("pagination walks back to the cursor instead of losing the oldest page", as
     actionType: 25,
     after: "10000",
   });
-  assert.equal(entries.length, 150, "must not stop at the first 100-entry page");
+  assert.equal(
+    entries.length,
+    150,
+    "must not stop at the first 100-entry page",
+  );
   assert.equal(entries[0].id, "10001", "entries should come back oldest-first");
   assert.equal(entries.at(-1).id, "10150");
   assert.ok(requests.length >= 2, "should have made more than one request");
@@ -228,7 +245,11 @@ test("getNewestAuditLogId asks for a single entry", async () => {
   const { requests } = fakeAuditLog(150);
   const id = await discord.getNewestAuditLogId("G1", 25);
   assert.equal(id, "10150");
-  assert.equal(requests.at(-1).limit, "1", "seeding should not fetch a full page");
+  assert.equal(
+    requests.at(-1).limit,
+    "1",
+    "seeding should not fetch a full page",
+  );
 });
 
 test("a 403 from the audit log carries its status for the caller to branch on", async () => {

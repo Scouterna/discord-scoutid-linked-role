@@ -148,9 +148,7 @@ export function logManualLink({
   callerId,
   result,
 }) {
-  const replaced = previousScoutId
-    ? ` (ersatte \`${previousScoutId}\`)`
-    : "";
+  const replaced = previousScoutId ? ` (ersatte \`${previousScoutId}\`)` : "";
   logEvent(
     `🔗 <@${callerId}> länkade <@${discordUserId}> till scoutid \`${scoutId}\`${replaced} — ${describeChanges(result)}`,
   );
@@ -166,7 +164,9 @@ export function logSync({ discordUserId, callerId, result }) {
     return;
   }
   const changed =
-    result?.added?.length > 0 || result?.removed?.length > 0 || result?.nickname;
+    result?.added?.length > 0 ||
+    result?.removed?.length > 0 ||
+    result?.nickname;
   if (!changed) return;
 
   // The Scout role disappearing is the security gate closing, and it is the one
@@ -179,7 +179,8 @@ export function logSync({ discordUserId, callerId, result }) {
     return;
   }
 
-  const by = callerId && callerId !== discordUserId ? ` (av <@${callerId}>)` : "";
+  const by =
+    callerId && callerId !== discordUserId ? ` (av <@${callerId}>)` : "";
   logEvent(`🔄 <@${discordUserId}>${by} — ${describeChanges(result)}`);
 }
 
@@ -212,7 +213,12 @@ function humanAge(ms) {
  * visible: a Discord account created minutes ago joining a server for 14–18 year
  * olds is worth a second look, and it is invisible in the member list.
  */
-export function formatMemberJoined({ discordUserId, name, accountCreatedAt, isBot }) {
+export function formatMemberJoined({
+  discordUserId,
+  name,
+  accountCreatedAt,
+  isBot,
+}) {
   const age = accountCreatedAt
     ? ` — konto skapat för ${humanAge(Date.now() - accountCreatedAt)} sedan`
     : "";
@@ -231,7 +237,12 @@ export function formatMemberJoined({ discordUserId, name, accountCreatedAt, isBo
  * `stillLinked` matters: a link left behind is what `/audit-scoutid` will report
  * as an orphan later, so naming it here saves the connection being made twice.
  */
-export function formatMemberGone({ discordUserId, name, stillLinked, removal }) {
+export function formatMemberGone({
+  discordUserId,
+  name,
+  stillLinked,
+  removal,
+}) {
   const link = stillLinked
     ? " — länkningen kvarstår i storage (`/audit-scoutid` listar den som orphan)"
     : "";
@@ -259,7 +270,13 @@ export function formatMemberRenamed({ discordUserId, from, to }) {
  * already logged as they happen, so what is left is a moderator editing roles by
  * hand — and "who did it" is the first question asked about one of those.
  */
-export function formatManualRoleChange({ discordUserId, actorId, added, removed, reason }) {
+export function formatManualRoleChange({
+  discordUserId,
+  actorId,
+  added,
+  removed,
+  reason,
+}) {
   const by = actorId ? ` (av <@${actorId}>)` : "";
   const why = reason ? ` — anledning: ${reason}` : "";
   return `🏷️ <@${discordUserId}>${by} — ${describeChanges({ added, removed })}${why}`;
@@ -272,7 +289,8 @@ export function formatManualRoleChange({ discordUserId, actorId, added, removed,
 export function logSyncAll({ callerId, results }) {
   const errors = results.filter((r) => r.error);
   const changed = results.filter(
-    (r) => !r.error && ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
+    (r) =>
+      !r.error && ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
   );
   logEvent(
     `🔁 <@${callerId}> körde \`/refresh-scoutid alla:true\` — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,

@@ -62,6 +62,13 @@ rules:
   - apiGroups: ["batch"]
     resources: ["cronjobs", "jobs"]
     verbs: ["get", "list", "watch", "create"]
+  # Added with k8s/pdb.yaml. A new resource *type* in the kustomization needs its
+  # `create` here before the deploy that introduces it, or that deploy fails with
+  # `poddisruptionbudgets.policy is forbidden` — and because this file is applied
+  # by hand, the order is on whoever ships the change, not on CI.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create"]
 
   # Read this Role, and only this Role. Not escalation — knowing your own
   # permissions does not widen them — and it is what lets the deploy compare the
@@ -98,6 +105,13 @@ rules:
     resourceNames:
       - discord-scoutid-backup
       - discord-scoutid-memberscan
+    verbs: ["update", "patch"]
+  # Its spec rarely changes, so `apply` will usually report it unchanged and
+  # never attempt a patch — the same trap `discord-scoutid-backup` hid behind for
+  # months. Named anyway, so the first real edit is not a failed deploy.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    resourceNames: ["discord-scoutid"]
     verbs: ["update", "patch"]
 ---
 # Included so the binding is documented alongside the Role it grants. It is

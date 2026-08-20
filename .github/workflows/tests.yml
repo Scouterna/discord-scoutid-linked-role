@@ -48,10 +48,59 @@ jobs:
           # warns on every run about the Node 20 action runtime being deprecated.
           # That is the runtime the action itself uses — unrelated to the
           # node-version below, which is the one the tests run on.
-          node-version: 20
+          node-version: 24
           cache: npm
 
+      - name: Lockfile must resolve from the public registry
+        # Development happens behind a network that TLS-intercepts
+        # registry.npmjs.org, so a gitignored .npmrc points npm at a reachable
+        # mirror instead. npm rewrites the registry host at install time, so a
+        # lockfile recording npmjs URLs serves both networks — but a lockfile
+        # *generated* there records the mirror in every `resolved`, and this
+        # runner cannot resolve that host.
+        #
+        # The check is host-agnostic on purpose: it asserts what must be true
+        # rather than blacklisting a name. It also catches the case the obvious
+        # version misses — the mirror answers tarball requests from a *different*
+        # host than the one configured, so grepping for the configured registry
+        # finds nothing.
+        #
+        # Runs before `npm ci` because the alternative symptom is ENOTFOUND on a
+        # random transitive dependency, eighty seconds in, which reads as a
+        # runner network glitch.
+        run: |
+          hosts=$(grep -o '"resolved": "https://[^/"]*' package-lock.json \
+            | sed 's|.*https://||' | sort -u)
+          bad=$(echo "$hosts" | grep -v '^registry\.npmjs\.org$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::package-lock.json resolves from a non-public registry: $bad"
+            echo "Rewrite the host back before committing:"
+            echo "  sed -i 's|https://<mirror-host>/npm/|https://registry.npmjs.org/|g' package-lock.json"
+            exit 1
+          fi
+          echo "all resolved URLs point at registry.npmjs.org"
+
       - run: npm ci
+
+      - name: Lint
+        # ESLint config lives in eslint.config.js. The extension was already
+        # installed in the devcontainer — it ships with the base image — and
+        # threw `Could not find config file` for every file it touched until
+        # that config existed. A linter that only runs in an editor is a linter
+        # nobody's branch has to satisfy, which is the same reason actionlint
+        # runs here and not only locally.
+        #
+        # Unlike the RBAC drift check, this fails the build rather than warning:
+        # what it reports is caused by the very commit being built, and it is
+        # fixed by editing that commit. Drift in something no code change caused
+        # is the case for warning; this is not that.
+        run: npm run lint
+
+      - name: Formatting
+        # `prettier --check`, not `--write`: CI must not push formatting back.
+        # Fixed locally with `npm run format`. Markdown is excluded on purpose —
+        # see .prettierignore.
+        run: npm run format:check
 
       - name: Unit tests
         # No container, no network, no credentials — if this needs setup one day,

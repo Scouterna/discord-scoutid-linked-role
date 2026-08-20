@@ -1,7 +1,11 @@
-# Node 20 matches package.json engines (>=20) and the runtime Dockerfile's
-# node:20-alpine. Debian rather than Alpine so the devcontainer features
+# Node 24 matches package.json engines (>=24) and the runtime Dockerfile's
+# node:24-alpine. Debian rather than Alpine so the devcontainer features
 # (azure-cli, terraform, gh) install cleanly.
-FROM mcr.microsoft.com/devcontainers/javascript-node:20-bookworm
+#
+# 24 rather than 22: both are LTS, but 20 reached end of life in April 2026 while
+# still in use here, and 24 is supported until April 2028. Jumping to the older
+# LTS would have meant repeating the exercise next spring.
+FROM mcr.microsoft.com/devcontainers/javascript-node:24-bookworm
 
 # dnsutils: dig, for DNS verification during the AKS migration.
 # jq: reading `az`/`kubectl -o json` output.

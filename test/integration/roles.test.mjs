@@ -32,7 +32,8 @@ process.env.SCOUTNET_DIVISION_ROLES =
   "deltagare:88168:Deltagare-{div}:Deltagare-Väntande," +
   "ledare:107592:Ledare-{div}:Ledare-Väntande";
 process.env.SCOUTNET_CATEGORY_ROLES = "ledare:Ledare";
-process.env.SCOUTNET_NICKNAME_SUFFIXES = "deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT";
+process.env.SCOUTNET_NICKNAME_SUFFIXES =
+  "deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT";
 process.env.LOG_CHANNEL_ID = "";
 
 const GUILD = "G1";
@@ -54,6 +55,8 @@ const GUILD_ROLES = [
 
 let member = null;
 let participants = {};
+/** Set by the outage cases: makes the ScoutNet fetch fail like a real one. */
+let scoutNetDown = false;
 /** Role ids that reject a change, standing in for Discord's role hierarchy. */
 let forbiddenRoleIds = new Set();
 
@@ -63,7 +66,17 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
-  if (u.includes("scoutnet.se")) return ok({ participants });
+  if (u.includes("scoutnet.se")) {
+    if (scoutNetDown) {
+      return {
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+        text: async () => "boom",
+      };
+    }
+    return ok({ participants });
+  }
   if (u.endsWith("/roles")) return ok(GUILD_ROLES);
 
   const roleChange = u.match(/\/members\/([^/]+)\/roles\/([^/?]+)$/);
@@ -71,7 +84,12 @@ globalThis.fetch = async (url, opts = {}) => {
     const roleId = roleChange[2];
     if (forbiddenRoleIds.has(roleId)) {
       // What Discord returns for a role above the bot's own position.
-      return { ok: false, status: 403, json: async () => ({}), text: async () => "{}" };
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+        text: async () => "{}",
+      };
     }
     (opts.method === "PUT" ? calls.added : calls.removed).push(roleId);
     return ok({});
@@ -89,14 +107,18 @@ globalThis.fetch = async (url, opts = {}) => {
 const storage = await import("../../src/storage.js");
 const roles = await import("../../src/roles.js");
 
-
 /** Reset the world. `roleIds` is what the member currently has in Discord. */
 async function setup({ userId, roleIds, nick, scoutId, participant }) {
   calls.added.length = 0;
   calls.removed.length = 0;
   calls.nicks.length = 0;
   forbiddenRoleIds = new Set();
-  member = { user: { id: userId, username: "u", global_name: nick }, nick, roles: roleIds };
+  scoutNetDown = false;
+  member = {
+    user: { id: userId, username: "u", global_name: nick },
+    nick,
+    roles: roleIds,
+  };
   participants = participant ? { [scoutId]: participant } : {};
   await storage.clearScoutNetCache();
   if (scoutId) await storage.setLinkedScoutIDUserId(userId, scoutId);
@@ -142,11 +164,20 @@ test("the managed Scout role is never re-added or removed", async () => {
     roleIds: ["r-scout"],
     nick: "Anna Andersson",
     scoutId: "111",
-    participant: { fee_id: 25697, cancelled_date: null, first_name: "Anna", last_name: "Andersson", questions: {} },
+    participant: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: {},
+    },
   });
   await roles.syncUserRoles(GUILD, "u1");
   assert.ok(!calls.added.includes("r-scout"), "tried to add a managed role");
-  assert.ok(!calls.removed.includes("r-scout"), "tried to remove a managed role");
+  assert.ok(
+    !calls.removed.includes("r-scout"),
+    "tried to remove a managed role",
+  );
 });
 
 test("a stale division role is removed when the division changes", async () => {
@@ -170,7 +201,10 @@ test("a stale division role is removed when the division changes", async () => {
   assert.deepEqual(namesOf(calls.added), ["Deltagare-07"]);
   assert.deepEqual(namesOf(calls.removed), ["Deltagare-05"]);
   assert.deepEqual(calls.nicks, ["Erik Svensson (07)"]);
-  assert.ok(!result.removed.includes("Något-Annat"), "touched a role it does not manage");
+  assert.ok(
+    !result.removed.includes("Något-Annat"),
+    "touched a role it does not manage",
+  );
 });
 
 test("roles outside the bot's configuration are left alone", async () => {
@@ -213,7 +247,11 @@ test("losing the Scout role strips every managed role and sets Overifierad", asy
 
   const result = await roles.syncUserRoles(GUILD, "u3");
   assert.deepEqual(namesOf(calls.added), ["Overifierad"]);
-  assert.deepEqual(namesOf(calls.removed), ["Ledare", "Ledare-12", "WSJ-event"]);
+  assert.deepEqual(namesOf(calls.removed), [
+    "Ledare",
+    "Ledare-12",
+    "WSJ-event",
+  ]);
   assert.ok(result.added.includes("Overifierad"));
 
   assert.equal(
@@ -229,7 +267,13 @@ test("a stripped member keeps no category hint in their nickname", async () => {
     roleIds: ["r-event", "r-l12"],
     nick: "Kim Nilsson (AL12)",
     scoutId: "333",
-    participant: { fee_id: 33293, cancelled_date: null, first_name: "Kim", last_name: "Nilsson", questions: {} },
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Kim",
+      last_name: "Nilsson",
+      questions: {},
+    },
   });
   await roles.syncUserRoles(GUILD, "u3");
   // Unverified means we no longer assert anything about their category.
@@ -252,7 +296,11 @@ test("a cancelled participant loses event access but keeps Scout", async () => {
   });
   const result = await roles.syncUserRoles(GUILD, "u4");
   assert.deepEqual(namesOf(calls.removed), ["Deltagare-07", "WSJ-event"]);
-  assert.deepEqual(calls.added, [], "Overifierad is for unverified, not for cancelled");
+  assert.deepEqual(
+    calls.added,
+    [],
+    "Overifierad is for unverified, not for cancelled",
+  );
   assert.ok(!result.removed.includes("scout"));
 });
 
@@ -274,8 +322,15 @@ test("a role above the bot in the hierarchy fails without aborting the rest", as
   forbiddenRoleIds = new Set(["r-l12"]);
 
   const result = await roles.syncUserRoles(GUILD, "u5");
-  assert.ok(!result.added.includes("Ledare-12"), "a failed add must not be reported as done");
-  assert.deepEqual(result.added.sort(), ["Ledare", "wsj-event"], "the rest should still apply");
+  assert.ok(
+    !result.added.includes("Ledare-12"),
+    "a failed add must not be reported as done",
+  );
+  assert.deepEqual(
+    result.added.sort(),
+    ["Ledare", "wsj-event"],
+    "the rest should still apply",
+  );
 });
 
 test("a nickname longer than Discord allows is truncated, not rejected", async () => {
@@ -294,7 +349,92 @@ test("a nickname longer than Discord allows is truncated, not rejected", async (
   });
   await roles.syncUserRoles(GUILD, "u6");
   assert.equal(calls.nicks.length, 1);
-  assert.equal(calls.nicks[0].length, 32, "Discord's nickname limit is 32 characters");
+  assert.equal(
+    calls.nicks[0].length,
+    32,
+    "Discord's nickname limit is 32 characters",
+  );
+});
+
+test("a ScoutNet outage changes nothing at all", async () => {
+  // The bug this pins: getDesiredRoles used to swallow the error and answer
+  // ["scout"], which is the same answer as "not registered in the event" — and
+  // that answer *means* remove the event, category and division roles. So a
+  // ScoutNet outage during `/refresh-scoutid alla:true` disarmed everyone the
+  // run reached, one user at a time, and reported success while doing it.
+  await setup({
+    userId: "u8",
+    roleIds: ["r-scout", "r-event", "r-ledare", "r-l12"],
+    nick: "Anna Andersson (AL12)",
+    scoutId: "888",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: { 107592: "12" },
+    },
+  });
+  scoutNetDown = true;
+
+  const result = await roles.syncUserRoles(GUILD, "u8");
+  assert.match(result.error, /ScoutNet/);
+  assert.deepEqual(calls.added, [], "added a role on incomplete data");
+  assert.deepEqual(calls.removed, [], "removed a role it could not confirm");
+  assert.deepEqual(calls.nicks, [], "renamed someone on incomplete data");
+});
+
+test("the verification gate still works while ScoutNet is down", async () => {
+  // The other half, and why the bail-out sits *below* the gate rather than at
+  // the top: stripping someone who lost the Scout role is the security
+  // boundary, and it needs no ScoutNet to decide. An outage must not become a
+  // window where a disconnected account keeps its access.
+  await setup({
+    userId: "u9",
+    roleIds: ["r-event", "r-ledare", "r-l12"], // no r-scout
+    nick: "Kim Nilsson (AL12)",
+    scoutId: "999",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Kim",
+      last_name: "Nilsson",
+      questions: { 107592: "12" },
+    },
+  });
+  scoutNetDown = true;
+
+  const result = await roles.syncUserRoles(GUILD, "u9");
+  assert.equal(result.error, undefined);
+  assert.deepEqual(namesOf(calls.removed), [
+    "Ledare",
+    "Ledare-12",
+    "WSJ-event",
+  ]);
+  assert.deepEqual(namesOf(calls.added), ["Overifierad"]);
+});
+
+test("syncAllUserRoles fails once instead of once per user", async () => {
+  // One request at an API that just proved it is down, not one per linked user,
+  // and one error to read instead of N identical ones.
+  await setup({
+    userId: "u8",
+    roleIds: ["r-scout", "r-event"],
+    nick: "Anna Andersson",
+    scoutId: "888",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: {},
+    },
+  });
+  scoutNetDown = true;
+
+  await assert.rejects(() => roles.syncAllUserRoles(GUILD), /ScoutNet/);
+  assert.deepEqual(calls.added, []);
+  assert.deepEqual(calls.removed, []);
 });
 
 test("stripUnlinkedMember clears access for a Scout role with no link behind it", async () => {
@@ -313,10 +453,17 @@ test("stripUnlinkedMember clears access for a Scout role with no link behind it"
   };
   const result = await roles.stripUnlinkedMember(GUILD, "u7", roleMap, orphan);
 
-  assert.deepEqual(namesOf(calls.removed), ["Ledare", "Ledare-12", "WSJ-event"]);
+  assert.deepEqual(namesOf(calls.removed), [
+    "Ledare",
+    "Ledare-12",
+    "WSJ-event",
+  ]);
   assert.deepEqual(result.added, ["Overifierad"]);
   assert.deepEqual(calls.nicks, ["Orphan Person"]);
-  assert.ok(!calls.removed.includes("r-scout"), "the managed Scout role cannot be removed");
+  assert.ok(
+    !calls.removed.includes("r-scout"),
+    "the managed Scout role cannot be removed",
+  );
 });
 
 test("stripUnlinkedMember leaves an already-stripped member untouched", async () => {

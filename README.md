@@ -188,7 +188,14 @@ npm test                  # pure logic — no container, no network, no credenti
 docker compose up -d azurite
 npm run test:integration  # the real scan against real Table Storage
 npm run test:all
+
+npm run lint              # eslint
+npm run format            # prettier --write .
+npm run format:check      # what CI runs
 ```
+
+Lint and formatting run in CI before the tests, so they gate the deploy too.
+Prettier does not touch markdown — see `.prettierignore` for why.
 
 The split is deliberate: a suite that cannot run without setup is a suite that
 stops being run, so the majority of the value sits in `npm test`. The integration
@@ -208,9 +215,13 @@ What is covered:
 - **`unit/server`** — the interactions endpoint, driven over a real socket with a
   real ed25519 keypair: forged signatures rejected, PING answered, every command
   acknowledged within Discord's 3-second window, and the admin gate enforced.
+  Plus the two health routes, which exist to answer differently: liveness must
+  say 200 with no storage in reach, readiness must say 503.
 - **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
-  nickname limit.
+  nickname limit, and that a ScoutNet outage changes nothing at all.
+- **`integration/health`** — `/readyz` against a real table, which is the only
+  way to test the answer that matters: 200 when storage genuinely works.
 - **`integration/audit`** — all 13 categories, and that the audit never writes.
 - **`integration/memberscan`** — the whole flow in sequence.
 

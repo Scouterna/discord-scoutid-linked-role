@@ -1,0 +1,19 @@
+# Markdown is excluded on purpose, and it is the only judgement call in here.
+#
+# CLAUDE.md and README.md are this repository's actual documentation — the
+# reasoning behind the design lives there, hand-wrapped at 80 columns. Prettier
+# would rewrite `*managed*` as `_managed_` across both files and realign every
+# table: 153 lines of churn that makes no sentence clearer. Prose formatting is
+# the author's, code formatting is Prettier's.
+
+*.md
+
+# Generated, and rewritten by their own tools on every install. Formatting them
+# means fighting npm and the devcontainer CLI for no benefit.
+package-lock.json
+.devcontainer/devcontainer-lock.json
+
+# Build output for the presentation deck, and gitignored working directories.
+docs/presentation/build/
+logs/
+.azure-scouterna/

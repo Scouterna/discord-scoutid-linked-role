@@ -30,7 +30,11 @@ const UNVERIFIED_ROLE = "Overifierad";
 
 /**
  * Get participant's fee category and division from ScoutNet.
- * Returns { category, division } or null if not in event.
+ *
+ * Returns { category, division }, or null when the member is genuinely not a
+ * live participant. Throws when ScoutNet could not be asked at all — the two
+ * are different answers and callers must be able to tell them apart. See
+ * getDesiredRoles.
  */
 async function getParticipantInfo(scoutnetMemberId) {
   if (!config.SCOUTNET_EVENT_ID) return null;
@@ -55,8 +59,25 @@ async function getParticipantInfo(scoutnetMemberId) {
 
 /**
  * Determine which roles a user should have.
+ *
+ * **Throws when ScoutNet cannot be reached**, and that is load-bearing rather
+ * than incidental. "Not registered in the event" and "could not ask whether
+ * they are registered" both used to come back as `[scoutRole]`, and every
+ * removal in `syncUserRoles` keys off exactly that difference: an answer with
+ * no event role in it *means* take the event, category and division roles away.
+ * So a ScoutNet outage during `/refresh-scoutid alla:true` disarmed every user
+ * the run reached. Same mistake as a truncated member snapshot read as an
+ * absent one — an unknown must not be allowed to look like a known negative.
+ *
+ * `allowIncomplete: true` opts back into the lenient answer, and is only for
+ * callers that exclusively *add* roles. The linking flow is the one such
+ * caller: there, failing means failing a verification that otherwise
+ * succeeded, and the missing roles arrive with the next sync anyway.
  */
-export async function getDesiredRoles(scoutnetMemberId) {
+export async function getDesiredRoles(
+  scoutnetMemberId,
+  { allowIncomplete = false } = {},
+) {
   const roles = [config.SCOUTNET_SCOUT_ROLE];
 
   try {
@@ -82,10 +103,14 @@ export async function getDesiredRoles(scoutnetMemberId) {
       }
     }
   } catch (e) {
+    if (!allowIncomplete) throw e;
     console.error(
       `Error fetching ScoutNet data for member ${scoutnetMemberId}:`,
-      e.message
+      e.message,
     );
+    // Discard anything gathered before the failure: a half-filled answer is
+    // indistinguishable from a complete one to the caller.
+    return [config.SCOUTNET_SCOUT_ROLE];
   }
 
   return roles;
@@ -95,8 +120,15 @@ export async function getDesiredRoles(scoutnetMemberId) {
  * Get the nickname suffix for a user based on their ScoutNet data.
  * E.g. " (CMT)", " (AL12)", " (IST-05)", " (03)".
  * Returns empty string if no suffix applies.
+ *
+ * Throws on a ScoutNet failure, for the same reason as getDesiredRoles: an
+ * empty suffix is a real instruction to rename someone, not a shrug. Same
+ * `allowIncomplete` escape hatch, same single caller for it.
  */
-export async function getNicknameSuffix(scoutnetMemberId) {
+export async function getNicknameSuffix(
+  scoutnetMemberId,
+  { allowIncomplete = false } = {},
+) {
   if (!config.SCOUTNET_NICKNAME_SUFFIXES) return "";
 
   try {
@@ -117,9 +149,10 @@ export async function getNicknameSuffix(scoutnetMemberId) {
 
     return "";
   } catch (e) {
+    if (!allowIncomplete) throw e;
     console.error(
       `Error getting nickname suffix for member ${scoutnetMemberId}:`,
-      e.message
+      e.message,
     );
     return "";
   }
@@ -139,7 +172,7 @@ function getManagedRoleNames() {
     roles.add(config.SCOUTNET_EVENT_ROLE);
     if (config.SCOUTNET_FEE_ROLES) {
       for (const category of new Set(
-        Object.values(config.SCOUTNET_FEE_ROLES)
+        Object.values(config.SCOUTNET_FEE_ROLES),
       )) {
         // Managed, so it is taken away again when someone changes category —
         // an ex-leader must not keep `Ledare` and its AutoMod exemption.
@@ -193,12 +226,24 @@ export async function syncUserRoles(guildId, discordUserId) {
   const scoutRole = roleMap.get(config.SCOUTNET_SCOUT_ROLE.toLowerCase());
   const isVerified = scoutRole && currentRoleIds.has(scoutRole.id);
 
-  // Compute desired roles + suffix based on verification state
+  // Compute desired roles + suffix based on verification state.
+  //
+  // Note what the gate above did *not* need: ScoutNet. Stripping someone who
+  // lost the Scout role is the security boundary, so it has to keep working
+  // while ScoutNet is down. Everything below genuinely needs ScoutNet, and
+  // cannot be guessed — so bail out here, before the first write, rather than
+  // remove roles we merely failed to confirm.
   let desiredRoles;
   let nicknameSuffix;
   if (isVerified) {
-    desiredRoles = await getDesiredRoles(scoutId);
-    nicknameSuffix = await getNicknameSuffix(scoutId);
+    try {
+      desiredRoles = await getDesiredRoles(scoutId);
+      nicknameSuffix = await getNicknameSuffix(scoutId);
+    } catch (e) {
+      return {
+        error: `Kunde inte hämta ScoutNet-data, inget ändrades: ${e.message}`,
+      };
+    }
   } else {
     console.log(
       `User ${discordUserId} is linked (scoutid=${scoutId}) but lacks Scout role — stripping access`,
@@ -216,20 +261,25 @@ export async function syncUserRoles(guildId, discordUserId) {
   let nicknameSet = null;
   try {
     const currentNick = member.nick || member.user?.global_name || "";
-    const participant = isVerified ? await scoutnet.getParticipant(scoutId) : null;
+    const participant = isVerified
+      ? await scoutnet.getParticipant(scoutId)
+      : null;
     const scoutNetName = participant
       ? [participant.first_name, participant.last_name]
           .filter(Boolean)
           .join(" ")
           .trim()
       : "";
-    const baseName =
-      scoutNetName || currentNick.replace(/\s*\(.*\)\s*$/, "");
+    const baseName = scoutNetName || currentNick.replace(/\s*\(.*\)\s*$/, "");
 
     if (baseName) {
       const newNick = (baseName + nicknameSuffix).substring(0, 32);
       if (newNick !== currentNick) {
-        await discord.updateGuildMemberNickname(guildId, discordUserId, newNick);
+        await discord.updateGuildMemberNickname(
+          guildId,
+          discordUserId,
+          newNick,
+        );
         nicknameSet = newNick;
       }
     }
@@ -249,7 +299,7 @@ export async function syncUserRoles(guildId, discordUserId) {
         added.push(roleName);
       } catch (e) {
         console.error(
-          `Failed to add role "${roleName}" (${role.id}) to user ${discordUserId}: ${e.message}`
+          `Failed to add role "${roleName}" (${role.id}) to user ${discordUserId}: ${e.message}`,
         );
       }
     }
@@ -269,7 +319,7 @@ export async function syncUserRoles(guildId, discordUserId) {
         removed.push(managedName);
       } catch (e) {
         console.error(
-          `Failed to remove role "${managedName}" (${role.id}) from user ${discordUserId}: ${e.message}`
+          `Failed to remove role "${managedName}" (${role.id}) from user ${discordUserId}: ${e.message}`,
         );
       }
     }
@@ -288,7 +338,7 @@ export async function syncUserRoles(guildId, discordUserId) {
           removed.push(role.name);
         } catch (e) {
           console.error(
-            `Failed to remove role "${role.name}" (${role.id}) from user ${discordUserId}: ${e.message}`
+            `Failed to remove role "${role.name}" (${role.id}) from user ${discordUserId}: ${e.message}`,
           );
         }
       }
@@ -309,7 +359,12 @@ export async function syncUserRoles(guildId, discordUserId) {
  * Caller passes the shared `roleMap` and the member object to avoid refetching.
  * Returns { added, removed }.
  */
-export async function stripUnlinkedMember(guildId, discordUserId, roleMap, member) {
+export async function stripUnlinkedMember(
+  guildId,
+  discordUserId,
+  roleMap,
+  member,
+) {
   const managedRoles = getManagedRoleNames();
   const divPrefixes = getDivisionPrefixes();
   const currentRoleIds = new Set(member.roles);
@@ -377,7 +432,9 @@ export async function stripUnlinkedMember(guildId, discordUserId, roleMap, membe
       );
     }
   } catch (e) {
-    console.error(`Error resetting nickname for ${discordUserId}: ${e.message}`);
+    console.error(
+      `Error resetting nickname for ${discordUserId}: ${e.message}`,
+    );
   }
 
   return { added, removed };
@@ -390,6 +447,17 @@ export async function stripUnlinkedMember(guildId, discordUserId, roleMap, membe
  */
 export async function syncAllUserRoles(guildId) {
   await storage.clearScoutNetCache();
+
+  // Fetch the participant list once, up front, and let a failure abort the run
+  // before anything is written. Each user below would otherwise fail
+  // individually and harmlessly — but that is one request per user at an API
+  // that just proved it is down, and a report of N identical errors. Failing
+  // once says the same thing usefully.
+  //
+  // The orphan strip at the end needs no ScoutNet and is skipped along with the
+  // rest. It runs on every refresh, so an outage delays it rather than dropping
+  // it, and the members it would strip are already stripped of their link.
+  if (config.SCOUTNET_EVENT_ID) await scoutnet.getParticipants();
 
   const linkedUsers = await storage.getAllLinkedUsers();
   const linkedSet = new Set(linkedUsers.map((u) => u.discordUserId));

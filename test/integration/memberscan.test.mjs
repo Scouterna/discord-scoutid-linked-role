@@ -36,7 +36,7 @@ const BAN = 22;
 
 let members = [];
 /** Newest-first per action type, the way Discord returns them. */
-let audit = { [ROLE_UPDATE]: [], [KICK]: [], [BAN]: [] };
+const audit = { [ROLE_UPDATE]: [], [KICK]: [], [BAN]: [] };
 let auditStatus = 200;
 let postShouldFail = false;
 const posted = [];
@@ -59,8 +59,17 @@ const entry = (id, userId, targetId, extra = {}) => ({
 const roleEntry = (id, userId, targetId, added = [], removed = []) =>
   entry(id, userId, targetId, {
     changes: [
-      ...(added.length ? [{ key: "$add", new_value: added.map((n) => ({ id: n, name: n })) }] : []),
-      ...(removed.length ? [{ key: "$remove", new_value: removed.map((n) => ({ id: n, name: n })) }] : []),
+      ...(added.length
+        ? [{ key: "$add", new_value: added.map((n) => ({ id: n, name: n })) }]
+        : []),
+      ...(removed.length
+        ? [
+            {
+              key: "$remove",
+              new_value: removed.map((n) => ({ id: n, name: n })),
+            },
+          ]
+        : []),
     ],
   });
 
@@ -68,7 +77,12 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   if (u.includes("/audit-logs")) {
     if (auditStatus !== 200) {
-      return { ok: false, status: auditStatus, json: async () => ({}), text: async () => "{}" };
+      return {
+        ok: false,
+        status: auditStatus,
+        json: async () => ({}),
+        text: async () => "{}",
+      };
     }
     const p = new URL(u).searchParams;
     const type = p.get("action_type");
@@ -76,16 +90,27 @@ globalThis.fetch = async (url, opts = {}) => {
     const before = p.get("before");
     let list = audit[type] ?? [];
     if (before) list = list.filter((e) => BigInt(e.id) < BigInt(before));
-    return { ok: true, status: 200, json: async () => ({ audit_log_entries: list.slice(0, limit) }) };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ audit_log_entries: list.slice(0, limit) }),
+    };
   }
   if (u.includes("/members?")) {
     const after = new URL(u).searchParams.get("after");
-    return { ok: true, status: 200, json: async () => (after === "0" ? members : []) };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => (after === "0" ? members : []),
+    };
   }
-  if (u.includes("/users/@me")) return { ok: true, status: 200, json: async () => ({ id: BOT_ID }) };
-  if (u.endsWith("/roles")) return { ok: true, status: 200, json: async () => [] };
+  if (u.includes("/users/@me"))
+    return { ok: true, status: 200, json: async () => ({ id: BOT_ID }) };
+  if (u.endsWith("/roles"))
+    return { ok: true, status: 200, json: async () => [] };
   if (u.includes("/messages")) {
-    if (postShouldFail) return { ok: false, status: 403, json: async () => ({}) };
+    if (postShouldFail)
+      return { ok: false, status: 403, json: async () => ({}) };
     posted.push(JSON.parse(opts.body).content);
     return { ok: true, status: 200, json: async () => ({}) };
   }
@@ -111,7 +136,11 @@ const KIM = snowflake(YEAR_AGO - 2 * 86400000);
 test("the first run seeds a baseline silently and does not replay history", async () => {
   // Announcing every existing member as a new arrival would bury the channel and
   // teach everyone to ignore it. Old audit entries must not be replayed either.
-  members = [M(ANNA, "anna", "Anna Andersson (AL12)"), M(ERIK, "erik", "Erik Svensson"), M(KIM, "kim", null)];
+  members = [
+    M(ANNA, "anna", "Anna Andersson (AL12)"),
+    M(ERIK, "erik", "Erik Svensson"),
+    M(KIM, "kim", null),
+  ];
   audit[ROLE_UPDATE] = [roleEntry("500", MOD_ID, ANNA, ["CMT"])];
 
   const { result, out } = await runScan();
@@ -120,7 +149,11 @@ test("the first run seeds a baseline silently and does not replay history", asyn
 
   const stored = await storage.getMemberSnapshot();
   assert.equal(Object.keys(stored.members).length, 3);
-  assert.equal(stored.auditCursors[ROLE_UPDATE], "500", "cursor should start at the newest entry");
+  assert.equal(
+    stored.auditCursors[ROLE_UPDATE],
+    "500",
+    "cursor should start at the newest entry",
+  );
 });
 
 test("a diff reports joins, departures, renames and other people's role changes", async () => {
@@ -144,10 +177,18 @@ test("a diff reports joins, departures, renames and other people's role changes"
   assert.match(out, /länkningen kvarstår/, "orphaned link not flagged");
   assert.match(out, /Kim Nilsson/, "rename not reported");
   assert.match(out, /Ledare-12/, "manual role change not reported");
-  assert.match(out, new RegExp(`\\(av <@${MOD_ID}>\\)`), "role change did not name the actor");
+  assert.match(
+    out,
+    new RegExp(`\\(av <@${MOD_ID}>\\)`),
+    "role change did not name the actor",
+  );
   assert.doesNotMatch(out, /WSJ-event/, "reported the bot's OWN role change");
   assert.doesNotMatch(out, /CMT/, "replayed an entry older than the cursor");
-  assert.doesNotMatch(out, new RegExp(`<@${ANNA}>`), "reported an unchanged member");
+  assert.doesNotMatch(
+    out,
+    new RegExp(`<@${ANNA}>`),
+    "reported an unchanged member",
+  );
 
   const stored = await storage.getMemberSnapshot();
   assert.equal(stored.auditCursors[ROLE_UPDATE], "700");
@@ -169,7 +210,11 @@ test("a kick is reported as a kick, not as a departure", async () => {
 
   const { result, out } = await runScan();
   assert.match(out, /kickad/, "a kick must not read as a plain departure");
-  assert.match(out, new RegExp(`<@${MOD_ID}>`), "kick did not name the moderator");
+  assert.match(
+    out,
+    new RegExp(`<@${MOD_ID}>`),
+    "kick did not name the moderator",
+  );
   assert.match(out, /anledning: regelbrott/);
   assert.equal(result.counts.removedByMod, 1);
   assert.match(scan.formatScanSummary(result), /varav 1 kickad\/bannad/);
@@ -234,7 +279,10 @@ test("a dry run writes nothing at all", async () => {
     "a dry run advanced the snapshot",
   );
   // The lines still have to come back, or the dry run shows nothing useful.
-  assert.ok(result.lines.some((l) => l.includes("Spöke Person")), "dry run returned no lines");
+  assert.ok(
+    result.lines.some((l) => l.includes("Spöke Person")),
+    "dry run returned no lines",
+  );
 });
 
 test("an unreadable audit log skips roles but still reports departures", async () => {
@@ -266,7 +314,10 @@ test("the snapshot survives being larger than one Table Storage property", async
     ];
   }
   const chars = JSON.stringify(big).length;
-  assert.ok(chars > 32768, `test data only ${chars} chars — not over the property cap`);
+  assert.ok(
+    chars > 32768,
+    `test data only ${chars} chars — not over the property cap`,
+  );
   assert.ok(chars > 4 * 8192, "test data should span more than four chunks");
 
   const cursors = { 25: "12345678901234567890" };
@@ -275,8 +326,15 @@ test("the snapshot survives being larger than one Table Storage property", async
 
   // Named separately: a null here means the metadata did not survive the write,
   // which is a different failure from the contents not matching.
-  assert.ok(back, "snapshot came back as absent — the chunk metadata did not survive");
-  assert.deepEqual(back.members, big, "large snapshot did not round-trip intact");
+  assert.ok(
+    back,
+    "snapshot came back as absent — the chunk metadata did not survive",
+  );
+  assert.deepEqual(
+    back.members,
+    big,
+    "large snapshot did not round-trip intact",
+  );
   assert.equal(
     back.auditCursors[25],
     "12345678901234567890",
@@ -290,7 +348,7 @@ test("a snapshot whose metadata did not land is treated as absent", async () => 
   // silently, which is indistinguishable from "no snapshot yet". Absent means
   // "seed a baseline"; corrupt means something ate the data. They must not look
   // alike, or a storage problem reads as a fresh install.
-  await storage.storeMemberSnapshot({ "1": ["Nick", "user"] }, {});
+  await storage.storeMemberSnapshot({ 1: ["Nick", "user"] }, {});
 
   const { TableClient } = await import("@azure/data-tables");
   const client = TableClient.fromConnectionString(
@@ -308,9 +366,12 @@ test("a snapshot whose metadata did not land is treated as absent", async () => 
 test("a truncated snapshot is treated as absent rather than diffed", async () => {
   // Silent corruption is the dangerous case: a short read would otherwise diff
   // into a report full of members who never joined and never left.
-  const snapshot = { "1": ["Nick", "user"] };
+  const snapshot = { 1: ["Nick", "user"] };
   await storage.storeMemberSnapshot(snapshot, {});
-  assert.ok(await storage.getMemberSnapshot(), "sanity: the snapshot should read back");
+  assert.ok(
+    await storage.getMemberSnapshot(),
+    "sanity: the snapshot should read back",
+  );
 
   const { TableClient } = await import("@azure/data-tables");
   const client = TableClient.fromConnectionString(
@@ -321,5 +382,9 @@ test("a truncated snapshot is treated as absent rather than diffed", async () =>
   const e = await client.getEntity("membersnapshot", "current");
   await client.upsertEntity({ ...e, chunk0: e.chunk0.slice(0, -5) }, "Replace");
 
-  assert.equal(await storage.getMemberSnapshot(), null, "a short read was accepted as valid");
+  assert.equal(
+    await storage.getMemberSnapshot(),
+    null,
+    "a short read was accepted as valid",
+  );
 });

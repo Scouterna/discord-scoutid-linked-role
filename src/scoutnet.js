@@ -33,7 +33,7 @@ export async function getParticipants() {
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `ScoutNet API error: [${response.status}] ${response.statusText} - ${errorText}`
+      `ScoutNet API error: [${response.status}] ${response.statusText} - ${errorText}`,
     );
   }
 
