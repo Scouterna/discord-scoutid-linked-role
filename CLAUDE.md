@@ -250,6 +250,24 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   Nothing applies it automatically: CI there validates but does not plan or
   apply, so applying is a deliberate manual act
 - Docker build pulls from registry.npmjs.org unless a gitignored `.npmrc` overrides it (installed in a separate build stage, so it never lands in the image). On a network that TLS-intercepts npmjs, `npm ci` half-installs while still exiting 0 — so a local `.npmrc` pointing at a reachable mirror is required there. The Dockerfile verifies every dependency landed and fails the build otherwise
+- **`package-lock.json` must record `registry.npmjs.org` in every `resolved`,
+  never the mirror.** npm rewrites the registry host at install time, so an
+  npmjs-pinned lockfile works on both networks — but running `npm install`
+  behind the mirror writes *its* host into every entry, and GitHub's runners
+  cannot resolve it. The symptom is `ENOTFOUND` on a random transitive
+  dependency, a minute into `npm ci`, which reads like a runner glitch. Rewrite
+  the host back before committing, and note that the host in the tarball URLs is
+  **not** the one configured in `.npmrc` — the mirror answers from a different
+  name, so grepping for the configured registry finds nothing:
+
+  ```bash
+  grep -o '"resolved": "https://[^/"]*' package-lock.json | sort -u   # what is in there
+  sed -i 's|https://<mirror-host>/npm/|https://registry.npmjs.org/|g' package-lock.json
+  ```
+
+  [tests.yml](.github/workflows/tests.yml) checks this before `npm ci`, and the
+  check asserts the property rather than blacklisting a hostname — the mirror's
+  name does not belong in a public repository
 - Local dev uses the Azurite storage emulator (see `docker-compose.yml`). The
   Table Storage SDK refuses a plain-http endpoint unless
   `allowInsecureConnection` is passed, so `storage.js` sets it — but only when

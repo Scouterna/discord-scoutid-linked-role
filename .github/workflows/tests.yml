@@ -51,6 +51,35 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Lockfile must resolve from the public registry
+        # Development happens behind a network that TLS-intercepts
+        # registry.npmjs.org, so a gitignored .npmrc points npm at a reachable
+        # mirror instead. npm rewrites the registry host at install time, so a
+        # lockfile recording npmjs URLs serves both networks — but a lockfile
+        # *generated* there records the mirror in every `resolved`, and this
+        # runner cannot resolve that host.
+        #
+        # The check is host-agnostic on purpose: it asserts what must be true
+        # rather than blacklisting a name. It also catches the case the obvious
+        # version misses — the mirror answers tarball requests from a *different*
+        # host than the one configured, so grepping for the configured registry
+        # finds nothing.
+        #
+        # Runs before `npm ci` because the alternative symptom is ENOTFOUND on a
+        # random transitive dependency, eighty seconds in, which reads as a
+        # runner network glitch.
+        run: |
+          hosts=$(grep -o '"resolved": "https://[^/"]*' package-lock.json \
+            | sed 's|.*https://||' | sort -u)
+          bad=$(echo "$hosts" | grep -v '^registry\.npmjs\.org$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::package-lock.json resolves from a non-public registry: $bad"
+            echo "Rewrite the host back before committing:"
+            echo "  sed -i 's|https://<mirror-host>/npm/|https://registry.npmjs.org/|g' package-lock.json"
+            exit 1
+          fi
+          echo "all resolved URLs point at registry.npmjs.org"
+
       - run: npm ci
 
       - name: Lint
