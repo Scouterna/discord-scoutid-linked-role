@@ -33,9 +33,10 @@ const SCOUTNET_TTL_MS = 10 * 60 * 1000;
 // anything in production: the real account is https, the flag stays false there,
 // and a misconfiguration that downgraded prod to http would still be refused —
 // it would have to say so in the connection string to get here.
-const insecureEndpoint = /(^|;)\s*(TableEndpoint\s*=\s*http:\/\/|DefaultEndpointsProtocol\s*=\s*http\s*(;|$))/i.test(
-  config.TABLE_CONNECTION_STRING ?? "",
-);
+const insecureEndpoint =
+  /(^|;)\s*(TableEndpoint\s*=\s*http:\/\/|DefaultEndpointsProtocol\s*=\s*http\s*(;|$))/i.test(
+    config.TABLE_CONNECTION_STRING ?? "",
+  );
 
 const client = TableClient.fromConnectionString(
   config.TABLE_CONNECTION_STRING,
@@ -114,7 +115,12 @@ export async function getScoutIDTokens(userId) {
 
 export async function storeStateData(state, data) {
   await ensureTable();
-  await setValue("state", state, JSON.stringify(data), Date.now() + STATE_TTL_MS);
+  await setValue(
+    "state",
+    state,
+    JSON.stringify(data),
+    Date.now() + STATE_TTL_MS,
+  );
 }
 
 export async function getStateData(state) {
@@ -314,7 +320,10 @@ export async function getMemberSnapshot() {
 const scoutNetCache = new Map(); // type -> { value, expiresAt }
 
 export async function storeScoutNetData(type, data) {
-  scoutNetCache.set(type, { value: data, expiresAt: Date.now() + SCOUTNET_TTL_MS });
+  scoutNetCache.set(type, {
+    value: data,
+    expiresAt: Date.now() + SCOUTNET_TTL_MS,
+  });
 }
 
 export async function getScoutNetData(type) {

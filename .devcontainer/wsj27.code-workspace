@@ -5,7 +5,7 @@
   "folders": [
     { "path": "/workspaces/discord-scoutid-linked-role" },
     { "path": "/workspaces/wsj27-infra" },
-    { "path": "/workspaces/wsj27-discord-bot" }
+    { "path": "/workspaces/wsj27-discord-bot" },
   ],
-  "settings": {}
+  "settings": {},
 }

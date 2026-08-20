@@ -46,7 +46,11 @@ test("getGuildMembers follows pagination past the 1000-member page limit", async
 
   const members = await discord.getGuildMembers("G1");
   assert.equal(members.length, 2250);
-  assert.deepEqual(requests, ["0", "1000", "2000"], "cursor should be the last id of each page");
+  assert.deepEqual(
+    requests,
+    ["0", "1000", "2000"],
+    "cursor should be the last id of each page",
+  );
   assert.equal(members.at(-1).user.id, "2250");
 });
 

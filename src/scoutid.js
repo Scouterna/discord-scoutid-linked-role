@@ -1,14 +1,13 @@
-import crypto from 'crypto';
-import config from './config.js';
+import crypto from "crypto";
+import config from "./config.js";
 
 /**
- * Code specific to communicating with the ScoutID API. 
+ * Code specific to communicating with the ScoutID API.
  * See https://scoutid.se for more details.
- * 
+ *
  * OIDC discovery is available at:
  *  https://scoutid.se/simplesaml/module.php/oidc/openid-configuration.php
-*/
-
+ */
 
 /**
  * Generate the url which the user will be directed to in order to approve the
@@ -19,31 +18,35 @@ export function getOidcAuthorizationUrl() {
   const state = crypto.randomUUID();
   const nonce = crypto.randomUUID();
 
-  const codeVerifier = crypto.randomBytes(64).toString('base64url');
+  const codeVerifier = crypto.randomBytes(64).toString("base64url");
   const codeChallenge = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(codeVerifier)
-    .digest('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+    .digest("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 
-  const authorizationEndpoint = "https://scoutid.se/simplesaml/module.php/oidc/authorize.php"
+  const authorizationEndpoint =
+    "https://scoutid.se/simplesaml/module.php/oidc/authorize.php";
   const url = new URL(authorizationEndpoint);
-  url.searchParams.set('client_id', config.SCOUTID_CLIENT_ID);
-  url.searchParams.set('redirect_uri', config.SCOUTID_REDIRECT_URI);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', config.SCOUTID_SCOPES || 'openid profile email');
-  url.searchParams.set('state', state);
-  url.searchParams.set('nonce', nonce);
-  url.searchParams.set('code_challenge', codeChallenge);
-  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set("client_id", config.SCOUTID_CLIENT_ID);
+  url.searchParams.set("redirect_uri", config.SCOUTID_REDIRECT_URI);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set(
+    "scope",
+    config.SCOUTID_SCOPES || "openid profile email",
+  );
+  url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
+  url.searchParams.set("code_challenge", codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
 
   return {
     state,
     nonce,
     codeVerifier,
-    url: url.toString()
+    url: url.toString(),
   };
 }
 
@@ -51,25 +54,24 @@ export function getOidcAuthorizationUrl() {
  * Given an OIDC authorization code from ScoutID, exchange it for access tokens.
  */
 export async function getOidcTokens({ code, codeVerifier }) {
-  if (!code) throw new Error('Missing authorization code');
-  if (!codeVerifier) throw new Error('Missing PKCE code_verifier');
+  if (!code) throw new Error("Missing authorization code");
+  if (!codeVerifier) throw new Error("Missing PKCE code_verifier");
 
-  const url = 'https://scoutid.se/simplesaml/module.php/oidc/access_token.php';
+  const url = "https://scoutid.se/simplesaml/module.php/oidc/access_token.php";
   const body = new URLSearchParams({
-        client_id: config.SCOUTID_CLIENT_ID,
+    client_id: config.SCOUTID_CLIENT_ID,
     client_secret: config.SCOUTID_CLIENT_SECRET,
-    grant_type: 'authorization_code',
+    grant_type: "authorization_code",
     code,
     redirect_uri: config.SCOUTID_REDIRECT_URI,
     code_verifier: codeVerifier,
-
   });
 
   const response = await fetch(url, {
     body,
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      "Content-Type": "application/x-www-form-urlencoded",
     },
   });
   if (response.ok) {
@@ -77,14 +79,14 @@ export async function getOidcTokens({ code, codeVerifier }) {
   } else {
     const errorText = await response.text();
     throw new Error(
-      `Error fetching ScoutID OIDC tokens: [${response.status}] ${response.statusText} - ${errorText}`
+      `Error fetching ScoutID OIDC tokens: [${response.status}] ${response.statusText} - ${errorText}`,
     );
   }
 }
 
 /**
  * Given an access token, fetch user profile information from ScoutID.
- * 
+ *
  * Example response (fields depend on granted scopes):
  * {
  *   "sub": "123@scoutnet.se",
@@ -97,26 +99,27 @@ export async function getOidcTokens({ code, codeVerifier }) {
  * }
  */
 export async function getUserData(tokens) {
-  const url = 'https://scoutid.se/simplesaml/module.php/oidc/userinfo.php';
+  const url = "https://scoutid.se/simplesaml/module.php/oidc/userinfo.php";
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${tokens.access_token}`,
     },
   });
-  
+
   if (response.ok) {
     const data = await response.json();
 
     const metadata = {
-      name: data.given_name + ' ' + data.family_name,
+      name: data.given_name + " " + data.family_name,
       scoutid: data.profile,
       email: data.email,
     };
-  
+
     return metadata;
   } else {
     const errorText = await response.text();
-    throw new Error(`Error fetching ScoutID user data: [${response.status}] ${response.statusText} - ${errorText}`);
+    throw new Error(
+      `Error fetching ScoutID user data: [${response.status}] ${response.statusText} - ${errorText}`,
+    );
   }
 }
-

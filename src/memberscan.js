@@ -71,7 +71,10 @@ function accountCreatedAt(userId) {
 function toSnapshot(members) {
   const snap = {};
   for (const m of members) {
-    snap[m.user.id] = [m.nick ?? "", m.user.global_name || m.user.username || ""];
+    snap[m.user.id] = [
+      m.nick ?? "",
+      m.user.global_name || m.user.username || "",
+    ];
   }
   return snap;
 }
@@ -136,10 +139,18 @@ async function fetchAuditType(guildId, actionType, cursor) {
 function removalsByUser(kickEntries, banEntries) {
   const map = new Map();
   for (const e of kickEntries) {
-    map.set(e.target_id, { kind: "kick", actorId: e.user_id, reason: e.reason ?? null });
+    map.set(e.target_id, {
+      kind: "kick",
+      actorId: e.user_id,
+      reason: e.reason ?? null,
+    });
   }
   for (const e of banEntries) {
-    map.set(e.target_id, { kind: "ban", actorId: e.user_id, reason: e.reason ?? null });
+    map.set(e.target_id, {
+      kind: "ban",
+      actorId: e.user_id,
+      reason: e.reason ?? null,
+    });
   }
   return map;
 }
@@ -184,7 +195,8 @@ export async function runMemberScan({ dryRun = false } = {}) {
   const wanted = config.LOG_MEMBER_EVENTS;
   const guildId = config.DISCORD_GUILD_ID;
 
-  if (!guildId) throw new Error("DISCORD_GUILD_ID is not set — nothing to scan");
+  if (!guildId)
+    throw new Error("DISCORD_GUILD_ID is not set — nothing to scan");
   if (wanted.size === 0) return { disabled: "LOG_MEMBER_EVENTS is off" };
   if (!config.LOG_CHANNEL_ID && !dryRun) {
     return { disabled: "LOG_CHANNEL_ID is not set — nowhere to report" };
@@ -273,7 +285,9 @@ export async function runMemberScan({ dryRun = false } = {}) {
     linkedIds = new Set(links.map((l) => l.discordUserId));
   }
 
-  const botIds = new Set(members.filter((m) => m.user?.bot).map((m) => m.user.id));
+  const botIds = new Set(
+    members.filter((m) => m.user?.bot).map((m) => m.user.id),
+  );
 
   // A dry run collects its lines and writes nothing. Routing through a sink
   // rather than a global flag keeps this run's choice local to this run: the
@@ -328,7 +342,14 @@ export async function runMemberScan({ dryRun = false } = {}) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   if (dryRun) {
-    return { counts, total, dryRun: true, auditUnavailable, enabled: [...wanted], lines };
+    return {
+      counts,
+      total,
+      dryRun: true,
+      auditUnavailable,
+      enabled: [...wanted],
+      lines,
+    };
   }
 
   if (total === 0) {
@@ -373,7 +394,8 @@ export function formatScanSummary(result) {
   const parts = [];
   if (on.has("join")) parts.push(`${c.joined} nya`);
   if (on.has("leave")) {
-    const mod = c.removedByMod > 0 ? ` (varav ${c.removedByMod} kickad/bannad)` : "";
+    const mod =
+      c.removedByMod > 0 ? ` (varav ${c.removedByMod} kickad/bannad)` : "";
     parts.push(`${c.gone} borta${mod}`);
   }
   if (on.has("nickname")) parts.push(`${c.renamed} namnbyten`);

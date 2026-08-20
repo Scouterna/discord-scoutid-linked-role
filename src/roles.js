@@ -106,7 +106,7 @@ export async function getDesiredRoles(
     if (!allowIncomplete) throw e;
     console.error(
       `Error fetching ScoutNet data for member ${scoutnetMemberId}:`,
-      e.message
+      e.message,
     );
     // Discard anything gathered before the failure: a half-filled answer is
     // indistinguishable from a complete one to the caller.
@@ -152,7 +152,7 @@ export async function getNicknameSuffix(
     if (!allowIncomplete) throw e;
     console.error(
       `Error getting nickname suffix for member ${scoutnetMemberId}:`,
-      e.message
+      e.message,
     );
     return "";
   }
@@ -172,7 +172,7 @@ function getManagedRoleNames() {
     roles.add(config.SCOUTNET_EVENT_ROLE);
     if (config.SCOUTNET_FEE_ROLES) {
       for (const category of new Set(
-        Object.values(config.SCOUTNET_FEE_ROLES)
+        Object.values(config.SCOUTNET_FEE_ROLES),
       )) {
         // Managed, so it is taken away again when someone changes category —
         // an ex-leader must not keep `Ledare` and its AutoMod exemption.
@@ -261,20 +261,25 @@ export async function syncUserRoles(guildId, discordUserId) {
   let nicknameSet = null;
   try {
     const currentNick = member.nick || member.user?.global_name || "";
-    const participant = isVerified ? await scoutnet.getParticipant(scoutId) : null;
+    const participant = isVerified
+      ? await scoutnet.getParticipant(scoutId)
+      : null;
     const scoutNetName = participant
       ? [participant.first_name, participant.last_name]
           .filter(Boolean)
           .join(" ")
           .trim()
       : "";
-    const baseName =
-      scoutNetName || currentNick.replace(/\s*\(.*\)\s*$/, "");
+    const baseName = scoutNetName || currentNick.replace(/\s*\(.*\)\s*$/, "");
 
     if (baseName) {
       const newNick = (baseName + nicknameSuffix).substring(0, 32);
       if (newNick !== currentNick) {
-        await discord.updateGuildMemberNickname(guildId, discordUserId, newNick);
+        await discord.updateGuildMemberNickname(
+          guildId,
+          discordUserId,
+          newNick,
+        );
         nicknameSet = newNick;
       }
     }
@@ -294,7 +299,7 @@ export async function syncUserRoles(guildId, discordUserId) {
         added.push(roleName);
       } catch (e) {
         console.error(
-          `Failed to add role "${roleName}" (${role.id}) to user ${discordUserId}: ${e.message}`
+          `Failed to add role "${roleName}" (${role.id}) to user ${discordUserId}: ${e.message}`,
         );
       }
     }
@@ -314,7 +319,7 @@ export async function syncUserRoles(guildId, discordUserId) {
         removed.push(managedName);
       } catch (e) {
         console.error(
-          `Failed to remove role "${managedName}" (${role.id}) from user ${discordUserId}: ${e.message}`
+          `Failed to remove role "${managedName}" (${role.id}) from user ${discordUserId}: ${e.message}`,
         );
       }
     }
@@ -333,7 +338,7 @@ export async function syncUserRoles(guildId, discordUserId) {
           removed.push(role.name);
         } catch (e) {
           console.error(
-            `Failed to remove role "${role.name}" (${role.id}) from user ${discordUserId}: ${e.message}`
+            `Failed to remove role "${role.name}" (${role.id}) from user ${discordUserId}: ${e.message}`,
           );
         }
       }
@@ -354,7 +359,12 @@ export async function syncUserRoles(guildId, discordUserId) {
  * Caller passes the shared `roleMap` and the member object to avoid refetching.
  * Returns { added, removed }.
  */
-export async function stripUnlinkedMember(guildId, discordUserId, roleMap, member) {
+export async function stripUnlinkedMember(
+  guildId,
+  discordUserId,
+  roleMap,
+  member,
+) {
   const managedRoles = getManagedRoleNames();
   const divPrefixes = getDivisionPrefixes();
   const currentRoleIds = new Set(member.roles);
@@ -422,7 +432,9 @@ export async function stripUnlinkedMember(guildId, discordUserId, roleMap, membe
       );
     }
   } catch (e) {
-    console.error(`Error resetting nickname for ${discordUserId}: ${e.message}`);
+    console.error(
+      `Error resetting nickname for ${discordUserId}: ${e.message}`,
+    );
   }
 
   return { added, removed };

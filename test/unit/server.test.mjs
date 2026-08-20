@@ -81,7 +81,9 @@ function post(body, { sign = true } = {}) {
   const raw = JSON.stringify(body);
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = sign
-    ? crypto.sign(null, Buffer.from(timestamp + raw), privateKey).toString("hex")
+    ? crypto
+        .sign(null, Buffer.from(timestamp + raw), privateKey)
+        .toString("hex")
     : "00".repeat(64);
   return fetch(`${BASE}/interactions`, {
     method: "POST",
@@ -148,7 +150,11 @@ test("a signature over different content is rejected", async () => {
   // Signing one body and sending another is the replay/tamper case.
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = crypto
-    .sign(null, Buffer.from(timestamp + JSON.stringify({ type: 1 })), privateKey)
+    .sign(
+      null,
+      Buffer.from(timestamp + JSON.stringify({ type: 1 })),
+      privateKey,
+    )
     .toString("hex");
   const res = await fetch(`${BASE}/interactions`, {
     method: "POST",
@@ -193,7 +199,10 @@ for (const name of [
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { type: 5, data: { flags: 64 } });
-    assert.ok(elapsed < 1000, `acknowledged after ${elapsed}ms, Discord allows 3000`);
+    assert.ok(
+      elapsed < 1000,
+      `acknowledged after ${elapsed}ms, Discord allows 3000`,
+    );
   });
 }
 
@@ -207,7 +216,11 @@ for (const name of ["audit-scoutid", "scan-scoutid", "link-scoutid"]) {
     await post(command(name, { admin: false, token }));
     const replies = await replyFor(token);
 
-    assert.equal(replies.length, 1, "expected one reply to the deferred response");
+    assert.equal(
+      replies.length,
+      1,
+      "expected one reply to the deferred response",
+    );
     assert.match(replies[0].content, /admin/i);
   });
 }
@@ -230,5 +243,9 @@ test("the interactions route reads the raw body, not a parsed one", async () => 
     },
     body: raw,
   });
-  assert.equal(res.status, 200, "unusual but valid JSON spacing must still verify");
+  assert.equal(
+    res.status,
+    200,
+    "unusual but valid JSON spacing must still verify",
+  );
 });

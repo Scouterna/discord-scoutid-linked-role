@@ -29,12 +29,15 @@ const {
 } = await import("../../src/config.js");
 
 test("fee roles map fee ids to categories", () => {
-  assert.deepEqual(parseFeeRoles("25694:deltagare,25696:ist,33293:ledare,25697:cmt"), {
-    25694: "deltagare",
-    25696: "ist",
-    33293: "ledare",
-    25697: "cmt",
-  });
+  assert.deepEqual(
+    parseFeeRoles("25694:deltagare,25696:ist,33293:ledare,25697:cmt"),
+    {
+      25694: "deltagare",
+      25696: "ist",
+      33293: "ledare",
+      25697: "cmt",
+    },
+  );
 });
 
 test("several fee ids may share one category", () => {
@@ -52,7 +55,10 @@ test("a repeated fee id keeps the last category", () => {
 });
 
 test("fee roles tolerate whitespace and skip incomplete pairs", () => {
-  assert.deepEqual(parseFeeRoles(" 1 : ist , 2 , :x , 3:cmt "), { 1: "ist", 3: "cmt" });
+  assert.deepEqual(parseFeeRoles(" 1 : ist , 2 , :x , 3:cmt "), {
+    1: "ist",
+    3: "cmt",
+  });
 });
 
 test("an empty fee-role config is null, not an empty object", () => {
@@ -88,7 +94,9 @@ test("a division entry with the wrong number of parts is dropped whole", () => {
 });
 
 test("nickname suffixes allow an empty half", () => {
-  const m = parseNicknameSuffixes("deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT");
+  const m = parseNicknameSuffixes(
+    "deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT",
+  );
   // deltagare gets a suffix only when a division is known; cmt only when not.
   assert.deepEqual(m.deltagare, { withDiv: "{div}", withoutDiv: "" });
   assert.deepEqual(m.cmt, { withDiv: "", withoutDiv: "CMT" });
@@ -106,7 +114,10 @@ test("deltagare deliberately has no flat marker", () => {
   // Its absence is what makes the AutoMod link filter hit participants: the rule
   // exempts the markers, and there is none for them. A marker added here would
   // silently switch the filter off for every participant.
-  assert.equal(parseCategoryRoles("ledare:Ledare,ist:IST").deltagare, undefined);
+  assert.equal(
+    parseCategoryRoles("ledare:Ledare,ist:IST").deltagare,
+    undefined,
+  );
 });
 
 test("member events default to join, leave and nickname", () => {
@@ -118,7 +129,11 @@ test("member events default to join, leave and nickname", () => {
 
 test("member events can be switched off entirely", () => {
   for (const value of ["off", "none", "", "  ", "OFF"]) {
-    assert.equal(parseMemberEvents(value).size, 0, `"${value}" should disable the scan`);
+    assert.equal(
+      parseMemberEvents(value).size,
+      0,
+      `"${value}" should disable the scan`,
+    );
   }
 });
 

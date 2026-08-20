@@ -80,7 +80,10 @@ test("a long run is split across messages under Discord's limit", async () => {
   const { posts: sent } = await drain();
   assert.ok(sent.length > 1, "should have split into several messages");
   for (const p of sent) {
-    assert.ok(p.content.length <= 2000, `message of ${p.content.length} chars exceeds the limit`);
+    assert.ok(
+      p.content.length <= 2000,
+      `message of ${p.content.length} chars exceeds the limit`,
+    );
   }
   // Nothing may be dropped in the splitting.
   const all = sent.map((p) => p.content).join("\n");
@@ -160,11 +163,19 @@ test("a manual link records who linked whom", async () => {
   // confirmed, so both parties belong in the line.
   assert.match(sent[0].content, /<@42>/);
   assert.match(sent[0].content, /<@1>/);
-  assert.match(sent[0].content, /111/, "replacing an existing link should be visible");
+  assert.match(
+    sent[0].content,
+    /111/,
+    "replacing an existing link should be visible",
+  );
 });
 
 test("a sync that changed nothing is not logged", async () => {
-  eventlog.logSync({ discordUserId: "1", callerId: "1", result: { added: [], removed: [] } });
+  eventlog.logSync({
+    discordUserId: "1",
+    callerId: "1",
+    result: { added: [], removed: [] },
+  });
   const { posts: sent } = await drain();
   // A feed that records non-events is a feed nobody reads.
   assert.equal(sent.length, 0);

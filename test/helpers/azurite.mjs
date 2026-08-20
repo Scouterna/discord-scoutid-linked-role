@@ -40,7 +40,10 @@ function dockerHostCandidates() {
     for (const line of route.split("\n").slice(1)) {
       const [, destination, gateway] = line.split(/\s+/);
       if (destination !== "00000000" || !gateway) continue;
-      const octets = gateway.match(/../g).reverse().map((h) => parseInt(h, 16));
+      const octets = gateway
+        .match(/../g)
+        .reverse()
+        .map((h) => parseInt(h, 16));
       hosts.push(octets.join("."));
       break;
     }

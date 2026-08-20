@@ -46,7 +46,13 @@ async function withParticipants(participants) {
   });
 }
 
-const FEE = { deltagare: 25694, ist: 25696, istOther: 25702, ledare: 33293, cmt: 25697 };
+const FEE = {
+  deltagare: 25694,
+  ist: 25696,
+  istOther: 25702,
+  ledare: 33293,
+  cmt: 25697,
+};
 
 test("a linked member always gets the scout role", async () => {
   await withParticipants({});
@@ -56,27 +62,46 @@ test("a linked member always gets the scout role", async () => {
 
 test("a cancelled registration counts as not registered", async () => {
   await withParticipants({
-    1: { fee_id: FEE.deltagare, cancelled_date: "2026-05-01", questions: { 88168: "7" } },
+    1: {
+      fee_id: FEE.deltagare,
+      cancelled_date: "2026-05-01",
+      questions: { 88168: "7" },
+    },
   });
   const r = await roles.getDesiredRoles("1");
-  assert.deepEqual(r, ["scout"], "a cancelled participant must lose event access");
+  assert.deepEqual(
+    r,
+    ["scout"],
+    "a cancelled participant must lose event access",
+  );
 });
 
 test("a participant gets the event role, the division role and no flat marker", async () => {
   await withParticipants({
-    1: { fee_id: FEE.deltagare, cancelled_date: null, questions: { 88168: "7" } },
+    1: {
+      fee_id: FEE.deltagare,
+      cancelled_date: null,
+      questions: { 88168: "7" },
+    },
   });
   const r = await roles.getDesiredRoles("1");
   // Zero-padded to two digits: ScoutNet answers "7", the Discord role is "-07".
   assert.deepEqual(r, ["scout", "wsj-event", "Deltagare-07"]);
   // Participants deliberately have no flat marker — its absence is what makes
   // the AutoMod link filter apply to them.
-  assert.ok(!r.includes("Deltagare"), "participants must not get a flat marker");
+  assert.ok(
+    !r.includes("Deltagare"),
+    "participants must not get a flat marker",
+  );
 });
 
 test("a leader gets both the division role and the flat marker", async () => {
   await withParticipants({
-    2: { fee_id: FEE.ledare, cancelled_date: null, questions: { 107592: "12" } },
+    2: {
+      fee_id: FEE.ledare,
+      cancelled_date: null,
+      questions: { 107592: "12" },
+    },
   });
   const r = await roles.getDesiredRoles("2");
   assert.deepEqual(r, ["scout", "wsj-event", "Ledare", "Ledare-12"]);
@@ -112,7 +137,11 @@ test("both IST travel groups produce the same patrol role", async () => {
   // belongs to exactly one of them and the bot need not tell them apart.
   await withParticipants({
     5: { fee_id: FEE.ist, cancelled_date: null, questions: { 88168: "7" } },
-    6: { fee_id: FEE.istOther, cancelled_date: null, questions: { 88168: "7" } },
+    6: {
+      fee_id: FEE.istOther,
+      cancelled_date: null,
+      questions: { 88168: "7" },
+    },
   });
   const a = await roles.getDesiredRoles("5");
   const b = await roles.getDesiredRoles("6");
@@ -142,7 +171,11 @@ test("an unmapped fee id yields event access but no category role", async () => 
 
 test("a division number of 10 or more is not padded further", async () => {
   await withParticipants({
-    9: { fee_id: FEE.deltagare, cancelled_date: null, questions: { 88168: "42" } },
+    9: {
+      fee_id: FEE.deltagare,
+      cancelled_date: null,
+      questions: { 88168: "42" },
+    },
   });
   assert.deepEqual(await roles.getDesiredRoles("9"), [
     "scout",
@@ -185,7 +218,10 @@ test("allowIncomplete degrades to the scout role, for the linking path", async (
 test("a ScoutNet failure throws for the nickname suffix too", async () => {
   await withScoutNetDown();
   // "" is a real instruction to rename someone without a suffix, not a shrug.
-  await assert.rejects(() => roles.getNicknameSuffix("2"), /ScoutNet API error/);
+  await assert.rejects(
+    () => roles.getNicknameSuffix("2"),
+    /ScoutNet API error/,
+  );
   assert.equal(
     await roles.getNicknameSuffix("2", { allowIncomplete: true }),
     "",
@@ -196,7 +232,11 @@ test("a ScoutNet failure throws for the nickname suffix too", async () => {
 
 test("the suffix uses the division when there is one", async () => {
   await withParticipants({
-    2: { fee_id: FEE.ledare, cancelled_date: null, questions: { 107592: "12" } },
+    2: {
+      fee_id: FEE.ledare,
+      cancelled_date: null,
+      questions: { 107592: "12" },
+    },
   });
   assert.equal(await roles.getNicknameSuffix("2"), " (AL12)");
 });
@@ -210,7 +250,11 @@ test("the suffix falls back to the division-less form", async () => {
 
 test("a participant's suffix is the bare division number", async () => {
   await withParticipants({
-    1: { fee_id: FEE.deltagare, cancelled_date: null, questions: { 88168: "3" } },
+    1: {
+      fee_id: FEE.deltagare,
+      cancelled_date: null,
+      questions: { 88168: "3" },
+    },
   });
   assert.equal(await roles.getNicknameSuffix("1"), " (03)");
 });

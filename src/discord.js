@@ -370,8 +370,12 @@ export async function getNewestAuditLogId(guildId, actionType) {
  *
  * Throws with `status = 403` when the bot's role lacks View Audit Log.
  */
-export async function getAuditLogEntries(guildId, { actionType, after, cap = 500 }) {
-  if (after == null) throw new Error("getAuditLogEntries requires an `after` cursor");
+export async function getAuditLogEntries(
+  guildId,
+  { actionType, after, cap = 500 },
+) {
+  if (after == null)
+    throw new Error("getAuditLogEntries requires an `after` cursor");
   const entries = [];
   let before = null;
   let truncated = false;
@@ -463,12 +467,14 @@ export async function registerStatusCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
   const command = {
     name: "status-scoutid",
-    description: "Visa status för en person, eller server-sammanfattning utan argument (admin)",
+    description:
+      "Visa status för en person, eller server-sammanfattning utan argument (admin)",
     default_member_permissions: "8", // ADMINISTRATOR
     options: [
       {
         name: "person",
-        description: "Person att visa status för (utelämna för server-sammanfattning)",
+        description:
+          "Person att visa status för (utelämna för server-sammanfattning)",
         type: 6, // USER
         required: false,
       },
@@ -496,7 +502,8 @@ export async function registerAuditCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
   const command = {
     name: "audit-scoutid",
-    description: "Lista avvikelser mellan Discord, ScoutID-länkar och ScoutNet (admin)",
+    description:
+      "Lista avvikelser mellan Discord, ScoutID-länkar och ScoutNet (admin)",
     default_member_permissions: "8", // ADMINISTRATOR
   };
 
@@ -521,7 +528,8 @@ export async function registerLinkCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
   const command = {
     name: "link-scoutid",
-    description: "Länka manuellt en Discord-användare till ett ScoutNet member_no (admin)",
+    description:
+      "Länka manuellt en Discord-användare till ett ScoutNet member_no (admin)",
     default_member_permissions: "8", // ADMINISTRATOR
     options: [
       {
@@ -562,12 +570,14 @@ export async function registerScanCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
   const command = {
     name: "scan-scoutid",
-    description: "Kör medlemsscannern nu i stället för att vänta på schemat (admin)",
+    description:
+      "Kör medlemsscannern nu i stället för att vänta på schemat (admin)",
     default_member_permissions: "8", // ADMINISTRATOR
     options: [
       {
         name: "torrkor",
-        description: "Visa vad som skulle rapporteras utan att posta eller spara",
+        description:
+          "Visa vad som skulle rapporteras utan att posta eller spara",
         type: 5, // BOOLEAN
         required: false,
       },

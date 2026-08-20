@@ -15,11 +15,7 @@ import * as roles from "./roles.js";
 const SCOUT_ROLE_FALLBACK = "scout";
 
 function normalizeName(s) {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim();
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 }
 
 /**
@@ -151,7 +147,8 @@ export async function runAudit(guildId) {
         const member = memberMap.get(u.discordUserId);
         if (!member) continue;
         if (member.roles.includes(scoutRole.id)) continue;
-        const name = member.nick || member.user.global_name || member.user.username;
+        const name =
+          member.nick || member.user.global_name || member.user.username;
         items.push(
           `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen köra \`/linked-role\` igen, eller \`/link-scoutid person:<@${u.discordUserId}> scoutid:${u.scoutId}\``,
         );
@@ -258,7 +255,10 @@ export async function runAudit(guildId) {
         const display = normalizeName(displayClean);
         const first = normalizeName(p.first_name || "");
         const last = normalizeName(p.last_name || "");
-        if ((!first || display.includes(first)) && (!last || display.includes(last))) {
+        if (
+          (!first || display.includes(first)) &&
+          (!last || display.includes(last))
+        ) {
           continue;
         }
         items.push(
@@ -304,7 +304,8 @@ export async function runAudit(guildId) {
     }
     categories.push({
       id: "missing_division_roles",
-      title: "Division-roller som ScoutNet refererar till men som saknas i Discord",
+      title:
+        "Division-roller som ScoutNet refererar till men som saknas i Discord",
       items,
     });
   }
@@ -327,7 +328,9 @@ export async function runAudit(guildId) {
         }
       }
       for (const [fid, count] of [...seen.entries()].sort()) {
-        items.push(`- fee_id=\`${fid}\` (${count} deltagare) — saknas i SCOUTNET_FEE_ROLES`);
+        items.push(
+          `- fee_id=\`${fid}\` (${count} deltagare) — saknas i SCOUTNET_FEE_ROLES`,
+        );
       }
     }
     categories.push({
@@ -425,12 +428,12 @@ export async function runAudit(guildId) {
         const managedStatic = new Set(
           staticManagedRoleNames().map((n) => n.toLowerCase()),
         );
-        const divPrefixes = Object.values(
-          config.SCOUTNET_DIVISION_ROLES || {},
-        ).map((d) => {
-          const idx = d.withDiv.indexOf("{div}");
-          return idx >= 0 ? d.withDiv.substring(0, idx).toLowerCase() : null;
-        }).filter(Boolean);
+        const divPrefixes = Object.values(config.SCOUTNET_DIVISION_ROLES || {})
+          .map((d) => {
+            const idx = d.withDiv.indexOf("{div}");
+            return idx >= 0 ? d.withDiv.substring(0, idx).toLowerCase() : null;
+          })
+          .filter(Boolean);
 
         const extra = currentRoleNames.filter((n) => {
           const lower = n.toLowerCase();
@@ -444,7 +447,8 @@ export async function runAudit(guildId) {
         if (missing.length > 0 || extra.length > 0) {
           const parts = [];
           if (missing.length > 0) parts.push(`saknar: ${missing.join(", ")}`);
-          if (extra.length > 0) parts.push(`har felaktigt: ${extra.join(", ")}`);
+          if (extra.length > 0)
+            parts.push(`har felaktigt: ${extra.join(", ")}`);
           items.push(`- <@${u.discordUserId}> — ${parts.join(" · ")}`);
         }
       }
@@ -459,14 +463,14 @@ export async function runAudit(guildId) {
   // --- B4. Användare med flera division-roller i samma kategori ---
   {
     const items = [];
-    const divPrefixes = Object.entries(
-      config.SCOUTNET_DIVISION_ROLES || {},
-    ).map(([cat, d]) => {
-      const idx = d.withDiv.indexOf("{div}");
-      return idx >= 0
-        ? { category: cat, prefix: d.withDiv.substring(0, idx).toLowerCase() }
-        : null;
-    }).filter(Boolean);
+    const divPrefixes = Object.entries(config.SCOUTNET_DIVISION_ROLES || {})
+      .map(([cat, d]) => {
+        const idx = d.withDiv.indexOf("{div}");
+        return idx >= 0
+          ? { category: cat, prefix: d.withDiv.substring(0, idx).toLowerCase() }
+          : null;
+      })
+      .filter(Boolean);
 
     for (const m of guildMembers) {
       const byCategory = new Map();
@@ -513,7 +517,7 @@ export async function runAudit(guildId) {
         }
         // expectedSuffix is " (X)" or ""; extract just X
         const expectedToken = expectedSuffix
-          ? expectedSuffix.match(/\(([^()]*)\)/)?.[1] ?? null
+          ? (expectedSuffix.match(/\(([^()]*)\)/)?.[1] ?? null)
           : null;
 
         const display =
@@ -535,8 +539,7 @@ export async function runAudit(guildId) {
   }
 
   // Filter out the placeholder "skipped" items from being counted as issues
-  const issueCount = (items) =>
-    items.filter((i) => !i.startsWith("(")).length;
+  const issueCount = (items) => items.filter((i) => !i.startsWith("(")).length;
 
   const totals = {
     issues: 0,
@@ -565,10 +568,7 @@ export function formatAuditMarkdown(audit) {
   const lines = [];
   lines.push("**Audit-rapport för ScoutID-länkningar**");
   const m = audit.meta;
-  const parts = [
-    `${m.guildMembers} medlemmar`,
-    `${m.linkedUsers} länkade`,
-  ];
+  const parts = [`${m.guildMembers} medlemmar`, `${m.linkedUsers} länkade`];
   if (m.participants != null) parts.push(`${m.participants} i ScoutNet`);
   lines.push(parts.join(" · "));
   lines.push("");
@@ -603,10 +603,7 @@ export function formatAuditMarkdown(audit) {
 
 export function summarizeAudit(audit) {
   const m = audit.meta;
-  const parts = [
-    `${m.guildMembers} medlemmar`,
-    `${m.linkedUsers} länkade`,
-  ];
+  const parts = [`${m.guildMembers} medlemmar`, `${m.linkedUsers} länkade`];
   if (m.participants != null) parts.push(`${m.participants} i ScoutNet`);
   parts.push(`${audit.totals.issues} avvikelser`);
 

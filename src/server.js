@@ -350,7 +350,9 @@ async function handleRefreshCommand(interaction) {
 
       const errors = results.filter((r) => r.error);
       const changed = results.filter(
-        (r) => !r.error && ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
+        (r) =>
+          !r.error &&
+          ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
       );
       const unchanged = results.length - errors.length - changed.length;
 
@@ -653,7 +655,10 @@ async function handleScanCommand(interaction) {
     await discord.editInteractionResponse(token, reply);
   } catch (e) {
     console.error("Error handling scan command:", e);
-    await discord.editInteractionResponse(token, `Fel vid scanning: ${e.message}`);
+    await discord.editInteractionResponse(
+      token,
+      `Fel vid scanning: ${e.message}`,
+    );
   }
 }
 
@@ -696,7 +701,9 @@ async function handleLinkCommand(interaction) {
         `⚠️ Var länkad till \`${existing}\`, ersätter med \`${scoutIdInput}\`.`,
       );
     } else if (existing === scoutIdInput) {
-      messageParts.push("Redan länkad — tvingar om-synk av roller och smeknamn.");
+      messageParts.push(
+        "Redan länkad — tvingar om-synk av roller och smeknamn.",
+      );
     }
 
     let participant = null;

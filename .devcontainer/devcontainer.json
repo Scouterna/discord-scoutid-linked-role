@@ -7,7 +7,9 @@
     "ghcr.io/devcontainers/features/terraform:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     // minikube is not wanted: the cluster is remote (AKS `webservices`).
-    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": { "minikube": "none" },
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "minikube": "none"
+    },
     // Reuses the host's Docker daemon, so `docker build` and the repo's
     // docker-compose.yml (app + Azurite + ngrok) work from inside the container.
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
