@@ -89,7 +89,11 @@ jobs:
         # restricted. Nothing keeps the two in step, and they drifted once
         # already. Warns, never fails: the test gate protects production from bad
         # code, and permission drift is not that.
-        run: scripts/check-rbac-drift.sh
+        # Invoked through bash rather than executed directly. This repository is
+        # edited from a Windows bind mount where git has core.filemode=false, so
+        # a `chmod +x` never reaches a commit — the mode is recorded in the index
+        # as well, but the workflow does not depend on it having survived.
+        run: bash scripts/check-rbac-drift.sh
 
       - name: Apply manifests
         run: |

@@ -416,6 +416,16 @@ actionlint                 # hela .github/workflows/
 yq '.spec.template.spec.containers[0].image' k8s/deployment.yaml
 ```
 
+**`chmod +x` når inte en commit här.** Workspacet är en bind-mount från Windows
+och git står på `core.filemode=false`, så filläget ignoreras helt — ett skript
+som fungerar lokalt landar som `100644` och faller i CI med "Permission denied".
+Det tog en misslyckad deploy att upptäcka. Spela in läget explicit, och anropa
+skript via `bash` i workflows så de inte beror på att biten överlevde:
+
+```bash
+git update-index --chmod=+x scripts/nytt-skript.sh
+```
+
 `yq` finns för k8s-manifesten och kustomize-utdata. `python3-yaml` finns som
 fallback — imagen har inget `pip`, så apt är enda vägen till en YAML-parser.
 
