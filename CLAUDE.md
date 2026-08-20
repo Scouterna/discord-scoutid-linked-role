@@ -64,6 +64,8 @@ ut för det: dess image är en pinnad `azure-cli`-version, så `kubectl apply`
 rapporterade alltid `unchanged` och försökte aldrig patcha.
 `discord-scoutid-memberscan` kör botens egen image, vars tag CI skriver om varje
 gång — så patchen försöks varje deploy, och saknades namnet föll hela deployen.
+Samma gäller `discord-scoutid-refresh`, som lades till senare och av samma skäl
+måste stå namngivet i rollen.
 
 **Rollen låg inte i något repo.** Den applyades för hand 2026-08-12, och dess
 levande regler hade sedan driftat från sin egen `last-applied-configuration`:
@@ -285,7 +287,9 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   markörerna. `deltagare` har med flit ingen markör — frånvaron *är* det som gör
   att länkfiltret träffar dem. Ändras utdelningen måste ordningen hållas: bot
   först, `/refresh-scoutid alla:true`, sedan `terraform apply` i infra-repot.
-  Omvänd ordning länkblockerar alla ledare och IST i mellantiden
+  Omvänd ordning länkblockerar alla ledare och IST i mellantiden. Vänta *inte* in
+  den nattliga synken för mellansteget — den kommer, men "i mellantiden" är då upp
+  till ett dygn långt
 - Each fee category can have its own ScoutNet question ID for division assignment
 - Division numbers are zero-padded to minimum 2 digits
 - The bot cannot modify users above it in Discord's role hierarchy (403 is expected for admins)
@@ -358,6 +362,49 @@ SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
 ```
+
+## Nattlig rollsynk — [src/refresh.js](src/refresh.js)
+
+Ett CronJob ([k8s/refresh-cronjob.yaml](k8s/refresh-cronjob.yaml), 04:10 UTC)
+kör `syncAllUserRoles` mot hela servern och rapporterar till `#server-logg`.
+
+**Varför den finns:** ingenting propagerade ScoutNet-ändringar av sig självt. En
+deltagare som fick avdelning tilldelad satt kvar på `Deltagare-Väntande` tills en
+admin råkade skriva `/refresh-scoutid alla:true` — och ju närmare eventet, desto
+mer rör sig indelningen. Arbetet var redan skrivet; det som saknades var något
+som körde det utan att bli tillsagt.
+
+**CronJob och inte en timer i servern**, av samma skäl som medlemsscannern:
+Deployment kör `replicas: 2`, så ett intervall inne i den hade synkat allt två
+gånger.
+
+```bash
+node src/refresh.js --dry-run          # visa vad den skulle ändra
+kubectl get cronjob discord-scoutid-refresh
+kubectl create job manual-refresh --from=cronjob/discord-scoutid-refresh
+```
+
+Tre egenskaper som måste hålla om det här ändras:
+
+- **Guild-tillståndet hämtas en gång per körning, inte en gång per användare.**
+  `syncUserRoles` hämtade tidigare hela rollistan själv, så en körning över 2 500
+  länkade personer bad om 151 roller 2 500 gånger för att komma fram till att
+  ingenting ändrats. Nu tar den emot `roleMap` och `member` från anroparen, och
+  `syncAllUserRoles` hämtar båda en gång. Pinnat i `integration/syncall`.
+- **Pausen mellan skrivningar tas bara när något faktiskt skrevs.** 200 ms per
+  användare oavsett är åtta minuters sömn vid 2 500 personer för att rapportera
+  att inget hänt. Det riktiga rate limit-skyddet är 429-retryn i `discord.js`.
+- **Sammanfattningsraden loggas även när ingenting ändrades**, till skillnad från
+  per-användarraderna. Ett schemalagt jobb som inte loggar något går inte att
+  skilja från ett schemalagt jobb som slutat köra — och det här finns just för att
+  ingen ska behöva komma ihåg det, så dess puls måste synas. En rad per natt.
+
+`/refresh-scoutid dryrun:true` kör samma sak från Discord utan att skriva.
+`dryRun` är en **parameter, aldrig en modulflagga**: servern hanterar
+förfrågningar samtidigt, så en processglobal flagga hade tystat en riktig
+länkning som råkade köra samtidigt. En dry-run skriver heller aldrig i
+händelseloggen — den kanalen är protokollet över vad boten *gjorde*, och
+"hade gjort"-rader gör den opålitlig för den enda fråga den finns för.
 
 ## Händelselogg till Discord
 
@@ -454,12 +501,12 @@ Två egenskaper som måste hålla:
   medlem som nyanländ skulle begrava kanalen och lära alla att ignorera den.
 
 `/scan-scoutid` kör samma `runMemberScan` som CronJobbet, direkt, för den som
-inte vill vänta på schemat. `torrkor:true` visar vad den skulle rapportera utan
+inte vill vänta på schemat. `dryrun:true` visar vad den skulle rapportera utan
 att posta eller flytta snapshoten — raderna kommer tillbaka i svaret i stället.
 
 **Dry-run samlar rader i en sink, inte via en global flagga.** Formatterarna
 returnerar strängar (`formatMemberJoined` osv.) i stället för att logga själva.
-Tidigare loggade de internt, så `torrkor:true` köade raderna och flush-timern
+Tidigare loggade de internt, så `dryrun:true` köade raderna och flush-timern
 postade dem några sekunder senare — en dry-run som inte var torr. En
 processglobal dry-run-flagga hade varit fel lösning: servern hanterar
 förfrågningar samtidigt, så den hade tystat en länkning som råkade logga just då. En manuell körning kan överlappa CronJobbet;
@@ -591,6 +638,7 @@ den finns.
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
+| `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
@@ -662,7 +710,10 @@ Auditen är helt läsande — inga `addRole`/`removeRole`/nickname-anrop — så
 ### Kommandon
 
 - `/audit-scoutid` — full rapport (admin). Filattachment om >2000 tecken.
-- `/scan-scoutid` — kör medlemsscannern nu (admin). `torrkor:true` = visa utan att posta.
+- `/scan-scoutid` — kör medlemsscannern nu (admin). `dryrun:true` = visa utan att posta.
+- `/refresh-scoutid` — synka roller. `person:` en användare, `alla:true` hela
+  servern (admin), `dryrun:true` visar utan att ändra. Slash-kommandonas flaggor
+  heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
 - `/status-scoutid` — utan argument: server-sammanfattning. Med `person`: detaljerad status för en användare.
 
 ## Krav på Discord-servern

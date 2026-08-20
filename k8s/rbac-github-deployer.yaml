@@ -105,6 +105,7 @@ rules:
     resourceNames:
       - discord-scoutid-backup
       - discord-scoutid-memberscan
+      - discord-scoutid-refresh
     verbs: ["update", "patch"]
   # Its spec rarely changes, so `apply` will usually report it unchanged and
   # never attempt a patch — the same trap `discord-scoutid-backup` hid behind for

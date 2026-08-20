@@ -205,21 +205,61 @@ function getDivisionPrefixes() {
   return prefixes;
 }
 
+/** Every role in the guild, keyed by lowercased name. */
+async function fetchRoleMap(guildId) {
+  const guildRoles = await discord.getGuildRoles(guildId);
+  const roleMap = new Map();
+  for (const role of guildRoles) roleMap.set(role.name.toLowerCase(), role);
+  return roleMap;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Courtesy pause after a user whose roles or nickname actually changed.
+ *
+ * It used to run after *every* user, which at 2500 linked people is eight
+ * minutes of sleeping to report that nothing moved. Paying it only when writes
+ * happened is safe because the real rate-limit protection is the 429 retry in
+ * discord.js — this only spreads out a burst. A write that failed with 403 from
+ * the role hierarchy is not counted, which is fine: that is not a rate limit,
+ * and a retry would not help it either.
+ */
+const WRITE_DELAY_MS = 200;
+
+const changedAnything = (result) =>
+  (result?.added?.length ?? 0) > 0 ||
+  (result?.removed?.length ?? 0) > 0 ||
+  Boolean(result?.nickname);
+
 /**
  * Sync one user's Discord roles to match their ScoutNet data.
- * Returns { added: string[], removed: string[] } or { error: string }.
+ * Returns { added: string[], removed: string[], nickname } or { error: string }.
+ *
+ * `options.roleMap` and `options.member` let a caller that already holds guild
+ * state avoid refetching it — see the comment inside.
+ *
+ * `options.dryRun` computes everything and calls nothing, so the return value
+ * describes what *would* change. It is a parameter and deliberately not a module
+ * flag: the server handles requests concurrently, so a process-global dry run
+ * would also silence a real linking that happened to run at the same moment.
+ * Same lesson the member scan's dry run already learned. One thing a dry run
+ * cannot predict is a 403 from the role hierarchy, so it reports what it would
+ * attempt, not what would succeed.
  */
-export async function syncUserRoles(guildId, discordUserId) {
+export async function syncUserRoles(guildId, discordUserId, options = {}) {
+  const { dryRun = false } = options;
   const scoutId = await storage.getLinkedScoutIDUserId(discordUserId);
   if (!scoutId) return { error: "Inte länkad till ScoutID" };
 
-  // Fetch guild + member state once and reuse below
-  const guildRoles = await discord.getGuildRoles(guildId);
-  const roleMap = new Map();
-  for (const role of guildRoles) {
-    roleMap.set(role.name.toLowerCase(), role);
-  }
-  const member = await discord.getGuildMember(guildId, discordUserId);
+  // Guild roles and the member object are passed in by callers that already
+  // hold them, and that is not a micro-optimisation: fetching them here meant
+  // the entire role list — 151 division roles and growing — was refetched once
+  // per linked user, so a nightly sync over 2500 people spent 5000 requests
+  // discovering that nothing had changed.
+  const roleMap = options.roleMap ?? (await fetchRoleMap(guildId));
+  const member =
+    options.member ?? (await discord.getGuildMember(guildId, discordUserId));
   const currentRoleIds = new Set(member.roles);
 
   // Verification gate: Scout role missing → treat as unverified, strip access
@@ -275,11 +315,13 @@ export async function syncUserRoles(guildId, discordUserId) {
     if (baseName) {
       const newNick = (baseName + nicknameSuffix).substring(0, 32);
       if (newNick !== currentNick) {
-        await discord.updateGuildMemberNickname(
-          guildId,
-          discordUserId,
-          newNick,
-        );
+        if (!dryRun) {
+          await discord.updateGuildMemberNickname(
+            guildId,
+            discordUserId,
+            newNick,
+          );
+        }
         nicknameSet = newNick;
       }
     }
@@ -295,7 +337,9 @@ export async function syncUserRoles(guildId, discordUserId) {
     const role = roleMap.get(roleName.toLowerCase());
     if (role && !role.managed && !currentRoleIds.has(role.id)) {
       try {
-        await discord.addRoleToUser(guildId, discordUserId, role.id);
+        if (!dryRun) {
+          await discord.addRoleToUser(guildId, discordUserId, role.id);
+        }
         added.push(roleName);
       } catch (e) {
         console.error(
@@ -315,7 +359,9 @@ export async function syncUserRoles(guildId, discordUserId) {
       !desiredSet.has(managedName.toLowerCase())
     ) {
       try {
-        await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+        if (!dryRun) {
+          await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+        }
         removed.push(managedName);
       } catch (e) {
         console.error(
@@ -334,7 +380,9 @@ export async function syncUserRoles(guildId, discordUserId) {
         !desiredSet.has(name)
       ) {
         try {
-          await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+          if (!dryRun) {
+            await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+          }
           removed.push(role.name);
         } catch (e) {
           console.error(
@@ -364,12 +412,14 @@ export async function stripUnlinkedMember(
   discordUserId,
   roleMap,
   member,
+  { dryRun = false } = {},
 ) {
   const managedRoles = getManagedRoleNames();
   const divPrefixes = getDivisionPrefixes();
   const currentRoleIds = new Set(member.roles);
   const added = [];
   const removed = [];
+  let nicknameSet = null;
 
   // Remove every managed role except the unverified marker itself.
   for (const managedName of managedRoles) {
@@ -377,7 +427,9 @@ export async function stripUnlinkedMember(
     const role = roleMap.get(managedName.toLowerCase());
     if (role && !role.managed && currentRoleIds.has(role.id)) {
       try {
-        await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+        if (!dryRun) {
+          await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+        }
         removed.push(managedName);
       } catch (e) {
         console.error(
@@ -392,7 +444,9 @@ export async function stripUnlinkedMember(
     for (const [name, role] of roleMap) {
       if (name.startsWith(prefix) && currentRoleIds.has(role.id)) {
         try {
-          await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+          if (!dryRun) {
+            await discord.removeRoleFromUser(guildId, discordUserId, role.id);
+          }
           removed.push(role.name);
         } catch (e) {
           console.error(
@@ -411,7 +465,9 @@ export async function stripUnlinkedMember(
     !currentRoleIds.has(unverifiedRole.id)
   ) {
     try {
-      await discord.addRoleToUser(guildId, discordUserId, unverifiedRole.id);
+      if (!dryRun) {
+        await discord.addRoleToUser(guildId, discordUserId, unverifiedRole.id);
+      }
       added.push(UNVERIFIED_ROLE);
     } catch (e) {
       console.error(
@@ -425,11 +481,14 @@ export async function stripUnlinkedMember(
     const currentNick = member.nick || member.user?.global_name || "";
     const baseName = currentNick.replace(/\s*\(.*\)\s*$/, "");
     if (baseName && baseName !== currentNick) {
-      await discord.updateGuildMemberNickname(
-        guildId,
-        discordUserId,
-        baseName.substring(0, 32),
-      );
+      if (!dryRun) {
+        await discord.updateGuildMemberNickname(
+          guildId,
+          discordUserId,
+          baseName.substring(0, 32),
+        );
+      }
+      nicknameSet = baseName.substring(0, 32);
     }
   } catch (e) {
     console.error(
@@ -437,15 +496,18 @@ export async function stripUnlinkedMember(
     );
   }
 
-  return { added, removed };
+  return { added, removed, nickname: nicknameSet };
 }
 
 /**
  * Sync roles for all linked users, then strip access from any member who has
  * the Scout role but no storage link (orphans). Clears ScoutNet cache first.
- * Returns array of { discordUserId, added, removed, error }.
+ * Returns array of { discordUserId, added, removed, nickname, error }.
+ *
+ * `options.dryRun` reports what would change without writing anything — see
+ * syncUserRoles for why it is a parameter and not a module flag.
  */
-export async function syncAllUserRoles(guildId) {
+export async function syncAllUserRoles(guildId, { dryRun = false } = {}) {
   await storage.clearScoutNetCache();
 
   // Fetch the participant list once, up front, and let a failure abort the run
@@ -463,27 +525,42 @@ export async function syncAllUserRoles(guildId) {
   const linkedSet = new Set(linkedUsers.map((u) => u.discordUserId));
   const results = [];
 
+  // Guild state, fetched once for the whole run rather than per user. The
+  // member list was already needed for the orphan strip below; hoisting it here
+  // means the sync loop needs no requests at all for a user with nothing to
+  // change, which is what makes this cheap enough to run on a schedule.
+  //
+  // It is a snapshot, and that is fine: this run is the only writer, so reading
+  // it once is if anything more consistent than refetching per user.
+  const roleMap = await fetchRoleMap(guildId);
+  const memberMap = new Map();
+  for (const m of await discord.getGuildMembers(guildId)) {
+    memberMap.set(m.user.id, m);
+  }
+
   for (const { discordUserId } of linkedUsers) {
     try {
-      const result = await syncUserRoles(guildId, discordUserId);
+      const result = await syncUserRoles(guildId, discordUserId, {
+        roleMap,
+        // Absent for a link whose user has left the guild. syncUserRoles then
+        // fetches and gets a 404, which lands in `results` as an error — the
+        // same report as before, and `/audit-scoutid` category 4 lists them.
+        member: memberMap.get(discordUserId),
+        dryRun,
+      });
       results.push({ discordUserId, ...result });
+      if (changedAnything(result)) await sleep(WRITE_DELAY_MS);
     } catch (e) {
       results.push({ discordUserId, error: e.message });
     }
-    // Small delay to avoid rate limits
-    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
   // Strip orphans: members with the Scout role but no storage link.
   try {
-    const guildRoles = await discord.getGuildRoles(guildId);
-    const roleMap = new Map();
-    for (const role of guildRoles) roleMap.set(role.name.toLowerCase(), role);
     const scoutRole = roleMap.get(config.SCOUTNET_SCOUT_ROLE.toLowerCase());
 
     if (scoutRole) {
-      const members = await discord.getGuildMembers(guildId);
-      for (const member of members) {
+      for (const member of memberMap.values()) {
         if (!member.roles.includes(scoutRole.id)) continue; // not verified
         if (linkedSet.has(member.user.id)) continue; // linked → already synced
         try {
@@ -492,14 +569,15 @@ export async function syncAllUserRoles(guildId) {
             member.user.id,
             roleMap,
             member,
+            { dryRun },
           );
-          if (result.removed.length > 0 || result.added.length > 0) {
+          if (changedAnything(result)) {
             results.push({ discordUserId: member.user.id, ...result });
+            await sleep(WRITE_DELAY_MS);
           }
         } catch (e) {
           results.push({ discordUserId: member.user.id, error: e.message });
         }
-        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
   } catch (e) {
