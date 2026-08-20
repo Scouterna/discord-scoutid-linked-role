@@ -9,6 +9,7 @@ import * as storage from "./storage.js";
 import * as roles from "./roles.js";
 import * as audit from "./audit.js";
 import * as eventlog from "./eventlog.js";
+import { updateMetadata } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
 import { getSuccessPageHTML } from "./templates.js";
 
@@ -798,50 +799,6 @@ function formatChanges({ added, removed }) {
 }
 
 // --- Helper functions ---
-
-async function updateMetadata(discordUserId) {
-  const scoutId = await storage.getLinkedScoutIDUserId(discordUserId);
-  if (!scoutId) throw new Error("ingen storage-länk");
-
-  const discordTokens = await storage.getDiscordTokens(discordUserId);
-  if (!discordTokens) {
-    throw new Error("Discord OAuth-tokens saknas i storage");
-  }
-
-  // `verified` is the *only* key the registered schema declares (see
-  // register.js), and it is what the `Scout` Linked Role's requirement reads.
-  // Nothing pushed it, so Discord held no value for it and the requirement could
-  // never be satisfied — which is why the requirement sits switched off in
-  // Server Settings, and why a link made today grants roles at link time and
-  // then loses them to the verification gate at the next sync.
-  //
-  // A constant `true` is the normal shape for a Linked Role criterion: the value
-  // carries no information, the *absence* does. Discord clears this metadata when
-  // the user disconnects the app, and that is precisely the revocation the Scout
-  // role exists to represent.
-  //
-  // The other three keys are not in the schema and Discord ignores them. They are
-  // kept because they cost nothing and document what the flow knows.
-  let metadata = { verified: true, scoutid: scoutId };
-  try {
-    const scoutIDTokens = await storage.getScoutIDTokens(scoutId);
-    if (scoutIDTokens) {
-      const scoutIDData = await scoutid.getUserData(scoutIDTokens);
-      metadata = {
-        verified: true,
-        scoutid: scoutIDData.scoutid,
-        email: scoutIDData.email,
-        name: scoutIDData.name,
-      };
-    }
-  } catch (e) {
-    // Display data only — the name and email are informational, and a stale
-    // ScoutID token must not cost the user their `verified` flag.
-    console.error(`Error fetching ScoutID data: ${e.message}`);
-  }
-
-  await discord.pushMetadata(discordUserId, discordTokens, metadata);
-}
 
 async function updateNickname(userId, nickname) {
   try {

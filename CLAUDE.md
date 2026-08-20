@@ -353,12 +353,44 @@ tappade den vid nästa `syncUserRoles`.
 utvärderar Discord det som ouppfyllt för varje användare vars metadata pushas om,
 tar `Scout` ifrån dem, och den nattliga synken strippar dem enligt
 verifieringsgrinden. `/link-scoutid` pushar om i bakgrunden, så det behövs ingen
-massåtgärd för att det ska börja rulla. Ordningen är:
+massåtgärd för att det ska börja rulla.
 
-1. koden pushar `verified: true` → deploya
-2. verifiera på **en** person: kör om `/linked-role` och se att `Scout` kommer
-3. slå på kravet i Server Settings
-4. `/audit-scoutid` — kategori 2 ska vara tom
+#### Låset, och vägen runt det
+
+Kravet går **inte** att slå på i efterhand: Discord vägrar lägga ett krav på en
+roll som medlemmar redan har. Och rollen går inte att tömma först, eftersom den är
+connection-managed — varken boten eller en admin kan ta bort den. Hönan och ägget.
+
+Utvägen är en roll som *börjar* tom, och det avgörande skälet att föredra den är
+att **ingenting tas ifrån någon förrän ersättaren är bevisat fungerande**:
+
+1. Deploya koden som pushar `verified: true`
+2. `node src/metadata.js --dry-run`, sedan utan flaggan. Metadatan hänger på
+   *applikationen*, inte på rollen, så det här går före den nya rollen finns.
+   **Läs `utan Discord-token`-listan** — de kan inte lagas härifrån och tappar
+   rollen när kravet slås på (auditens kategori 3)
+3. Skapa en ny roll i Discord med noll medlemmar och sätt kravet
+   `Verifierad = true` på den
+4. Se den fyllas. Antalet ska matcha de pushade. **Sanningens ögonblick** — går
+   det inte har ingens åtkomst rörts
+5. Pausa nattjobbet:
+   `kubectl patch cronjob discord-scoutid-refresh -p '{"spec":{"suspend":true}}'`
+6. Peka `SCOUTNET_SCOUT_ROLE` på det nya namnet i configmappen och deploya
+7. `/refresh-scoutid alla:true dryrun:true` → **måste visa noll strippningar.**
+   Annars: backa configmappen, ingenting är skrivet
+8. Avpausa nattjobbet. Gamla `Scout` kan tas bort först när ingenting namnger den
+
+**Landminan i steg 6:** finns inte rollen som `SCOUTNET_SCOUT_ROLE` pekar på blir
+`isVerified` falskt för *alla*, och synken strippar hela servern. Det är därför
+nattjobbet pausas över bytet och därför dry-runen står mellan deployen och att
+jobbet släpps lös igen.
+
+Ett alternativ som *inte* rekommenderas: radera kravet helt från `Scout` (inte
+bara stänga av det), varvid rollen troligen slutar vara connection-managed och
+kan tas bort från alla — och lägg sedan tillbaka kravet på en tom roll. Det
+slipper en ny roll, men mellan "borttagen från alla" och "Discord har delat ut
+igen" ser grinden ingen som verifierad, och återutdelar Discord inte automatiskt
+finns ingen väg tillbaka.
 
 **Länkningsvägen kan inte tillämpa verifieringsgrinden**, och det är inte en
 brist som går att laga: Discord delar ut Linked Role-rollen efter att användaren
@@ -675,6 +707,7 @@ den finns.
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
+| `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, och att `utan token` skiljs från `fel` |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
