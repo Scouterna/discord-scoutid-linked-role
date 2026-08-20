@@ -466,9 +466,15 @@ första kicken i en guild som svaldes av markör-seedningen. Låt etiketterna st
 de beskriver felen, inte bara koden.
 
 Azurite hittas av [test/helpers/azurite.mjs](test/helpers/azurite.mjs), som provar
-`azurite:10002` (compose-nätverket, inifrån devcontainern) och `127.0.0.1:10002`
-(publicerad port, från värden) och avslutar med instruktioner om ingen svarar.
-`AZURITE_TABLE_HOST` går före. Att byta ut `globalThis.fetch` stör inte lagringen:
+fyra adresser i tur och ordning och avslutar med instruktioner om ingen svarar.
+`AZURITE_TABLE_HOST` går före allt.
+
+Den fjärde är den som gör `docker compose up -d azurite` användbart **inifrån
+devcontainern**, och den är inte självklar: compose lägger Azurite på sitt eget
+nätverk, som den här containern inte är med i, och publicerar porten på
+Docker-*värden*. Alltså når varken `azurite` eller `127.0.0.1` den — utan
+default-gatewayen gör det. Hjälparen läser den ur `/proc/net/route` (och provar
+`host.docker.internal` först, för Docker Desktop). Att byta ut `globalThis.fetch` stör inte lagringen:
 Table Storage-SDK:n går via nodes `http`-modul, inte via global fetch.
 
 ## Audit och konsistenskontroll

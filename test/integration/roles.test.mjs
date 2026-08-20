@@ -16,10 +16,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// dotenv prints a banner to stdout on every config() call, and the test runner
-// uses that same stream for its own protocol. Quiet it before config.js loads.
-process.env.DOTENV_CONFIG_QUIET = "true";
-
+// The dotenv banner is silenced by the azurite helper, at its own top level.
+// Setting it here would read as if it ran first, but static imports are hoisted:
+// the helper executes before any statement in this file.
 import { useAzurite } from "../helpers/azurite.mjs";
 
 await useAzurite("rolestest");

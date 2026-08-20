@@ -39,10 +39,15 @@ jobs:
             | tar -xz -C /usr/local/bin actionlint
           actionlint -color
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          # Matches the Dockerfile, so a version-specific failure shows up here
-          # rather than in the image.
+          # Matches the devcontainer and the runtime image, so a version-specific
+          # failure shows up here rather than in the image.
+          #
+          # v5 rather than v4: GitHub now forces v4 to run on Node 24 anyway and
+          # warns on every run about the Node 20 action runtime being deprecated.
+          # That is the runtime the action itself uses — unrelated to the
+          # node-version below, which is the one the tests run on.
           node-version: 20
           cache: npm
 

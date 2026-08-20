@@ -20,7 +20,44 @@
 // parses that stream as its own protocol. Silence it before src/config.js loads.
 process.env.DOTENV_CONFIG_QUIET = "true";
 
-const CANDIDATES = ["azurite:10002", "127.0.0.1:10002", "localhost:10002"];
+const PORT = 10002;
+
+/**
+ * The Docker host's address as seen from inside a container.
+ *
+ * Needed for the docker-outside-of-docker devcontainer: `docker compose up -d
+ * azurite` puts the emulator on the compose network, which this container is not
+ * part of, and publishes the port on the *host*. So neither `azurite` nor
+ * `127.0.0.1` reaches it — the default gateway does.
+ *
+ * `host.docker.internal` covers Docker Desktop; where it does not resolve, the
+ * default route in /proc/net/route holds the gateway as little-endian hex.
+ */
+function dockerHostCandidates() {
+  const hosts = ["host.docker.internal"];
+  try {
+    const route = readFileSync("/proc/net/route", "utf8");
+    for (const line of route.split("\n").slice(1)) {
+      const [, destination, gateway] = line.split(/\s+/);
+      if (destination !== "00000000" || !gateway) continue;
+      const octets = gateway.match(/../g).reverse().map((h) => parseInt(h, 16));
+      hosts.push(octets.join("."));
+      break;
+    }
+  } catch {
+    // Not Linux, or no /proc — the other candidates still apply.
+  }
+  return hosts;
+}
+
+const CANDIDATES = [
+  "azurite", // same compose network
+  "127.0.0.1", // published port, running on the host
+  "localhost",
+  ...dockerHostCandidates(), // published port, seen from inside a container
+].map((h) => `${h}:${PORT}`);
+import { readFileSync } from "node:fs";
+
 const DEV_KEY =
   "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 
