@@ -192,8 +192,12 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
           allowIncomplete: true,
         });
         if (desiredRoles.length > 0) {
-          await addDiscordRoles(discordUserId, desiredRoles);
-          assignedRoles = desiredRoles;
+          // What came back, not what was asked for. `scout` is always in the
+          // wish list and can never be in the result — it is a managed Linked
+          // Role that Discord alone grants — so claiming it was assigned made
+          // the log line say the opposite of what happened, in exactly the case
+          // worth noticing.
+          assignedRoles = await addDiscordRoles(discordUserId, desiredRoles);
         }
       }
     } catch (e) {
@@ -804,18 +808,35 @@ async function updateMetadata(discordUserId) {
     throw new Error("Discord OAuth-tokens saknas i storage");
   }
 
-  let metadata = { scoutid: scoutId };
+  // `verified` is the *only* key the registered schema declares (see
+  // register.js), and it is what the `Scout` Linked Role's requirement reads.
+  // Nothing pushed it, so Discord held no value for it and the requirement could
+  // never be satisfied — which is why the requirement sits switched off in
+  // Server Settings, and why a link made today grants roles at link time and
+  // then loses them to the verification gate at the next sync.
+  //
+  // A constant `true` is the normal shape for a Linked Role criterion: the value
+  // carries no information, the *absence* does. Discord clears this metadata when
+  // the user disconnects the app, and that is precisely the revocation the Scout
+  // role exists to represent.
+  //
+  // The other three keys are not in the schema and Discord ignores them. They are
+  // kept because they cost nothing and document what the flow knows.
+  let metadata = { verified: true, scoutid: scoutId };
   try {
     const scoutIDTokens = await storage.getScoutIDTokens(scoutId);
     if (scoutIDTokens) {
       const scoutIDData = await scoutid.getUserData(scoutIDTokens);
       metadata = {
+        verified: true,
         scoutid: scoutIDData.scoutid,
         email: scoutIDData.email,
         name: scoutIDData.name,
       };
     }
   } catch (e) {
+    // Display data only — the name and email are informational, and a stale
+    // ScoutID token must not cost the user their `verified` flag.
     console.error(`Error fetching ScoutID data: ${e.message}`);
   }
 
@@ -842,10 +863,27 @@ async function updateNickname(userId, nickname) {
   }
 }
 
+/**
+ * Grant roles on the linking path. Returns the names actually granted.
+ *
+ * Skips managed roles, which `syncUserRoles` has always done and this had not:
+ * `scout` is a managed Linked Role, so every link attempted to add it, got a
+ * guaranteed error from Discord, and buried it in a `console.error` about the
+ * bot's hierarchy position — a misleading message for something that was never
+ * possible in the first place.
+ *
+ * Note what this deliberately does *not* do: apply the verification gate. It
+ * cannot. Discord grants the Linked Role after the user finishes on its side,
+ * which is after this code has run and the success page has rendered, so a check
+ * here would fail for every first-time link. The asymmetry with `syncUserRoles`
+ * is therefore real and unavoidable — what is fixed is that the report no longer
+ * claims otherwise.
+ */
 async function addDiscordRoles(userId, roleNames) {
+  const granted = [];
   try {
     const guildId = config.DISCORD_GUILD_ID;
-    if (!guildId) return;
+    if (!guildId) return granted;
 
     const guildRoles = await discord.getGuildRoles(guildId);
     const roleMap = new Map();
@@ -856,9 +894,14 @@ async function addDiscordRoles(userId, roleNames) {
     console.log(`Assigning roles [${roleNames.join(", ")}] to user ${userId}`);
     for (const roleName of roleNames) {
       const role = roleMap.get(roleName.toLowerCase());
-      if (role) {
+      if (role?.managed) {
+        console.log(
+          `Skipping managed role "${roleName}" — Discord grants it, not the bot`,
+        );
+      } else if (role) {
         try {
           await discord.addRoleToUser(guildId, userId, role.id);
+          granted.push(roleName);
           console.log(
             `Added role "${roleName}" (${role.id}) to user ${userId}`,
           );
@@ -876,6 +919,7 @@ async function addDiscordRoles(userId, roleNames) {
   } catch (e) {
     console.error(`Error adding roles for ${userId}:`, e.message);
   }
+  return granted;
 }
 
 // Exported so tests can drive the routes without the module taking over the
