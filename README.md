@@ -28,7 +28,10 @@ waiting role until an admin happened to run the command.
 ### Security boundary
 
 The `Scout` role — a Discord *managed* role granted by the Linked Role
-verification — is the boundary. If a linked user loses it (they disconnected the
+verification — is the boundary. The bot can never grant it: Discord does, against
+the `verified` metadata this app pushes, and Discord takes it away when the user
+disconnects the app. That revocation is the whole point, and it is why the
+boundary is a managed role rather than one the bot controls. If a linked user loses it (they disconnected the
 app, or left and rejoined the server), the next sync strips every bot-managed
 role and applies `Overifierad`. The stored link is kept, so the user can
 re-verify without an admin re-entering their member number.

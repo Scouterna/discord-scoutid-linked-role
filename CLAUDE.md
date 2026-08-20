@@ -115,9 +115,9 @@ prefix (the same account holds Terraform state — never write an unscoped rule
 there).
 
 The `state` partition is excluded: OAuth state is ephemeral with a 10-minute
-expiry. Everything else is kept — the 9 `link` rows are the irreplaceable part,
-since losing them means every user must re-verify, while tokens merely force a
-re-auth.
+expiry. Everything else is kept — the `link` rows are the irreplaceable part
+(18 of them on 2026-08-20, and growing), since losing them means every user must
+re-verify, while tokens merely force a re-auth.
 
 Two properties worth preserving if this is ever edited: it paginates explicitly
 (the service caps a page at 1000 entities and the CLI does not follow the
@@ -331,6 +331,43 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 - **General Information** → Linked Roles Verification URL: `https://discord-scoutid.wsj27.scouterna.net/linked-role`
 - **General Information** → Interactions Endpoint URL: `https://discord-scoutid.wsj27.scouterna.net/interactions`
 - **OAuth2** → Redirect: `https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback`
+
+### `verified`, och varför ordningen mot Server Settings är tvingande
+
+Schemat i [src/register.js](src/register.js) deklarerar **en** nyckel: `verified`
+(boolean_eq). Den är vad kravet på `Scout`-rollen läser, och `updateMetadata`
+måste pusha den. Att ett konstant `true` inte bär någon information är hela
+poängen — **frånvaron** gör jobbet: Discord raderar metadatan när användaren
+kopplar bort appen, och det är precis den återtagning `Scout` finns för att
+representera.
+
+Fram till 2026-08-20 pushade ingenting `verified`. Discord höll alltså inget
+värde, kravet kunde aldrig uppfyllas, och kravet stod därför **avstängt** i
+Server Settings → Roles → `Scout` → Links. Konsekvensen var tyst men allvarlig:
+med kravet av utvärderar Discord ingenting, så `Scout` slutar vara en gräns och
+blir en frusen ögonblicksbild av vilka som kvalificerade sig senast kravet var
+på. Nya länkningar fick rollen aldrig — de fick åtkomst vid länkningen och
+tappade den vid nästa `syncUserRoles`.
+
+**Slå aldrig på kravet före koden.** Med kravet på och `verified` opushad
+utvärderar Discord det som ouppfyllt för varje användare vars metadata pushas om,
+tar `Scout` ifrån dem, och den nattliga synken strippar dem enligt
+verifieringsgrinden. `/link-scoutid` pushar om i bakgrunden, så det behövs ingen
+massåtgärd för att det ska börja rulla. Ordningen är:
+
+1. koden pushar `verified: true` → deploya
+2. verifiera på **en** person: kör om `/linked-role` och se att `Scout` kommer
+3. slå på kravet i Server Settings
+4. `/audit-scoutid` — kategori 2 ska vara tom
+
+**Länkningsvägen kan inte tillämpa verifieringsgrinden**, och det är inte en
+brist som går att laga: Discord delar ut Linked Role-rollen efter att användaren
+avslutat på *sin* sida, alltså efter att vår callback kört och success-sidan
+renderats. En kontroll där hade fallit för varje förstagångslänkning. Vad som
+däremot är lagat är att rapporten inte längre påstår motsatsen —
+`addDiscordRoles` hoppar över managed roller och returnerar vad som *faktiskt*
+delades ut, så händelseloggens rad visar `WSJ-event, cmt` utan att hävda `scout`.
+Saknas `scout` i raden gick Discords halva av flödet inte i mål.
 
 ## Config format reference
 
@@ -722,7 +759,7 @@ Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/ws
 
 | Bot tilldelar | Källa i infra-repot |
 |---|---|
-| `scout` | Extern `Scout`-roll (ScoutID-bot, ej Terraform) |
+| `scout` | Extern `Scout`-roll — en **managed Linked Role**, ej Terraform. Boten kan aldrig dela ut den; Discord gör det, mot `verified`-metadatan. Se avsnittet om Developer Portal |
 | `wsj-event` | `discord_role.wsj_event` |
 | `Deltagare-{nr}` / `Deltagare-Väntande` | `discord_role.participant[*]` / `discord_role.participant_pending` |
 | `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
