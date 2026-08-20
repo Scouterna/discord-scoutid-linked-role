@@ -36,7 +36,7 @@ const BAN = 22;
 
 let members = [];
 /** Newest-first per action type, the way Discord returns them. */
-let audit = { [ROLE_UPDATE]: [], [KICK]: [], [BAN]: [] };
+const audit = { [ROLE_UPDATE]: [], [KICK]: [], [BAN]: [] };
 let auditStatus = 200;
 let postShouldFail = false;
 const posted = [];

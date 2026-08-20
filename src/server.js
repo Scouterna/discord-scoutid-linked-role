@@ -758,14 +758,6 @@ async function handleLinkCommand(interaction) {
   }
 }
 
-function normalizeName(s) {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
 function formatChanges({ added, removed }) {
   const parts = [];
   if (added?.length > 0) parts.push(`Lade till: ${added.join(", ")}`);

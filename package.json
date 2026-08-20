@@ -11,6 +11,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "node --test test/unit/*.test.mjs",
     "test:integration": "node --test test/integration/*.test.mjs",
     "test:all": "npm test && npm run test:integration"
@@ -22,5 +25,11 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
+    "prettier": "^3.9.6"
   }
 }

@@ -188,7 +188,14 @@ npm test                  # pure logic — no container, no network, no credenti
 docker compose up -d azurite
 npm run test:integration  # the real scan against real Table Storage
 npm run test:all
+
+npm run lint              # eslint
+npm run format            # prettier --write .
+npm run format:check      # what CI runs
 ```
+
+Lint and formatting run in CI before the tests, so they gate the deploy too.
+Prettier does not touch markdown — see `.prettierignore` for why.
 
 The split is deliberate: a suite that cannot run without setup is a suite that
 stops being run, so the majority of the value sits in `npm test`. The integration

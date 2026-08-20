@@ -101,10 +101,23 @@
         "hashicorp.terraform",
         "ms-kubernetes-tools.vscode-kubernetes-tools",
         "ms-azuretools.vscode-docker",
-        "redhat.vscode-yaml"
+        "redhat.vscode-yaml",
+        // Prettier is a workspace-side extension, so one installed on the
+        // Windows host does not run in here. Without this line a synced
+        // `editor.defaultFormatter` pointing at it left format-on-save silently
+        // doing nothing, which read as "Prettier is broken".
+        "esbenp.prettier-vscode",
+        // Already installed by the javascript-node base image, listed so that is
+        // deliberate rather than incidental — it is what surfaces eslint.config.js.
+        "dbaeumer.vscode-eslint"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash",
+        // Named explicitly so the container does not depend on whatever the
+        // host has synced. Prettier now exists in here, and its config is
+        // prettier.config.mjs.
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
         "yaml.schemas": {
           "kubernetes": ["k8s/*.yaml", "!k8s/kustomization.yaml"]
         }

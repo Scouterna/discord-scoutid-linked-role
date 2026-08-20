@@ -63,9 +63,7 @@ function expectedDivisionRoleNames(participants) {
   const expected = new Map();
   if (!participants || !config.SCOUTNET_DIVISION_ROLES) return expected;
 
-  for (const [category, divConfig] of Object.entries(
-    config.SCOUTNET_DIVISION_ROLES,
-  )) {
+  for (const category of Object.keys(config.SCOUTNET_DIVISION_ROLES)) {
     expected.set(category, new Set());
   }
 

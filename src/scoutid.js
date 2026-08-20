@@ -107,7 +107,7 @@ export async function getUserData(tokens) {
   if (response.ok) {
     const data = await response.json();
 
-    let metadata = {
+    const metadata = {
       name: data.given_name + ' ' + data.family_name,
       scoutid: data.profile,
       email: data.email,

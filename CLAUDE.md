@@ -507,6 +507,48 @@ git update-index --chmod=+x scripts/nytt-skript.sh
 `yq` finns för k8s-manifesten och kustomize-utdata. `python3-yaml` finns som
 fallback — imagen har inget `pip`, så apt är enda vägen till en YAML-parser.
 
+### ESLint och Prettier
+
+```bash
+npm run lint            # eslint .
+npm run format          # prettier --write .
+npm run format:check    # vad CI kör
+```
+
+Båda fäller CI, före testerna, och alltså även deployen. Skillnaden mot
+RBAC-driftkontrollen — som bara varnar — är avsiktlig: det de rapporterar
+orsakas av just den commit som byggs och fixas genom att redigera den. Drift som
+ingen kodändring orsakat är fallet för att varna, det här är inte det.
+
+**ESLint-extensionen var installerad långt innan konfigurationen fanns.** Den
+följer med `javascript-node`-basimagen, tillsammans med ett globalt `eslint`, och
+ESLint 9+ kräver en flat config — så den kastade `Could not find config file` för
+varje fil den tittade på: 175 fel i en enda sessions logg, inget av dem om koden.
+[eslint.config.js](eslint.config.js) är filen som saknades.
+
+Den ligger nära `recommended` och innehåller **ingenting stilistiskt** — Prettier
+äger formatering, så det finns ingen konflikt att skilja på och därför inget
+behov av `eslint-config-prettier`. Tre tillägg säger något om avsikt i stället
+för layout: `eqeqeq` med `null: "ignore"` (`!= null` är idiomet här — en
+`cancelled_date` är antingen en datumsträng eller frånvarande), `no-var` och
+`prefer-const`.
+
+[prettier.config.mjs](prettier.config.mjs) är tom på overrides, för att alla
+defaults redan stämde: koden var handskriven på ~80 kolumner med dubbla
+citattecken och semikolon. Att skriva ut dem hade bara skapat något att drifta
+från. **Markdown är undantaget** i [.prettierignore](.prettierignore), och det är
+enda egentliga bedömningen där: CLAUDE.md och README.md *är* dokumentationen,
+handbrutna på 80 kolumner, och Prettier skulle skriva om `*så*` till `_så_` och
+rada om varje tabell — 153 rader utan att en mening blir tydligare. Prosans
+formatering är författarens, kodens är Prettiers.
+
+Prettier är en workspace-side extension, så en som är installerad på
+Windows-värden **kör inte i containern**. Därför ligger `esbenp.prettier-vscode`
+i `devcontainer.json`, och därför pekas `editor.defaultFormatter` ut explicit
+i stället för att bero på vad värden råkat synka: utan det lämnade en synkad
+inställning som pekade på Prettier format-on-save tyst overksam, vilket läste
+som att Prettier var trasig.
+
 ## Tester
 
 ```bash
