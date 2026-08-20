@@ -48,7 +48,7 @@ jobs:
           # warns on every run about the Node 20 action runtime being deprecated.
           # That is the runtime the action itself uses — unrelated to the
           # node-version below, which is the one the tests run on.
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci

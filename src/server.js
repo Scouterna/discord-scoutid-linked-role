@@ -15,10 +15,90 @@ import { getSuccessPageHTML } from "./templates.js";
 const app = express();
 app.use(cookieParser(config.COOKIE_SECRET));
 
-// --- Health check ---
+// --- Health checks ---
+//
+// Three routes, and the difference between them is the point.
+//
+// `/` is the landing page a human might hit, and stays exactly what it was.
+//
+// `/healthz` is liveness, and deliberately depends on nothing outside the
+// process. Liveness restarts the pod, so hanging it on Table Storage would
+// turn a storage blip into every replica restarting at once — a degraded
+// service made into no service.
+//
+// `/readyz` is readiness, and does depend on storage, because a pod that
+// cannot reach the table answers every interaction with an error and taking it
+// out of the endpoint list is precisely right. Two consequences worth knowing
+// before changing it: with `maxUnavailable: 0` a cluster-wide storage outage
+// also blocks rollouts, which is the correct answer to "should we deploy into
+// this?" but surprising in the moment; and the probe's `failureThreshold` is
+// what keeps a single slow request from evicting a healthy pod.
 
 app.get("/", (req, res) => {
   res.send("👋");
+});
+
+app.get("/healthz", (req, res) => {
+  res.type("text/plain").send("ok");
+});
+
+// The probe fires every 10s per pod. The result is cached for slightly less
+// than that so a burst of probes cannot become a burst of storage requests,
+// and the in-flight promise is shared so a *hung* table does not stack probes
+// on top of each other until the pod runs out of sockets.
+const READY_CACHE_MS = 5000;
+const READY_TIMEOUT_MS = 3000;
+let readyCache = { at: 0, ok: false, error: null };
+let readyInFlight = null;
+
+async function withTimeout(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} svarade inte inom ${ms} ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    // Without this the timer keeps the event loop alive for its full duration,
+    // which at shutdown means the process lingers for no reason.
+    clearTimeout(timer);
+  }
+}
+
+async function probeStorage() {
+  try {
+    await withTimeout(storage.ping(), READY_TIMEOUT_MS, "Table Storage");
+    readyCache = { at: Date.now(), ok: true, error: null };
+  } catch (e) {
+    readyCache = { at: Date.now(), ok: false, error: e.message };
+  }
+  return readyCache;
+}
+
+async function isReady() {
+  if (Date.now() - readyCache.at < READY_CACHE_MS) return readyCache;
+  readyInFlight ??= probeStorage().finally(() => {
+    readyInFlight = null;
+  });
+  return readyInFlight;
+}
+
+app.get("/readyz", async (req, res) => {
+  const { ok, error } = await isReady();
+  if (ok) {
+    res.type("text/plain").send("ready");
+    return;
+  }
+  // The reason goes to the log, not to the body: the ingress routes `/` as a
+  // prefix, so this route answers the public internet, and Azure's errors carry
+  // endpoint names and request ids. A probe only needs the status code.
+  console.error(`Readiness check failed: ${error}`);
+  res.status(503).type("text/plain").send("storage unreachable");
 });
 
 // --- OAuth flow: step 1 - redirect to Discord ---
@@ -104,7 +184,13 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     try {
       const guildId = config.DISCORD_GUILD_ID;
       if (guildId) {
-        const desiredRoles = await roles.getDesiredRoles(scoutIDUser.scoutid);
+        // `allowIncomplete`: this path only ever adds roles, so a ScoutNet
+        // outage must not fail a verification that otherwise succeeded. The
+        // user gets the Scout marker now and the rest at the next sync. Every
+        // other caller wants the throw — see getDesiredRoles.
+        const desiredRoles = await roles.getDesiredRoles(scoutIDUser.scoutid, {
+          allowIncomplete: true,
+        });
         if (desiredRoles.length > 0) {
           await addDiscordRoles(discordUserId, desiredRoles);
           assignedRoles = desiredRoles;
@@ -116,7 +202,12 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
 
     // Update nickname with role suffix
     if (scoutIDUser.name) {
-      const suffix = await roles.getNicknameSuffix(scoutIDUser.scoutid);
+      // Lenient for the same reason, and here it is load-bearing: this call is
+      // not wrapped in its own try, so a throw would reach the outer handler
+      // and answer a successful linking with a 500 page.
+      const suffix = await roles.getNicknameSuffix(scoutIDUser.scoutid, {
+        allowIncomplete: true,
+      });
       await updateNickname(discordUserId, scoutIDUser.name + suffix);
     }
 

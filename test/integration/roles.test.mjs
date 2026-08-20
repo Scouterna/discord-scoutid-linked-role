@@ -54,6 +54,8 @@ const GUILD_ROLES = [
 
 let member = null;
 let participants = {};
+/** Set by the outage cases: makes the ScoutNet fetch fail like a real one. */
+let scoutNetDown = false;
 /** Role ids that reject a change, standing in for Discord's role hierarchy. */
 let forbiddenRoleIds = new Set();
 
@@ -63,7 +65,12 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
-  if (u.includes("scoutnet.se")) return ok({ participants });
+  if (u.includes("scoutnet.se")) {
+    if (scoutNetDown) {
+      return { ok: false, status: 500, statusText: "Server Error", text: async () => "boom" };
+    }
+    return ok({ participants });
+  }
   if (u.endsWith("/roles")) return ok(GUILD_ROLES);
 
   const roleChange = u.match(/\/members\/([^/]+)\/roles\/([^/?]+)$/);
@@ -96,6 +103,7 @@ async function setup({ userId, roleIds, nick, scoutId, participant }) {
   calls.removed.length = 0;
   calls.nicks.length = 0;
   forbiddenRoleIds = new Set();
+  scoutNetDown = false;
   member = { user: { id: userId, username: "u", global_name: nick }, nick, roles: roleIds };
   participants = participant ? { [scoutId]: participant } : {};
   await storage.clearScoutNetCache();
@@ -295,6 +303,77 @@ test("a nickname longer than Discord allows is truncated, not rejected", async (
   await roles.syncUserRoles(GUILD, "u6");
   assert.equal(calls.nicks.length, 1);
   assert.equal(calls.nicks[0].length, 32, "Discord's nickname limit is 32 characters");
+});
+
+test("a ScoutNet outage changes nothing at all", async () => {
+  // The bug this pins: getDesiredRoles used to swallow the error and answer
+  // ["scout"], which is the same answer as "not registered in the event" — and
+  // that answer *means* remove the event, category and division roles. So a
+  // ScoutNet outage during `/refresh-scoutid alla:true` disarmed everyone the
+  // run reached, one user at a time, and reported success while doing it.
+  await setup({
+    userId: "u8",
+    roleIds: ["r-scout", "r-event", "r-ledare", "r-l12"],
+    nick: "Anna Andersson (AL12)",
+    scoutId: "888",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: { 107592: "12" },
+    },
+  });
+  scoutNetDown = true;
+
+  const result = await roles.syncUserRoles(GUILD, "u8");
+  assert.match(result.error, /ScoutNet/);
+  assert.deepEqual(calls.added, [], "added a role on incomplete data");
+  assert.deepEqual(calls.removed, [], "removed a role it could not confirm");
+  assert.deepEqual(calls.nicks, [], "renamed someone on incomplete data");
+});
+
+test("the verification gate still works while ScoutNet is down", async () => {
+  // The other half, and why the bail-out sits *below* the gate rather than at
+  // the top: stripping someone who lost the Scout role is the security
+  // boundary, and it needs no ScoutNet to decide. An outage must not become a
+  // window where a disconnected account keeps its access.
+  await setup({
+    userId: "u9",
+    roleIds: ["r-event", "r-ledare", "r-l12"], // no r-scout
+    nick: "Kim Nilsson (AL12)",
+    scoutId: "999",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Kim",
+      last_name: "Nilsson",
+      questions: { 107592: "12" },
+    },
+  });
+  scoutNetDown = true;
+
+  const result = await roles.syncUserRoles(GUILD, "u9");
+  assert.equal(result.error, undefined);
+  assert.deepEqual(namesOf(calls.removed), ["Ledare", "Ledare-12", "WSJ-event"]);
+  assert.deepEqual(namesOf(calls.added), ["Overifierad"]);
+});
+
+test("syncAllUserRoles fails once instead of once per user", async () => {
+  // One request at an API that just proved it is down, not one per linked user,
+  // and one error to read instead of N identical ones.
+  await setup({
+    userId: "u8",
+    roleIds: ["r-scout", "r-event"],
+    nick: "Anna Andersson",
+    scoutId: "888",
+    participant: { fee_id: 33293, cancelled_date: null, first_name: "Anna", last_name: "Andersson", questions: {} },
+  });
+  scoutNetDown = true;
+
+  await assert.rejects(() => roles.syncAllUserRoles(GUILD), /ScoutNet/);
+  assert.deepEqual(calls.added, []);
+  assert.deepEqual(calls.removed, []);
 });
 
 test("stripUnlinkedMember clears access for a Scout role with no link behind it", async () => {

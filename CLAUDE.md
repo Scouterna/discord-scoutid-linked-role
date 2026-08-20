@@ -53,6 +53,12 @@ resurs*typ*, men `update`/`patch` är **pinnade till namngivna objekt**. Lägger
 till en resurs i `k8s/` som CI ska kunna ändra måste dess namn in i rollen, annars
 misslyckas varje deploy med `... is forbidden`.
 
+En ny resurs*typ* är strängare än så: den behöver `create` i rollen **innan** den
+deploy som introducerar den. Och eftersom filen applyas för hand ligger ordningen
+på den som shippar ändringen, inte på CI. `k8s/pdb.yaml` var senaste fallet —
+`policy/poddisruptionbudgets` fanns inte i rollen alls, så deployen hade fallit på
+`poddisruptionbudgets.policy ... is forbidden`. Applya rollen först, deploya sen.
+
 Det syns inte förrän det smäller, eftersom `discord-scoutid-backup` aldrig råkade
 ut för det: dess image är en pinnad `azure-cli`-version, så `kubectl apply`
 rapporterade alltid `unchanged` och försökte aldrig patcha.
@@ -140,13 +146,21 @@ is not a backup.
 
 ### Why rollouts are safe
 
-Three settings work together, and removing any one reintroduces dropped
+Four settings work together, and removing any one reintroduces dropped
 requests. This was measured, not assumed — before the preStop hook a rollout
 dropped 5 of 559 requests; after, 0 of 254.
 
 - `maxUnavailable: 0` keeps a Ready pod throughout, so Discord's 3-second
   interaction ACK is always met. It does **not** stop traffic reaching a
   terminating pod — that is what the next item is for.
+- A **PodDisruptionBudget** ([k8s/pdb.yaml](k8s/pdb.yaml)), `minAvailable: 1`,
+  because `maxUnavailable: 0` only constrains what the Deployment controller
+  does to its own ReplicaSets. A node drain is a different mechanism — an AKS
+  node image upgrade, an autoscaler scale-down, a `kubectl drain` by a cluster
+  admin — and it evicts pods without consulting the rollout strategy at all.
+  The anti-affinity is `preferred`, so both replicas may share a node and go
+  together. `webservices` is a shared cluster, upgraded by someone who is not
+  watching this app.
 - A **10s `preStop` sleep**, because pod deletion and endpoint removal are
   concurrent: traefik keeps routing here briefly after termination begins.
 - A **SIGTERM handler** in [src/server.js](src/server.js) that drains open
@@ -155,6 +169,45 @@ dropped 5 of 559 requests; after, 0 of 254.
   without the wait a deploy kills it after the user was told it was accepted.
   This requires `CMD ["node", …]` (exec form) so node is PID 1 and receives the
   signal at all — under `npm start` it never arrives.
+
+### Health-probarna svarar olika med flit
+
+`/healthz` är liveness och beror **inte** på något utanför processen. `/readyz`
+är readiness och gör en billig läsning mot Table Storage. `/` är oförändrad,
+landningssidan.
+
+Skillnaden är hela poängen. Liveness startar om podden, så en Table
+Storage-hicka på en delad readiness-probe hade startat om varje replika
+samtidigt — en degraderad tjänst gjord till ingen tjänst. Readiness *ska*
+däremot bero på storage: en pod som inte når tabellen svarar fel på varje
+interaktion, och att plocka den ur Service:n är precis rätt.
+
+Två följder att känna till innan de ändras:
+
+- **Ett storage-avbrott blockerar också rollouts**, eftersom `maxUnavailable: 0`
+  väntar på en Ready-pod. Det är rätt svar på "ska vi deploya in i det här?",
+  men överraskande i stunden. En hemlighetsrotation går ändå igenom: den nya
+  podden har den nya connection stringen och blir Ready.
+- `failureThreshold: 3` × 10 s är vad som hindrar en enstaka trög läsning från
+  att vräka ut en frisk pod. Appen cachar dessutom svaret i 5 sekunder och delar
+  ett pågående anrop, så en *hängande* tabell inte staplar prober på varandra.
+
+`deploy.yml` pollar `/readyz` efter `rollout status`, alltså hela vägen från
+publika ingressen till datan. Faller det där är det routen eller certifikatet,
+inte appen — `rollout status` krävde redan en Ready-pod.
+
+### Härdning i podspecen
+
+Imagen släpper redan ner till `node` (uid 1000). `securityContext` i
+[k8s/deployment.yaml](k8s/deployment.yaml) och
+[k8s/memberscan-cronjob.yaml](k8s/memberscan-cronjob.yaml) gör det *upprätthållet*
+i stället för avsett: `runAsNonRoot` vägrar starta en image som ändrats till att
+köra som root, och resten är vad ett `restricted` Pod Security Standard kräver.
+Namespacet upprätthåller inget PSS idag, så ingenting ändras — det betyder att
+workloaden fortsätter deploya oförändrad den dag det slås på.
+
+`readOnlyRootFilesystem: true` kräver en skrivbar `/tmp` (emptyDir). Backup- och
+restore-jobben är med flit utanför: de kör `azure-cli`-imagen, som skriver fritt.
 
 ## Azure CLI: use the Scouterna config dir
 
@@ -179,7 +232,13 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 ## Architecture
 
-- Node.js 20 + Express 5 + Azure Table Storage (ESM modules)
+- Node.js 24 + Express 5 + Azure Table Storage (ESM modules). Node 20 gick ur
+  underhåll i april 2026 medan det fortfarande kördes här; 24 är LTS till april
+  2028. Bumpen avslöjade direkt en inkompatibilitet: från Node 22 tolkas
+  positionsargument till `node --test` som glob-mönster, så `node --test
+  test/unit/` slutade hitta något och föll på `Cannot find module`. Skripten i
+  `package.json` expanderar därför `test/unit/*.test.mjs` i skalet i stället,
+  vilket fungerar på båda
 - Runs on Kubernetes: namespace `wsj27` on Scouterna's shared AKS cluster
   `webservices`, behind traefik with a cert-manager certificate. Manifests in
   `k8s/`, images in GHCR. Storage stayed in Azure — Table Storage is durable,
@@ -215,6 +274,25 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 - `register.js` only needs Discord API, but imports storage.js which connects to Table Storage — storage errors during registration are harmless
 - Interaction responses use a 1-second delay before processing to avoid race conditions with Discord's deferred response handling
 - **Scout-rollen är säkerhetsgränsen.** Saknar en länkad användare Scout-rollen i Discord (managed Linked Role) så strippas alla bot-hanterade roller och `Overifierad` sätts vid nästa `syncUserRoles`. Storage-länken behålls så användaren kan re-verifiera utan att admin behöver fråga efter scoutid igen.
+- **Ett ScoutNet-fel får aldrig se ut som ett tomt svar.**
+  `getDesiredRoles` **kastar** när ScoutNet inte går att nå. Tidigare svalde den
+  felet och svarade `[scout]` — samma svar som "inte anmäld i eventet", och det
+  svaret *betyder* ta bort event-, kategori- och divisionsrollerna. Ett
+  ScoutNet-avbrott under `/refresh-scoutid alla:true` avrustade alltså alla den
+  hann nå, och rapporterade lyckat medan det skedde. Samma tankefel som en
+  trunkerad medlemssnapshot läst som en frånvarande: ett *okänt* får inte tillåtas
+  se ut som ett känt nej.
+
+  `syncUserRoles` avbryter därför **före första skrivningen**, men *under*
+  verifieringsgrinden — att strippa någon som tappat Scout-rollen kräver ingen
+  ScoutNet och måste fortsätta fungera under ett avbrott. `syncAllUserRoles`
+  hämtar listan en gång i förväg och faller på en gång i stället för en gång per
+  användare.
+
+  `allowIncomplete: true` finns för det enda anropsställe som bara *lägger till*
+  roller — länkningsflödet, där alternativet är att fälla en verifiering som
+  annars gick igenom. Föreslår du att den flaggan sätts någon annanstans är svaret
+  nej.
 - OAuth-tokens (`discord-token`, `scoutid-token`) och länkar (`link`) lagras durabelt i Azure Table Storage (ingen TTL). OAuth-state (`state`) har ett `expiresAt`-fält (lazy expiry, 10 min) eftersom Table Storage saknar native TTL. Refresh-tokens från Discord är giltiga i månader, och persistent lagring låter `/link-scoutid` re-pusha Linked Role-metadata i bakgrunden.
 - ScoutNet-deltagarlistan cachas i processminnet (10 min), inte i Table Storage — hela listan överskrider gränsen på 64 KB per property. Cache-miss efter omstart kostar bara en extra ScoutNet-hämtning.
 - **Varför inte Redis:** Azure Redis Basic-tier saknar persistens och tappar ALL data vid varje nod-omstart/underhåll. 2026-05-26 wipeades alla länkar+tokens av en sådan omstart. Table Storage (LRS) är durabelt och billigare för detta access-mönster (bara läs/skriv vid länkning + audit).
@@ -447,12 +525,13 @@ den finns.
 | Fil | Täcker |
 | --- | --- |
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
-| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade |
+| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar |
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry, att fel bär sin HTTP-status, att mentions alltid tystas |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
-| `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls |
-| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen |
+| `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
+| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
+| `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
 

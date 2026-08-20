@@ -40,6 +40,21 @@ spec:
             app: discord-scoutid-memberscan
         spec:
           restartPolicy: OnFailure
+          # Same image as the Deployment, so the same hardening applies. Kept in
+          # step with it deliberately: a difference here would only ever be an
+          # oversight, and would show up as a scan that fails on a cluster where
+          # the bot still runs. The backup and restore jobs are left alone — they
+          # run the azure-cli image, which writes freely outside /tmp.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
           containers:
             - name: memberscan
               # Same image as the bot; CI rewrites this tag through the
@@ -55,6 +70,14 @@ spec:
                     name: discord-scoutid-config
                 - secretRef:
                     name: discord-scoutid-secrets
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: 50m

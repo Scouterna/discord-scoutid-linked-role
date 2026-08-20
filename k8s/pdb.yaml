@@ -1,0 +1,26 @@
+# Keeps one replica serving while the *cluster* moves pods around.
+#
+# `maxUnavailable: 0` on the Deployment covers rollouts, and only rollouts: it
+# constrains what the Deployment controller does to its own ReplicaSets. A node
+# drain is a different mechanism entirely — an AKS node image upgrade, a cluster
+# autoscaler scale-down, a `kubectl drain` by a cluster admin — and it evicts
+# pods without consulting the Deployment's strategy at all.
+#
+# That matters here because the anti-affinity is `preferred`, not `required`: both
+# replicas may well sit on the same node, and draining it takes them together.
+# Discord's 3-second interaction ACK does not survive that, and the shared
+# `webservices` cluster is upgraded by someone who is not watching this app.
+#
+# minAvailable: 1 rather than maxUnavailable: 1 — same thing at two replicas, but
+# it keeps meaning "one stays up" if the replica count ever changes.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-scoutid
+  labels:
+    app: discord-scoutid
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: discord-scoutid

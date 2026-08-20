@@ -1,7 +1,7 @@
 # Dependencies are installed in a separate stage so that .npmrc — which may
 # point at an internal registry and hold credentials for it — never becomes a
 # layer in the published image.
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY package*.json .npmrc* ./
 RUN npm ci --omit=dev --no-audit --no-fund \
  && node -e "const fs=require('fs'),{dependencies={}}=require('./package.json');const missing=Object.keys(dependencies).filter(m=>!fs.existsSync('node_modules/'+m+'/package.json'));if(missing.length){console.error('npm ci left dependencies missing: '+missing.join(', '));process.exit(1)}"
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

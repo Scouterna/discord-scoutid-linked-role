@@ -151,7 +151,8 @@ test("a division number of 10 or more is not padded further", async () => {
   ]);
 });
 
-test("a ScoutNet failure degrades to the scout role instead of throwing", async () => {
+/** Make the next ScoutNet fetch fail the way a real outage does. */
+async function withScoutNetDown() {
   await storage.clearScoutNetCache();
   globalThis.fetch = async () => ({
     ok: false,
@@ -159,9 +160,36 @@ test("a ScoutNet failure degrades to the scout role instead of throwing", async 
     statusText: "Server Error",
     text: async () => "boom",
   });
-  // Linking must not fail because ScoutNet is down; the user gets the marker and
-  // a later `/refresh-scoutid` fills in the rest.
-  assert.deepEqual(await roles.getDesiredRoles("1"), ["scout"]);
+}
+
+test("a ScoutNet failure throws instead of looking like an empty answer", async () => {
+  await withScoutNetDown();
+  // This used to return ["scout"], which reads to syncUserRoles as "not
+  // registered in the event" — an instruction to take the event, category and
+  // division roles away. A ScoutNet outage during `/refresh-scoutid alla:true`
+  // therefore disarmed everyone it reached. The throw is the fix.
+  await assert.rejects(() => roles.getDesiredRoles("1"), /ScoutNet API error/);
+});
+
+test("allowIncomplete degrades to the scout role, for the linking path", async () => {
+  await withScoutNetDown();
+  // Only the linking flow passes this, and only because it exclusively *adds*
+  // roles: verification must not fail because ScoutNet is down, and the rest
+  // arrives at the next sync.
+  assert.deepEqual(
+    await roles.getDesiredRoles("1", { allowIncomplete: true }),
+    ["scout"],
+  );
+});
+
+test("a ScoutNet failure throws for the nickname suffix too", async () => {
+  await withScoutNetDown();
+  // "" is a real instruction to rename someone without a suffix, not a shrug.
+  await assert.rejects(() => roles.getNicknameSuffix("2"), /ScoutNet API error/);
+  assert.equal(
+    await roles.getNicknameSuffix("2", { allowIncomplete: true }),
+    "",
+  );
 });
 
 // --- Nickname suffixes ---

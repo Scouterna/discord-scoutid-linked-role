@@ -70,6 +70,20 @@ async function setValue(partitionKey, rowKey, value, expiresAt) {
   await client.upsertEntity(entity, "Replace");
 }
 
+/**
+ * A cheap round trip to Table Storage, for the readiness probe.
+ *
+ * A 404 is the expected answer and counts as healthy: what is being proved is
+ * that the request was signed, routed and answered — not that anything is
+ * stored under that key. A wrong account key answers 403 and an unreachable
+ * endpoint does not answer at all, and `getEntity` turns both into a throw.
+ */
+export async function ping() {
+  await ensureTable();
+  await getEntity("health", "probe");
+  return true;
+}
+
 // --- Discord tokens ---
 
 export async function storeDiscordTokens(userId, tokens) {

@@ -107,10 +107,36 @@ const command = (name, { admin = true, options, token } = {}) => ({
   },
 });
 
-test("the health route answers, because the deploy waits for it", async () => {
-  // deploy.yml polls `GET /` for HTTP 200 and fails the rollout without it.
+test("the landing route answers", async () => {
   const res = await fetch(`${BASE}/`);
   assert.equal(res.status, 200);
+});
+
+test("liveness depends on nothing outside the process", async () => {
+  // The whole reason /healthz exists separately from /readyz. Liveness restarts
+  // the pod, so if it reached Table Storage a storage blip would restart every
+  // replica at once. This suite has no emulator and no network — and that is
+  // exactly the environment /healthz must answer 200 in.
+  const res = await fetch(`${BASE}/healthz`);
+  assert.equal(res.status, 200);
+});
+
+test("readiness fails when storage is unreachable", async () => {
+  // The connection string here points at an account that does not exist, which
+  // is the closest a unit test gets to a storage outage. 503 is the useful
+  // answer: it takes the pod out of the Service instead of leaving it to answer
+  // every interaction with an error. /readyz is also what deploy.yml polls.
+  //
+  // This does not break the suite's no-network rule: the call fails whether or
+  // not there is a network, and the route's own 3-second timeout bounds how long
+  // it can take to find out. The 200 path needs a real table, so it lives in
+  // test/integration/health.test.mjs.
+  const res = await fetch(`${BASE}/readyz`);
+  assert.equal(res.status, 503);
+  // Deliberately says nothing useful: the ingress routes `/` as a prefix, so
+  // this answers the public internet, and Azure's errors carry endpoint names
+  // and request ids. The reason goes to the pod log.
+  assert.equal(await res.text(), "storage unreachable");
 });
 
 test("an unsigned interaction is rejected", async () => {
