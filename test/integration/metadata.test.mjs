@@ -27,12 +27,23 @@ process.env.LOG_CHANNEL_ID = "";
 let pushes = [];
 /** What ScoutID's userinfo endpoint answers. */
 let scoutIDResponse = "json";
+/** What Discord answers when the role-connection is *read* back. */
+let connectionStatus = 200;
 
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
   if (u.includes("/role-connection")) {
+    if ((opts.method ?? "GET") === "GET") {
+      // The liveness probe. A read, so it has no effect on what it measures.
+      return {
+        ok: connectionStatus === 200,
+        status: connectionStatus,
+        json: async () => ({}),
+        text: async () => "{}",
+      };
+    }
     pushes.push(JSON.parse(opts.body));
     return ok({});
   }
@@ -172,4 +183,41 @@ test("the summary names who has to act themselves", async () => {
   assert.match(summary, /utan Discord-token/);
   assert.match(summary, /linked-role/);
   assert.match(summary, /u3/);
+});
+
+// --- verifyConnection: three answers, and only one of them may cause a strip ---
+
+test("a live grant is accepted", async () => {
+  connectionStatus = 200;
+  await link("v1", "901");
+  assert.deepEqual((await metadata.verifyConnection("v1")).status, "accepted");
+});
+
+test("a revoked grant is rejected", async () => {
+  // 401 is Discord saying the user removed the app. That *is* the revocation the
+  // Scout role exists to represent, so acting on it is the point.
+  connectionStatus = 401;
+  await link("v2", "902");
+  assert.equal((await metadata.verifyConnection("v2")).status, "rejected");
+});
+
+test("an unreachable Discord is unknown, never a no", async () => {
+  // The one that matters. If a 500 counted as "not verified", a Discord outage
+  // would strip every member at once — the same failure a swallowed ScoutNet
+  // error used to cause one user at a time.
+  connectionStatus = 500;
+  await link("v3", "903");
+  assert.equal((await metadata.verifyConnection("v3")).status, "unknown");
+});
+
+test("no stored token is rejected, deliberately the less generous reading", async () => {
+  // No path leads from here to verified except the user re-linking, so treating
+  // it as unknown would leave them verified forever and make /link-scoutid a
+  // standing bypass. They have no Scout role either, so this matches what a sync
+  // already does today.
+  connectionStatus = 200;
+  await link("v4", "904", { discordToken: false });
+  const r = await metadata.verifyConnection("v4");
+  assert.equal(r.status, "rejected");
+  assert.match(r.detail, /inget sparat/);
 });

@@ -142,6 +142,26 @@ export async function pushMetadata(userId, tokens, metadata) {
   });
 }
 
+/**
+ * Read back the role-connection Discord holds for a user, with *their* token.
+ *
+ * A read, deliberately: this is used as a liveness probe for the user's OAuth
+ * grant, and probing with a write would mean the check has side effects on the
+ * thing it is checking.
+ *
+ * Returns the status code alongside the body so the caller can tell the three
+ * cases apart — 200 means the grant is live, 401 means the user revoked it, and
+ * anything else means Discord could not answer, which is *not* the same as a no.
+ */
+export async function getRoleConnection(userId, tokens) {
+  const accessToken = await getAccessToken(userId, tokens);
+  const url = `https://discord.com/api/v10/users/@me/applications/${config.DISCORD_CLIENT_ID}/role-connection`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return { status: response.status, ok: response.ok };
+}
+
 // --- Guild member management ---
 
 export async function updateGuildMemberNickname(guildId, userId, nickname) {
