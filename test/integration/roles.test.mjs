@@ -479,6 +479,8 @@ test("stripUnlinkedMember leaves an already-stripped member untouched", async ()
   };
   const result = await roles.stripUnlinkedMember(GUILD, "u8", roleMap, already);
   // syncAllUserRoles only reports members it changed; a no-op must stay silent.
-  assert.deepEqual(result, { added: [], removed: [] });
+  // `nickname` is reported the same way syncUserRoles reports it — null here,
+  // which is exactly what keeps this member out of the report.
+  assert.deepEqual(result, { added: [], removed: [], nickname: null });
   assert.deepEqual(calls.nicks, []);
 });

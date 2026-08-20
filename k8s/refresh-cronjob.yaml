@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: discord-scoutid-refresh
+  labels:
+    app: discord-scoutid-refresh
+spec:
+  # 04:10 UTC daily — after the 03:15 backup, so the two never compete for the
+  # same window, and early enough that a troop assigned in ScoutNet yesterday
+  # has become a role before anyone opens Discord.
+  #
+  # Nightly rather than hourly because this is the *only* thing that propagates
+  # ScoutNet changes: before it existed, a participant who got a troop assigned
+  # sat on `Deltagare-Väntande` until an admin happened to run
+  # `/refresh-scoutid alla:true`. A day's delay on that is fine; needing a human
+  # to remember was not.
+  schedule: "10 4 * * *"
+  # A second run while one is in flight would recompute the same diff against a
+  # guild the first is still changing.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Keep more failures than successes. This job is unattended by design, so the
+  # runs worth reading are the ones that broke.
+  failedJobsHistoryLimit: 5
+  # A run missed by more than an hour is not worth catching up on out of hours —
+  # tomorrow's produces the same result, since it recomputes from ScoutNet.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # A ceiling, not an estimate: measured runtime is seconds at today's size,
+      # and the sync only pauses between users it actually changed. Raise it if a
+      # real run ever approaches it — but check *why* first, because a run this
+      # long means either the guild grew a lot or something is retrying.
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: discord-scoutid-refresh
+        spec:
+          restartPolicy: OnFailure
+          # Same hardening as the Deployment and the member scan; see the comment
+          # in memberscan-cronjob.yaml for why it is repeated rather than shared.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: refresh
+              # The bot's own image; CI rewrites this tag through the
+              # kustomization's `images:` transformer. Never :latest.
+              image: ghcr.io/scouterna/discord-scoutid-linked-role:PLACEHOLDER-set-by-ci
+              command: ["node", "src/refresh.js"]
+              # Needs the full role configuration, not just a token: it computes
+              # desired roles exactly as the server does.
+              envFrom:
+                - configMapRef:
+                    name: discord-scoutid-config
+                - secretRef:
+                    name: discord-scoutid-secrets
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi

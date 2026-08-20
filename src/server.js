@@ -320,6 +320,8 @@ async function handleRefreshCommand(interaction) {
     (o) => o.name === "person",
   );
   const allOption = interaction.data.options?.find((o) => o.name === "alla");
+  const dryRun =
+    interaction.data.options?.find((o) => o.name === "dryrun")?.value === true;
 
   try {
     if (allOption?.value === true) {
@@ -338,8 +340,11 @@ async function handleRefreshCommand(interaction) {
         linkedUsers.map((u) => `${u.discordUserId} -> ${u.scoutId}`),
       );
 
-      const results = await roles.syncAllUserRoles(guildId);
-      eventlog.logSyncAll({ callerId, results });
+      const results = await roles.syncAllUserRoles(guildId, { dryRun });
+      // A dry run leaves no trace in the event log: that channel is the record
+      // of what the bot *did*, and writing "would have" lines into it makes the
+      // history unreliable for the one question it exists to answer.
+      if (!dryRun) eventlog.logSyncAll({ callerId, results });
       if (results.length === 0) {
         await discord.editInteractionResponse(
           token,
@@ -349,16 +354,20 @@ async function handleRefreshCommand(interaction) {
       }
 
       const errors = results.filter((r) => r.error);
+      // A rename is a change here too — it is the change users notice first.
       const changed = results.filter(
         (r) =>
           !r.error &&
-          ((r.added?.length ?? 0) > 0 || (r.removed?.length ?? 0) > 0),
+          ((r.added?.length ?? 0) > 0 ||
+            (r.removed?.length ?? 0) > 0 ||
+            Boolean(r.nickname)),
       );
       const unchanged = results.length - errors.length - changed.length;
+      const prefix = dryRun ? "**Dry run — inget ändrades.** " : "";
 
       const lines = [];
       lines.push(
-        `Synkade **${results.length}** användare: ${changed.length} med ändringar, ${errors.length} fel, ${unchanged} oförändrade.`,
+        `${prefix}Synkade **${results.length}** användare: ${changed.length} med ändringar, ${errors.length} fel, ${unchanged} oförändrade.`,
       );
       if (changed.length > 0) {
         lines.push("");
@@ -414,8 +423,12 @@ async function handleRefreshCommand(interaction) {
       }
 
       await storage.clearScoutNetCache();
-      const result = await roles.syncUserRoles(guildId, targetUserId);
-      eventlog.logSync({ discordUserId: targetUserId, callerId, result });
+      const result = await roles.syncUserRoles(guildId, targetUserId, {
+        dryRun,
+      });
+      if (!dryRun) {
+        eventlog.logSync({ discordUserId: targetUserId, callerId, result });
+      }
 
       if (result.error) {
         await discord.editInteractionResponse(
@@ -425,14 +438,16 @@ async function handleRefreshCommand(interaction) {
       } else {
         await discord.editInteractionResponse(
           token,
-          `<@${targetUserId}>: ${formatChanges(result)}`,
+          `${prefixFor(dryRun)}<@${targetUserId}>: ${formatChanges(result)}`,
         );
       }
     } else {
       // No arguments - refresh yourself
       await storage.clearScoutNetCache();
-      const result = await roles.syncUserRoles(guildId, callerId);
-      eventlog.logSync({ discordUserId: callerId, callerId, result });
+      const result = await roles.syncUserRoles(guildId, callerId, { dryRun });
+      if (!dryRun) {
+        eventlog.logSync({ discordUserId: callerId, callerId, result });
+      }
 
       if (result.error) {
         await discord.editInteractionResponse(
@@ -442,7 +457,7 @@ async function handleRefreshCommand(interaction) {
       } else {
         await discord.editInteractionResponse(
           token,
-          `<@${callerId}>: ${formatChanges(result)}`,
+          `${prefixFor(dryRun)}<@${callerId}>: ${formatChanges(result)}`,
         );
       }
     }
@@ -631,7 +646,7 @@ async function handleScanCommand(interaction) {
   }
 
   const dryRun =
-    interaction.data.options?.find((o) => o.name === "torrkor")?.value === true;
+    interaction.data.options?.find((o) => o.name === "dryrun")?.value === true;
 
   try {
     const result = await runMemberScan({ dryRun });
@@ -763,6 +778,11 @@ async function handleLinkCommand(interaction) {
     console.error("Error handling link command:", e);
     await discord.editInteractionResponse(token, `Fel: ${e.message}`);
   }
+}
+
+/** Marks a reply that describes what *would* happen rather than what did. */
+function prefixFor(dryRun) {
+  return dryRun ? "**Dry run — inget ändrades.** " : "";
 }
 
 function formatChanges({ added, removed }) {

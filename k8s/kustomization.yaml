@@ -11,6 +11,7 @@ resources:
   - ingress.yaml
   - backup-cronjob.yaml
   - memberscan-cronjob.yaml
+  - refresh-cronjob.yaml
 
 # backup-restore-job.yaml is deliberately NOT listed: it is a one-off, applied
 # by hand when a restore is actually needed.
