@@ -25,8 +25,8 @@ process.env.LOG_CHANNEL_ID = "";
 
 /** Pushed metadata bodies, in order. */
 let pushes = [];
-/** What ScoutID's userinfo endpoint answers. */
-let scoutIDResponse = "json";
+/** How many times anything reached for ScoutID. Must stay at zero. */
+let scoutIDCalls = 0;
 /** What Discord answers when the role-connection is *read* back. */
 let connectionStatus = 200;
 
@@ -49,22 +49,8 @@ globalThis.fetch = async (url, opts = {}) => {
   }
 
   if (u.includes("userinfo.php")) {
-    if (scoutIDResponse === "html") {
-      // What SimpleSAMLphp actually answers for a token it no longer accepts:
-      // HTTP *200* with an HTML page. `response.ok` is true, and `.json()`
-      // throws `Unexpected token '<'`.
-      return {
-        ok: true,
-        status: 200,
-        json: async () => JSON.parse("<!DOCTYPE html><html></html>"),
-      };
-    }
-    return ok({
-      given_name: "Anna",
-      family_name: "Andersson",
-      profile: "111",
-      email: "anna@example.com",
-    });
+    scoutIDCalls++;
+    throw new Error("ScoutID must not be contacted from a stored token");
   }
 
   throw new Error(`unexpected fetch: ${opts.method ?? "GET"} ${u}`);
@@ -74,11 +60,7 @@ const storage = await import("../../src/storage.js");
 const metadata = await import("../../src/metadata.js");
 
 /** A linked user with usable Discord tokens and, optionally, ScoutID ones. */
-async function link(
-  userId,
-  scoutId,
-  { discordToken = true, scoutIDToken = true } = {},
-) {
+async function link(userId, scoutId, { discordToken = true } = {}) {
   await storage.setLinkedScoutIDUserId(userId, scoutId);
   if (discordToken) {
     await storage.storeDiscordTokens(userId, {
@@ -88,45 +70,39 @@ async function link(
       expires_at: Date.now() + 3600_000,
     });
   }
-  if (scoutIDToken) {
-    await storage.storeScoutIDTokens(scoutId, {
-      access_token: "at",
-      refresh_token: "rt",
-      expires_at: Date.now() + 3600_000,
-    });
-  }
 }
 
-test("the push carries `verified: true`", async () => {
-  // The key the registered schema declares and the `Scout` requirement reads.
-  // Nothing pushed it until 2026-08-20, so Discord held no value, the
-  // requirement could never be satisfied, and it ended up switched off.
+test("the push carries `verified: true` and nothing that needs a live ScoutID token", async () => {
+  // `verified` is the key the registered schema declares and the `Scout`
+  // requirement reads. `scoutid` rides along outside the schema, which Discord
+  // stores and no requirement looks at.
   pushes = [];
-  scoutIDResponse = "json";
+  scoutIDCalls = 0;
   await link("u1", "111");
 
   await metadata.updateMetadata("u1");
 
   assert.equal(pushes.length, 1);
-  assert.equal(pushes[0].metadata.verified, true);
-  assert.equal(pushes[0].metadata.name, "Anna Andersson");
+  assert.deepEqual(pushes[0].metadata, { verified: true, scoutid: "111" });
 });
 
-test("a dead ScoutID token does not cost the user their `verified` flag", async () => {
-  // ScoutID's refresh token is stored but never used, so `getUserData` fails for
-  // every link older than the access token's lifetime. That must degrade the
-  // *display* fields only: losing `verified` here would revoke the Scout role
-  // over a name lookup.
+test("the push never reaches for ScoutID at all", async () => {
+  // This replaces a test that asserted a *failed* ScoutID fetch still left
+  // `verified` intact. The failure was guaranteed: the stored access token is
+  // dead for every link because nothing refreshes it, so the call cost one
+  // certain-to-fail request per user and logged a misleading parse error. Now
+  // there is no call to survive, which is a stronger guarantee than a try/catch —
+  // and the stub turns any attempt into a hard failure so it cannot creep back.
   pushes = [];
-  scoutIDResponse = "html";
+  scoutIDCalls = 0;
   await link("u2", "222");
 
   await metadata.updateMetadata("u2");
 
-  assert.equal(pushes.length, 1);
+  assert.equal(scoutIDCalls, 0, "something asked ScoutID for data");
   assert.equal(pushes[0].metadata.verified, true);
-  assert.equal(pushes[0].metadata.name, undefined, "no name is expected here");
-  assert.equal(pushes[0].metadata.scoutid, "222");
+  assert.equal(pushes[0].metadata.name, undefined);
+  assert.equal(pushes[0].metadata.email, undefined);
 });
 
 test("a link with no Discord token cannot be pushed at all", async () => {
@@ -147,7 +123,6 @@ test("pushAllMetadata separates 'no token' from 'failed'", async () => {
   // list is the reason to run this before flipping the switch, so it must not be
   // buried among transient errors.
   pushes = [];
-  scoutIDResponse = "json";
 
   const result = await metadata.pushAllMetadata();
 

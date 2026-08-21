@@ -338,7 +338,22 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   roller — länkningsflödet, där alternativet är att fälla en verifiering som
   annars gick igenom. Föreslår du att den flaggan sätts någon annanstans är svaret
   nej.
-- OAuth-tokens (`discord-token`, `scoutid-token`) och länkar (`link`) lagras durabelt i Azure Table Storage (ingen TTL). OAuth-state (`state`) har ett `expiresAt`-fält (lazy expiry, 10 min) eftersom Table Storage saknar native TTL. Refresh-tokens från Discord är giltiga i månader, och persistent lagring låter `/link-scoutid` re-pusha Linked Role-metadata i bakgrunden.
+- **Discords** OAuth-tokens (`discord-token`) och länkar (`link`) lagras durabelt i
+  Azure Table Storage (ingen TTL). OAuth-state (`state`) har ett `expiresAt`-fält
+  (lazy expiry, 10 min) eftersom Table Storage saknar native TTL. Discords
+  refresh-tokens är giltiga i månader, och persistent lagring är vad som låter
+  `updateMetadata` köras i bakgrunden — och sedan 2026-08-21 vad grindens andra
+  bevis läser.
+- **ScoutIDs tokens sparas inte** (partitionen `scoutid-token` är avvecklad, gamla
+  rader är inerta). Ingenting kunde använda dem: access-tokenet går ut inom en
+  timme och ingenting förnyar det, så varje anrop med ett sparat token föll — 16
+  av 16 när det mättes. Förnyelse hade inte hjälpt, för det enda de kunde hämta
+  var namn och e-post, och **namnet som betyder något kommer från ScoutNet**: det
+  är vad smeknamnet byggs av och vad auditen jämför mot. `name`/`email` låg
+  dessutom utanför Linked Role-schemat, så inget krav läste dem — fältet Discord
+  faktiskt visar på kopplingskortet är `platform_username`, som vi inte sätter.
+  Kvar av ScoutID är det enda som behövdes: `getUserData` vid länkningen, med ett
+  token som är sekunder gammalt, för att få personens scoutid.
 - ScoutNet-deltagarlistan cachas i processminnet (10 min), inte i Table Storage — hela listan överskrider gränsen på 64 KB per property. Cache-miss efter omstart kostar bara en extra ScoutNet-hämtning.
 - **Varför inte Redis:** Azure Redis Basic-tier saknar persistens och tappar ALL data vid varje nod-omstart/underhåll. 2026-05-26 wipeades alla länkar+tokens av en sådan omstart. Table Storage (LRS) är durabelt och billigare för detta access-mönster (bara läs/skriv vid länkning + audit).
 

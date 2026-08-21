@@ -1,5 +1,4 @@
 import * as discord from "./discord.js";
-import * as scoutid from "./scoutid.js";
 import * as storage from "./storage.js";
 
 /**
@@ -53,25 +52,21 @@ export async function updateMetadata(discordUserId) {
   // the user disconnects the app, and that is precisely the revocation the Scout
   // role exists to represent.
   //
-  // The other three keys are not in the schema and Discord ignores them. They are
-  // kept because they cost nothing and document what the flow knows.
-  let metadata = { verified: true, scoutid: scoutId };
-  try {
-    const scoutIDTokens = await storage.getScoutIDTokens(scoutId);
-    if (scoutIDTokens) {
-      const scoutIDData = await scoutid.getUserData(scoutIDTokens);
-      metadata = {
-        verified: true,
-        scoutid: scoutIDData.scoutid,
-        email: scoutIDData.email,
-        name: scoutIDData.name,
-      };
-    }
-  } catch (e) {
-    // Display data only — the name and email are informational, and a stale
-    // ScoutID token must not cost the user their `verified` flag.
-    console.error(`Error fetching ScoutID data: ${e.message}`);
-  }
+  // `scoutid` is outside the schema too, so Discord stores it but no requirement
+  // reads it. Kept because it costs nothing and makes the stored connection
+  // self-describing.
+  //
+  // It used to fetch the name and email from ScoutID first. That call could only
+  // ever fail: the stored ScoutID access token is dead for every link in the
+  // table (measured 2026-08-20 — 16 of 16 attempts), because nothing refreshes
+  // it. So it cost one guaranteed-failing HTTP request per user and wrote a
+  // misleading `Unexpected token '<'` line for each. Nothing read the fields
+  // either: they are not in the registered schema, and the field Discord *does*
+  // display on a connection card is `platform_username`, which is separate.
+  //
+  // The name that matters comes from ScoutNet — it is what the nickname is built
+  // from and what the audit compares against.
+  const metadata = { verified: true, scoutid: scoutId };
 
   await discord.pushMetadata(discordUserId, discordTokens, metadata);
   return metadata;

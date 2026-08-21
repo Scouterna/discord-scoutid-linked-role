@@ -8,12 +8,18 @@ import config from "./config.js";
  *   PartitionKey   RowKey          value (+ expiresAt for state)
  *   link           discordUserId   scoutId
  *   discord-token  userId          JSON
- *   scoutid-token  userId          JSON
+ *   scoutid-token  userId          JSON   (legacy — no longer written, see below)
  *   state          state           JSON   + expiresAt   (OAuth, 10 min)
  *   membersnapshot current         chunk0..chunkN + chunks + auditCursors
  *
  * Table Storage has no native TTL, so state rows carry an `expiresAt`
  * (epoch ms) and are treated as absent past that time (lazy expiry).
+ *
+ * The `scoutid-token` partition is **no longer written or read** (2026-08-21).
+ * Nothing could use those tokens: ScoutID's access token expires within the hour
+ * and nothing refreshes it, so every call made with a stored one failed — 16 of
+ * 16 when measured. Keeping an OAuth credential at rest that protects nothing is
+ * liability, not caution. Existing rows are inert and can be dropped whenever.
  *
  * The ScoutNet participant cache is NOT stored here — the full list exceeds
  * Table Storage's 64 KB/property limit, and it's a throwaway cache, so it
@@ -99,17 +105,6 @@ export async function getDiscordTokens(userId) {
 }
 
 // --- ScoutID tokens ---
-
-export async function storeScoutIDTokens(userId, tokens) {
-  await ensureTable();
-  await setValue("scoutid-token", userId, JSON.stringify(tokens));
-}
-
-export async function getScoutIDTokens(userId) {
-  await ensureTable();
-  const e = await getEntity("scoutid-token", userId);
-  return e ? JSON.parse(e.value) : null;
-}
 
 // --- OAuth state (short-lived) ---
 

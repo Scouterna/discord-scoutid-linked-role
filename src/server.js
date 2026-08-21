@@ -169,12 +169,14 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       `Linked ScoutID ${scoutIDUser.scoutid} to Discord user ${discordUserId}`,
     );
 
-    await storage.storeScoutIDTokens(scoutIDUser.scoutid, {
-      discord_user_id: discordUserId,
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expires_at: Date.now() + tokens.expires_in * 1000,
-    });
+    // ScoutID's tokens are deliberately **not** stored. Nothing could use them:
+    // the access token expires within the hour and nothing refreshes it, so every
+    // later call failed (16 of 16, measured 2026-08-20). An OAuth credential kept
+    // at rest that protects nothing is pure liability — it sits in the table and
+    // in every backup. What the flow needed from ScoutID it has already taken:
+    // the scoutid, read from a token that was seconds old.
+    //
+    // Existing `scoutid-token` rows are inert. They can be dropped whenever.
 
     // Link accounts and push metadata
     await storage.setLinkedScoutIDUserId(discordUserId, scoutIDUser.scoutid);
@@ -517,21 +519,27 @@ async function handleStatusCommand(interaction) {
     } else {
       lines.push(`🟢 Länkad till ScoutID: \`${scoutId}\``);
 
-      // ScoutID name (from stored tokens)
-      try {
-        const scoutIDTokens = await storage.getScoutIDTokens(scoutId);
-        if (scoutIDTokens) {
-          const scoutIDData = await scoutid.getUserData(scoutIDTokens);
-          lines.push(`👤 Namn: ${scoutIDData.name}`);
-        }
-      } catch (e) {
-        lines.push(`👤 Namn: (kunde inte hämta — ${e.message})`);
-      }
-
-      // ScoutNet participant info
+      // The name comes from ScoutNet, not ScoutID.
+      //
+      // This used to fetch it with the stored ScoutID token, which is dead for
+      // every link in the table because nothing refreshes it — so the line was
+      // always `👤 Namn: (kunde inte hämta — Unexpected token '<' …)`. ScoutNet's
+      // name is also the one that matters: it is what the nickname is built from
+      // and what the audit compares against.
+      //
+      // The scoutid stays on its own line above, deliberately: when ScoutNet has
+      // nothing to show — not registered, or the event id unset — that number is
+      // what lets a leader look the person up in ScoutNet by hand.
       if (config.SCOUTNET_EVENT_ID) {
         try {
           const participant = await scoutnet.getParticipant(scoutId);
+          const fullName = participant
+            ? [participant.first_name, participant.last_name]
+                .filter(Boolean)
+                .join(" ")
+                .trim()
+            : "";
+          if (fullName) lines.push(`👤 Namn: ${fullName} (från ScoutNet)`);
           if (!participant) {
             lines.push("📋 ScoutNet: Inte registrerad i evenemanget");
           } else if (participant.cancelled_date != null) {
