@@ -65,7 +65,7 @@ function expectedDivisionRoleNames(participants) {
   }
 
   for (const p of Object.values(participants)) {
-    if (p?.cancelled_date != null) continue;
+    if (scoutnet.isCancelled(p)) continue;
     const category = config.SCOUTNET_FEE_ROLES?.[String(p.fee_id)];
     if (!category) continue;
     const divConfig = config.SCOUTNET_DIVISION_ROLES?.[category];
@@ -222,11 +222,11 @@ export async function runAudit(guildId) {
     } else {
       for (const u of linkedUsers) {
         const p = participants[u.scoutId];
-        if (p && p.cancelled_date != null) {
+        if (scoutnet.isCancelled(p)) {
           const name =
             [p.first_name, p.last_name].filter(Boolean).join(" ") || "?";
           items.push(
-            `- <@${u.discordUserId}> scoutid=\`${u.scoutId}\` ${name} (avbokad ${p.cancelled_date})`,
+            `- <@${u.discordUserId}> scoutid=\`${u.scoutId}\` ${name} (avbokad ${scoutnet.cancelledLabel(p)})`,
           );
         }
       }
@@ -247,7 +247,7 @@ export async function runAudit(guildId) {
       for (const u of linkedUsers) {
         const member = memberMap.get(u.discordUserId);
         const p = participants[u.scoutId];
-        if (!member || !p || p.cancelled_date != null) continue;
+        if (!member || !p || scoutnet.isCancelled(p)) continue;
         if (!p.first_name && !p.last_name) continue;
 
         const rawDisplay =
@@ -321,7 +321,7 @@ export async function runAudit(guildId) {
     } else {
       const seen = new Map(); // fee_id → count
       for (const p of Object.values(participants)) {
-        if (p?.cancelled_date != null) continue;
+        if (scoutnet.isCancelled(p)) continue;
         if (p?.fee_id == null) continue;
         const fid = String(p.fee_id);
         if (!config.SCOUTNET_FEE_ROLES[fid]) {

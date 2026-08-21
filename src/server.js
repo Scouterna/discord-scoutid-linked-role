@@ -542,9 +542,9 @@ async function handleStatusCommand(interaction) {
           if (fullName) lines.push(`👤 Namn: ${fullName} (från ScoutNet)`);
           if (!participant) {
             lines.push("📋 ScoutNet: Inte registrerad i evenemanget");
-          } else if (participant.cancelled_date != null) {
+          } else if (scoutnet.isCancelled(participant)) {
             lines.push(
-              `📋 ScoutNet: Avregistrerad (${participant.cancelled_date})`,
+              `📋 ScoutNet: Avregistrerad (${scoutnet.cancelledLabel(participant)})`,
             );
           } else {
             const category =
@@ -742,9 +742,9 @@ async function handleLinkCommand(interaction) {
           messageParts.push(
             `⚠️ ScoutNet känner inte till member_no \`${scoutIdInput}\` — länkar ändå.`,
           );
-        } else if (participant.cancelled_date != null) {
+        } else if (scoutnet.isCancelled(participant)) {
           messageParts.push(
-            `⚠️ ScoutNet-deltagaren är avbokad (${participant.cancelled_date}).`,
+            `⚠️ ScoutNet-deltagaren är avbokad (${scoutnet.cancelledLabel(participant)}).`,
           );
         }
       } catch (e) {

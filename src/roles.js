@@ -41,7 +41,7 @@ async function getParticipantInfo(scoutnetMemberId) {
   if (!config.SCOUTNET_EVENT_ID) return null;
 
   const participant = await scoutnet.getParticipant(scoutnetMemberId);
-  if (!participant || participant.cancelled_date != null) return null;
+  if (!participant || scoutnet.isCancelled(participant)) return null;
 
   const category =
     config.SCOUTNET_FEE_ROLES && participant.fee_id
