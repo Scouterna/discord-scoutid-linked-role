@@ -115,14 +115,24 @@ export async function getUserGuilds(tokens) {
 
 // --- Linked role metadata ---
 
-export async function pushMetadata(userId, tokens, metadata) {
+/**
+ * `platformUsername` is the only part of this that Discord ever *shows*: it is
+ * the line under "ScoutID" on the user's connection card. The metadata keys are
+ * read by role requirements and otherwise invisible, which is why the card said
+ * nothing for the first year — nobody was setting this field.
+ */
+export async function pushMetadata(userId, tokens, metadata, platformUsername) {
   const url = `https://discord.com/api/v10/users/@me/applications/${config.DISCORD_CLIENT_ID}/role-connection`;
 
   await retryWithBackoff(async () => {
     const accessToken = await getAccessToken(userId, tokens);
     const response = await fetch(url, {
       method: "PUT",
-      body: JSON.stringify({ platform_name: "ScoutID", metadata }),
+      body: JSON.stringify({
+        platform_name: "ScoutID",
+        platform_username: platformUsername ?? "",
+        metadata,
+      }),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",

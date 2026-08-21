@@ -112,11 +112,12 @@ const M = (id, nick, roleIds) => ({
 async function link(userId, scoutId, { withTokens = true } = {}) {
   await storage.setLinkedScoutIDUserId(userId, scoutId);
   if (withTokens) {
+    // Only the Discord token matters. ScoutID's is no longer stored at all — see
+    // the note in storage.js — and the audit never read it.
     await storage.storeDiscordTokens(userId, {
       access_token: "a",
       refresh_token: "r",
     });
-    await storage.storeScoutIDTokens(userId, { access_token: "a" });
   }
 }
 

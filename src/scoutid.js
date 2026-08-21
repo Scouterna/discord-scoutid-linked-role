@@ -107,7 +107,21 @@ export async function getUserData(tokens) {
   });
 
   if (response.ok) {
-    const data = await response.json();
+    // Not `response.json()` straight off. SimpleSAMLphp answers a token it no
+    // longer accepts with **HTTP 200 and an HTML page**, so `ok` is true and the
+    // parse throws `Unexpected token '<', "<!DOCTYPE "...` — an error that says
+    // nothing about the cause. This path is the one that must work (it is how the
+    // scoutid is learned at link time), so when it does fail it should say why.
+    const body = await response.text();
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch {
+      const peek = body.slice(0, 60).replace(/\s+/g, " ");
+      throw new Error(
+        `ScoutID svarade HTTP ${response.status} men inte med JSON (\`${peek}…\`) — access-tokenet gäller sannolikt inte längre`,
+      );
+    }
 
     const metadata = {
       name: data.given_name + " " + data.family_name,
