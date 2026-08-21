@@ -123,7 +123,9 @@ The token check is the least obvious one. A link is enough to assign roles and
 set a nickname, but pushing Linked Role metadata needs the user's own Discord
 token — so a link without one works right up until Discord drops the `Scout`
 role, at which point neither an admin nor `/link-scoutid` can repair it and the
-person has to open the `/linked-role` URL themselves.
+person has to re-link the role themselves — and note that opening the
+verification URL is not enough: `Scout` is connection-gated, so only clicking
+**Link** on the role inside Discord grants it.
 
 ## Event log
 
@@ -136,7 +138,7 @@ off and everything else is unchanged.
 09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → WSJ-event, Ledare-12, Ledare
 09:20 🔗 @moderator länkade @erik till scoutid `777` (ersatte `666`) — + Deltagare-05
 09:31 🔒 @kim saknar Scout-rollen — roller strippade, Overifierad satt
-      (måste re-verifiera via /linked-role själv)
+      (måste länka om Scout-rollen i Discord: Kanaler och roller → Scout → Länka)
 10:02 🔁 @moderator körde /refresh-scoutid alla:true — 143 användare, 7 ändrade, 0 fel
 ```
 

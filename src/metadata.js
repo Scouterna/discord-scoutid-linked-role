@@ -14,6 +14,23 @@ import * as storage from "./storage.js";
  */
 
 /**
+ * What a member has to do to get the `Scout` role back, in words they can act on.
+ *
+ * One constant instead of five copies, because the five copies had drifted into
+ * being wrong in the same way: they all said "kör `/linked-role`". That is not a
+ * command — it is an HTTP route on this service — so moderators repeated it and
+ * members went looking for a slash command that does not exist.
+ *
+ * The route alone is not the answer either. `Scout` is connection-gated, so
+ * Discord grants it *only* when the user clicks Link on the role from inside
+ * Discord. Opening the verification URL refreshes the metadata and the stored
+ * token, which is enough for the gate's second proof — but it never grants the
+ * role. Proven by elimination 2026-08-20.
+ */
+export const RELINK_INSTRUCTION =
+  "länka om Scout-rollen i Discord: Kanaler och roller → Scout → Länka";
+
+/**
  * Push metadata for one linked user, using their stored Discord tokens.
  *
  * Needs no user interaction: the stored token carries `role_connections.write`,
@@ -174,7 +191,7 @@ export function formatPushSummary({ pushed, noTokens, failed, dryRun, total }) {
       "Utan sparade Discord-tokens — dessa kan INTE lagas härifrån och tappar",
     );
     lines.push(
-      "Scout-rollen när kravet slås på. De måste själva köra /linked-role:",
+      `Scout-rollen om deras Discord-koppling också dör. De måste själva ${RELINK_INSTRUCTION}:`,
     );
     for (const id of noTokens) lines.push(`  ${id}`);
   }
