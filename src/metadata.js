@@ -27,8 +27,10 @@ import * as storage from "./storage.js";
  * token, which is enough for the gate's second proof — but it never grants the
  * role. Proven by elimination 2026-08-20.
  */
-export const RELINK_INSTRUCTION =
-  "länka om Scout-rollen i Discord: Kanaler och roller → Scout → Länka";
+export const RELINK_PATH = "Kanaler och roller → Scout → Länka";
+
+/** The same thing as a clause, for embedding mid-sentence. */
+export const RELINK_INSTRUCTION = `länka om Scout-rollen i Discord: ${RELINK_PATH}`;
 
 /**
  * Push metadata for one linked user, using their stored Discord tokens.
@@ -215,11 +217,14 @@ export function formatPushSummary({ pushed, noTokens, failed, dryRun, total }) {
   if (noTokens.length > 0) {
     lines.push("");
     lines.push(
-      "Utan sparade Discord-tokens — dessa kan INTE lagas härifrån och tappar",
+      "Utan sparade Discord-tokens — kan inte lagas härifrån. De tappar",
     );
     lines.push(
-      `Scout-rollen om deras Discord-koppling också dör. De måste själva ${RELINK_INSTRUCTION}:`,
+      "Scout-rollen om deras Discord-koppling också dör, och måste då",
     );
+    lines.push("länka om den själva:");
+    lines.push(`  ${RELINK_PATH}`);
+    lines.push("");
     for (const id of noTokens) lines.push(`  ${id}`);
   }
   if (failed.length > 0) {
