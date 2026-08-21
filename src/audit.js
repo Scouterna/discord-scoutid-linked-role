@@ -3,7 +3,7 @@ import * as discord from "./discord.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 import * as roles from "./roles.js";
-import { RELINK_INSTRUCTION } from "./metadata.js";
+import { RELINK_INSTRUCTION, verifyConnection } from "./metadata.js";
 
 /**
  * Server consistency audit.
@@ -141,25 +141,47 @@ export async function runAudit(guildId) {
   // Vid nästa /refresh-scoutid får dessa sina roller borttagna och Overifierad satt.
   {
     const items = [];
+    let note = null;
     if (!scoutRole) {
       items.push(`(Rollen \`${scoutRoleName}\` finns inte i guilden.)`);
     } else {
+      // The gate takes two proofs, so the missing role is only half a question —
+      // and asking half of it made this category list 17 people who were in no
+      // danger whatsoever, with identical advice none of them needed. An audit
+      // that reports a non-problem as loudly as a problem is one nobody reads.
+      //
+      // So ask the other half. `verifyConnection` is a GET, which keeps the audit
+      // read-only, and it only runs for members who lack the role — at most a
+      // handful once the migration has settled.
+      let carried = 0;
       for (const u of linkedUsers) {
         const member = memberMap.get(u.discordUserId);
         if (!member) continue;
         if (member.roles.includes(scoutRole.id)) continue;
+        const connection = await verifyConnection(u.discordUserId);
+        if (connection.status === "accepted") {
+          carried++;
+          continue;
+        }
         const name =
           member.nick || member.user.global_name || member.user.username;
+        const why =
+          connection.status === "unknown"
+            ? `kunde inte avgöra kopplingen (${connection.detail})`
+            : `kopplingen är död (${connection.detail})`;
         items.push(
-          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen ${RELINK_INSTRUCTION}`,
+          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — ${why}, be hen ${RELINK_INSTRUCTION}`,
         );
+      }
+      if (carried > 0) {
+        note = `${carried} till saknar rollen men är verifierade via sin Discord-koppling — de påverkas inte, och får rollen när de nästa gång länkar om.`;
       }
     }
     categories.push({
       id: "linked_no_scout_role",
-      title:
-        "Länkade men saknar Scout-rollen — strippas vid nästa synk *om* även deras Discord-koppling är död",
+      title: "Saknar Scout-rollen *och* har ingen giltig Discord-koppling",
       items,
+      note,
     });
   }
 
@@ -545,12 +567,32 @@ export async function runAudit(guildId) {
   const totals = {
     issues: 0,
     byCategory: {},
+    // How many *people* the findings are about. `issues` counts findings, and one
+    // person can appear in four categories — so 23 findings read as an emergency
+    // when the truth was two members needing to act. Pulled out of the item text
+    // rather than threaded through every category: the mention format is fixed,
+    // and the alternative is restructuring thirteen builders for one number.
+    affectedUsers: 0,
   };
+  const affected = new Set();
   for (const c of categories) {
     const n = issueCount(c.items);
     c.count = n;
     totals.byCategory[c.id] = n;
     totals.issues += n;
+    for (const item of c.items) {
+      for (const m of item.matchAll(/<@([^>]+)>/g)) affected.add(m[1]);
+    }
+  }
+  totals.affectedUsers = affected.size;
+
+  // Display names for every member, so the plain-text report can say who someone
+  // is instead of `<@1013377192023040000>`. Discord renders mentions; a .txt
+  // attachment does not, and that is the form the report takes exactly when it is
+  // long enough to matter.
+  const names = {};
+  for (const m of guildMembers) {
+    names[m.user.id] = m.nick || m.user.global_name || m.user.username;
   }
 
   return {
@@ -562,6 +604,7 @@ export async function runAudit(guildId) {
     },
     categories,
     totals,
+    names,
   };
 }
 
@@ -586,7 +629,9 @@ export function formatAuditMarkdown(audit) {
     return lines.join("\n").trimEnd();
   }
 
-  lines.push(`Hittade **${audit.totals.issues}** avvikelser:`);
+  lines.push(
+    `Hittade **${audit.totals.issues}** fynd hos **${audit.totals.affectedUsers}** personer:`,
+  );
   lines.push("");
 
   const withIssues = audit.categories.filter((c) => c.count > 0);
@@ -596,17 +641,86 @@ export function formatAuditMarkdown(audit) {
       if (item.startsWith("(")) continue;
       lines.push(item);
     }
+    if (c.note) lines.push(`_${c.note}_`);
     lines.push("");
   }
 
+  // Notes on categories with nothing wrong still belong in the report: "17 are
+  // fine and here is why" is the sentence that stops someone acting on a number
+  // they misread.
+  for (const c of audit.categories) {
+    if (c.count === 0 && c.note) lines.push(`_${c.note}_`);
+  }
+
   return lines.join("\n").trimEnd();
+}
+
+/**
+ * The same report as plain text, for the file attachment.
+ *
+ * Discord renders `**bold**` and turns `<@123>` into a name — in a *message*. The
+ * report becomes a `.txt` attachment as soon as it passes 2000 characters, and an
+ * attachment renders nothing: it arrives as literal `__…__` and raw numeric ids,
+ * unreadable exactly when it is long enough to need reading.
+ *
+ * So the file gets its own rendering: names resolved from `audit.names`, markup
+ * stripped, headings underlined with dashes.
+ */
+export function formatAuditText(audit) {
+  const strip = (t) =>
+    t
+      .replace(/<@([^>]+)>/g, (_, id) => audit.names?.[id] ?? `användare ${id}`)
+      // Single `*` as well as `**`: several titles use it for emphasis, and it
+      // survived the first version of this as literal asterisks.
+      .replace(/\*+/g, "")
+      .replace(/__/g, "")
+      .replace(/`/g, "")
+      // The items spell out `<@id> (nickname)` because a rendered mention shows
+      // the *account* name, not the server nickname. Resolved to a name they are
+      // usually the same string twice.
+      .replace(/([^\s()][^()]*) \(\1\)/g, "$1")
+      .replace(/^- /, "  · ");
+
+  const m = audit.meta;
+  const lines = ["AUDIT-RAPPORT FÖR SCOUTID-LÄNKNINGAR", ""];
+  const head = [`${m.guildMembers} medlemmar`, `${m.linkedUsers} länkade`];
+  if (m.participants != null) head.push(`${m.participants} i ScoutNet`);
+  lines.push(head.join(" · "));
+
+  if (audit.totals.issues === 0) {
+    lines.push("", "Inga avvikelser hittades.");
+  } else {
+    lines.push(
+      "",
+      `${audit.totals.issues} fynd hos ${audit.totals.affectedUsers} personer:`,
+    );
+  }
+
+  for (const c of audit.categories) {
+    if (c.count === 0 && !c.note) continue;
+    lines.push("");
+    if (c.count > 0) {
+      const heading = `${strip(c.title)} (${c.count})`;
+      lines.push(heading);
+      lines.push("-".repeat(heading.length));
+      for (const item of c.items) {
+        if (item.startsWith("(")) continue;
+        lines.push(strip(item));
+      }
+    }
+    if (c.note) lines.push(`  (${strip(c.note)})`);
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 export function summarizeAudit(audit) {
   const m = audit.meta;
   const parts = [`${m.guildMembers} medlemmar`, `${m.linkedUsers} länkade`];
   if (m.participants != null) parts.push(`${m.participants} i ScoutNet`);
-  parts.push(`${audit.totals.issues} avvikelser`);
+  parts.push(
+    `${audit.totals.issues} fynd hos ${audit.totals.affectedUsers} personer`,
+  );
 
   const topIssues = audit.categories
     .filter((c) => c.count > 0)

@@ -72,11 +72,27 @@ const ROLES = [
 let members = [];
 let participants = {};
 const mutations = [];
+/**
+ * What Discord answers when the audit reads back a user's role-connection — the
+ * gate's second proof. Defaults to 401 so the cases below keep testing the role
+ * signal on its own; a live grant would make most findings disappear, which is
+ * the whole point of the change that introduced this.
+ */
+let connectionStatus = 401;
 
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const method = opts.method ?? "GET";
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+
+  if (u.includes("/role-connection")) {
+    return {
+      ok: connectionStatus === 200,
+      status: connectionStatus,
+      json: async () => ({}),
+      text: async () => "{}",
+    };
+  }
 
   if (method !== "GET") {
     // The audit must never write. Recorded rather than thrown so the failure
@@ -193,6 +209,25 @@ test("a link whose Scout role fell off is reported", async () => {
 
   const result = await audit.runAudit(GUILD);
   assert.equal(counts(result).linked_no_scout_role, 1);
+});
+
+test("a missing Scout role with a live connection is not a finding", async () => {
+  // The gate takes two proofs, so the missing role is half a question. Asking
+  // only that half made this category list seventeen members who were in no
+  // danger at all, with identical advice none of them needed — and an audit that
+  // reports a non-problem as loudly as a problem is one nobody reads.
+  //
+  // They are still worth a line, so the count drops to zero and the category
+  // carries a note instead.
+  connectionStatus = 200;
+  try {
+    const result = await audit.runAudit(GUILD);
+    assert.equal(counts(result).linked_no_scout_role, 0);
+    const c = result.categories.find((x) => x.id === "linked_no_scout_role");
+    assert.match(c.note, /verifierade via sin Discord-koppling/);
+  } finally {
+    connectionStatus = 401;
+  }
 });
 
 test("a link with no stored Discord tokens is reported", async () => {
@@ -418,7 +453,47 @@ test("the report renders and summarises what it found", async () => {
   for (const c of result.categories) {
     if (c.count === 0) assert.doesNotMatch(md, new RegExp(escape(c.title)));
   }
-  assert.match(audit.summarizeAudit(result), /avvikelser/);
+  assert.match(audit.summarizeAudit(result), /fynd hos \d+ personer/);
+  // One person can appear in four categories, so a finding count alone read as an
+  // emergency when the truth was two members needing to act.
+  assert.ok(
+    result.totals.affectedUsers > 0 &&
+      result.totals.affectedUsers <= result.totals.issues,
+    `orimligt antal personer: ${result.totals.affectedUsers} av ${result.totals.issues} fynd`,
+  );
+});
+
+test("the attachment is readable without Discord to render it", async () => {
+  // The report becomes a .txt as soon as it passes 2000 characters, and an
+  // attachment renders nothing — so the markdown version arrived as literal
+  // `__…__` and raw numeric ids, unreadable exactly when it was long enough to
+  // need reading.
+  const result = await audit.runAudit(GUILD);
+  const txt = audit.formatAuditText(result);
+
+  assert.doesNotMatch(txt, /<@/, "an unresolved mention survived");
+  assert.doesNotMatch(txt, /\*|__|`/, "Discord markup survived");
+  // The items spell out `<@id> (nickname)` because a rendered mention shows the
+  // account name, not the server one. Resolved, that is the same string twice.
+  assert.doesNotMatch(
+    txt,
+    /(\S[^()]*) \(\1\)/,
+    "a name was printed twice in a row",
+  );
+
+  // Every mention the markdown version makes must appear as a name in the text
+  // version. Asserting on an arbitrary member instead would only prove that
+  // someone consistent — who is not in the report at all — was absent.
+  const md = audit.formatAuditMarkdown(result);
+  const mentioned = [...md.matchAll(/<@([^>]+)>/g)].map((m) => m[1]);
+  assert.ok(mentioned.length > 0, "the fixture should produce findings");
+  for (const id of new Set(mentioned)) {
+    assert.match(
+      txt,
+      new RegExp(escape(result.names[id])),
+      `${id} was not resolved to a name`,
+    );
+  }
 });
 
 function escape(s) {
