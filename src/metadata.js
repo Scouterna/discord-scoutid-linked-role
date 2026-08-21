@@ -1,4 +1,5 @@
 import * as discord from "./discord.js";
+import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 
 /**
@@ -68,7 +69,38 @@ export async function updateMetadata(discordUserId) {
   // from and what the audit compares against.
   const metadata = { verified: true, scoutid: scoutId };
 
-  await discord.pushMetadata(discordUserId, discordTokens, metadata);
+  // The connection card's visible line. ScoutNet's name, because that is the one
+  // already on show inside the server — the bot writes it into the nickname — so
+  // it adds no exposure the guild does not have. Deliberately *not* the scoutid:
+  // that number is admin-facing today, and a connection card can be seen wider
+  // than the channels are.
+  //
+  // Wrapped, and the push happens either way. A ScoutNet outage must not cost the
+  // user their `verified` flag — the same reason the ScoutID lookup was removed
+  // from here. The cost of that choice is honest and small: a push made while
+  // ScoutNet is down clears the displayed name until the next one, because PUT
+  // replaces the whole object.
+  let platformUsername = "";
+  try {
+    const participant = await scoutnet.getParticipant(scoutId);
+    if (participant) {
+      platformUsername = [participant.first_name, participant.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+    }
+  } catch (e) {
+    console.error(
+      `Kunde inte hämta ScoutNet-namn för ${scoutId}: ${e.message}`,
+    );
+  }
+
+  await discord.pushMetadata(
+    discordUserId,
+    discordTokens,
+    metadata,
+    platformUsername,
+  );
   return metadata;
 }
 

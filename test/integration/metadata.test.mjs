@@ -22,6 +22,8 @@ process.env.DISCORD_TOKEN = "fake";
 process.env.DISCORD_CLIENT_ID = "app-1";
 process.env.DISCORD_CLIENT_SECRET = "shh";
 process.env.LOG_CHANNEL_ID = "";
+process.env.SCOUTNET_EVENT_ID = "9999";
+process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 
 /** Pushed metadata bodies, in order. */
 let pushes = [];
@@ -29,6 +31,9 @@ let pushes = [];
 let scoutIDCalls = 0;
 /** What Discord answers when the role-connection is *read* back. */
 let connectionStatus = 200;
+/** ScoutNet's participant list, and whether the fetch fails. */
+let participants = {};
+let scoutNetDown = false;
 
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
@@ -46,6 +51,11 @@ globalThis.fetch = async (url, opts = {}) => {
     }
     pushes.push(JSON.parse(opts.body));
     return ok({});
+  }
+
+  if (u.includes("scoutnet.se")) {
+    if (scoutNetDown) throw new Error("ScoutNet unreachable");
+    return ok({ participants });
   }
 
   if (u.includes("userinfo.php")) {
@@ -199,4 +209,52 @@ test("no stored token is rejected, deliberately the less generous reading", asyn
   const r = await metadata.verifyConnection("v4");
   assert.equal(r.status, "rejected");
   assert.match(r.detail, /inget sparat/);
+});
+
+// --- platform_username: the only part of the push Discord ever displays ---
+
+test("the connection card shows the ScoutNet name", async () => {
+  // The metadata keys are read by role requirements and otherwise invisible, so
+  // the card said nothing at all until this field was set.
+  pushes = [];
+  scoutNetDown = false;
+  participants = { 777: { first_name: "Anna", last_name: "Andersson" } };
+  await storage.clearScoutNetCache();
+  await link("p1", "777");
+
+  await metadata.updateMetadata("p1");
+
+  assert.equal(pushes[0].platform_username, "Anna Andersson");
+  assert.equal(pushes[0].platform_name, "ScoutID");
+});
+
+test("someone with no ScoutNet record still gets a clean push", async () => {
+  pushes = [];
+  scoutNetDown = false;
+  participants = {};
+  await storage.clearScoutNetCache();
+  await link("p2", "778");
+
+  await metadata.updateMetadata("p2");
+
+  assert.equal(pushes[0].platform_username, "");
+  assert.equal(pushes[0].metadata.verified, true);
+});
+
+test("a ScoutNet outage still pushes `verified`", async () => {
+  // The priority that matters: the flag is what the Scout requirement reads, and
+  // a display name is not worth risking it for. The cost is stated rather than
+  // hidden — PUT replaces the whole object, so this push clears the shown name
+  // until the next one succeeds.
+  pushes = [];
+  participants = { 779: { first_name: "Erik", last_name: "Svensson" } };
+  await storage.clearScoutNetCache();
+  await link("p3", "779");
+  scoutNetDown = true;
+
+  await metadata.updateMetadata("p3");
+
+  assert.equal(pushes.length, 1, "the push must still happen");
+  assert.equal(pushes[0].metadata.verified, true);
+  assert.equal(pushes[0].platform_username, "");
 });

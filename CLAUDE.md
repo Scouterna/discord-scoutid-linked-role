@@ -350,8 +350,15 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   av 16 när det mättes. Förnyelse hade inte hjälpt, för det enda de kunde hämta
   var namn och e-post, och **namnet som betyder något kommer från ScoutNet**: det
   är vad smeknamnet byggs av och vad auditen jämför mot. `name`/`email` låg
-  dessutom utanför Linked Role-schemat, så inget krav läste dem — fältet Discord
-  faktiskt visar på kopplingskortet är `platform_username`, som vi inte sätter.
+  dessutom utanför Linked Role-schemat, så inget krav läste dem. Fältet Discord
+  faktiskt *visar* på kopplingskortet är `platform_username`, och det sätts nu —
+  till **ScoutNet-namnet**, eftersom det redan syns i servern via smeknamnet och
+  därmed inte exponerar något nytt. Med flit *inte* scoutid-numret: det är
+  admin-vänt idag, och ett kopplingskort kan ses bredare än kanalerna. Hämtningen
+  är inslagen i en try/catch och pushen sker ändå — ett ScoutNet-avbrott får inte
+  kosta någon deras `verified`-flagga, av exakt samma skäl som ScoutID-anropet
+  togs bort. Priset är att en push under ett avbrott tömmer det visade namnet till
+  nästa lyckade push, eftersom `PUT` ersätter hela objektet.
   Kvar av ScoutID är det enda som behövdes: `getUserData` vid länkningen, med ett
   token som är sekunder gammalt, för att få personens scoutid.
 - ScoutNet-deltagarlistan cachas i processminnet (10 min), inte i Table Storage — hela listan överskrider gränsen på 64 KB per property. Cache-miss efter omstart kostar bara en extra ScoutNet-hämtning.
