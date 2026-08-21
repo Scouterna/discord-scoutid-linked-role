@@ -107,8 +107,8 @@ reports it.
 | `/refresh-scoutid`                  | Everyone | Re-sync your own roles and nickname                       |
 | `/refresh-scoutid person:@user`     | Admin    | Re-sync one user                                          |
 | `/refresh-scoutid alla:true`        | Admin    | Re-sync every linked user                                 |
-| `/status-scoutid`                   | Admin    | Server summary: members, links, participants, open issues |
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
+| `/adoption-scoutid`                 | Admin    | How many registered participants have linked, per group    |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
 | `/scan-scoutid`                     | Admin    | Run the member scan now; `dryrun:true` for a dry run      |

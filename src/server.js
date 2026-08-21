@@ -8,6 +8,7 @@ import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 import * as roles from "./roles.js";
 import * as audit from "./audit.js";
+import * as adoption from "./adoption.js";
 import * as eventlog from "./eventlog.js";
 import { updateMetadata, RELINK_INSTRUCTION } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
@@ -306,6 +307,15 @@ app.post(
       return;
     }
 
+    if (
+      interaction.type === 2 &&
+      interaction.data.name === "adoption-scoutid"
+    ) {
+      res.json({ type: 5, data: { flags: 64 } });
+      scheduleBackground(() => handleAdoptionCommand(interaction));
+      return;
+    }
+
     if (interaction.type === 2 && interaction.data.name === "link-scoutid") {
       res.json({ type: 5, data: { flags: 64 } });
       scheduleBackground(() => handleLinkCommand(interaction));
@@ -474,6 +484,37 @@ async function handleRefreshCommand(interaction) {
   }
 }
 
+async function handleAdoptionCommand(interaction) {
+  const token = interaction.token;
+  const callerPermissions = BigInt(interaction.member.permissions);
+  if ((callerPermissions & ADMIN_PERMISSION) !== ADMIN_PERMISSION) {
+    await discord.editInteractionResponse(
+      token,
+      "Du måste vara admin för att använda det här kommandot.",
+    );
+    return;
+  }
+
+  const includeMissing =
+    interaction.data.options?.find((o) => o.name === "saknas")?.value === true;
+
+  try {
+    const result = await adoption.runAdoption();
+    const summary = adoption.formatAdoptionSummary(result);
+    // Always a file as well: the per-group breakdown is 130 lines at full size,
+    // and it is the breakdown, not the total, that someone acts on.
+    await discord.editInteractionResponseWithFile(
+      token,
+      summary,
+      "adoption-scoutid.txt",
+      adoption.formatAdoptionText(result, { includeMissing }),
+    );
+  } catch (e) {
+    console.error("Error handling adoption command:", e);
+    await discord.editInteractionResponse(token, `Fel: ${e.message}`);
+  }
+}
+
 async function handleStatusCommand(interaction) {
   const guildId = interaction.guild_id;
   const token = interaction.token;
@@ -492,19 +533,15 @@ async function handleStatusCommand(interaction) {
     (o) => o.name === "person",
   )?.value;
 
-  // No person argument → server-wide audit summary
+  // `person` is a required option, so Discord rejects the command without one.
+  // It used to fall back to `runAudit()` plus its summary here — the same
+  // computation over the same data as `/audit-scoutid`, only shorter, which made
+  // two commands answer one question and neither of them clearly.
   if (!targetUserId) {
-    try {
-      const result = await audit.runAudit(guildId);
-      const summary = audit.summarizeAudit(result);
-      await discord.editInteractionResponse(
-        token,
-        `**Server-status**\n${summary}\n\nKör \`/audit-scoutid\` för full rapport.`,
-      );
-    } catch (e) {
-      console.error("Error handling status summary:", e);
-      await discord.editInteractionResponse(token, `Fel: ${e.message}`);
-    }
+    await discord.editInteractionResponse(
+      token,
+      "Ange `person`. För serverbilden: `/audit-scoutid` (avvikelser) eller `/adoption-scoutid` (hur många som länkat sig).",
+    );
     return;
   }
 

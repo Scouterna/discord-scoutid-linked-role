@@ -187,6 +187,7 @@ for (const name of [
   "audit-scoutid",
   "scan-scoutid",
   "link-scoutid",
+  "adoption-scoutid",
 ]) {
   test(`/${name} is acknowledged immediately and ephemerally`, async () => {
     // Discord drops the interaction unless it is acknowledged within 3 seconds,
@@ -206,7 +207,12 @@ for (const name of [
   });
 }
 
-for (const name of ["audit-scoutid", "scan-scoutid", "link-scoutid"]) {
+for (const name of [
+  "audit-scoutid",
+  "scan-scoutid",
+  "link-scoutid",
+  "adoption-scoutid",
+]) {
   test(`/${name} turns away a non-admin`, async () => {
     // The permission gate lives in the background handler, after the ACK, so the
     // rejection arrives as an edit to the deferred response rather than as a

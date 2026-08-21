@@ -73,6 +73,16 @@ if (config.DISCORD_GUILD_ID) {
     console.error("Command registration failed:", e.message);
   }
 
+  console.log("Registering /adoption-scoutid command...");
+  try {
+    const result = await discord.registerAdoptionCommand(
+      config.DISCORD_GUILD_ID,
+    );
+    console.log("Command registered:", result.name);
+  } catch (e) {
+    console.error("Command registration failed:", e.message);
+  }
+
   console.log("Registering /link-scoutid command...");
   try {
     const result = await discord.registerLinkCommand(config.DISCORD_GUILD_ID);
