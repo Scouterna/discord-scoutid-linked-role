@@ -59,6 +59,8 @@ let participants = {};
 let scoutNetDown = false;
 /** Role ids that reject a change, standing in for Discord's role hierarchy. */
 let forbiddenRoleIds = new Set();
+/** What Discord answers for the role-connection read — the gate's second proof. */
+let connectionStatus = 401;
 
 const calls = { added: [], removed: [], nicks: [] };
 
@@ -78,6 +80,17 @@ globalThis.fetch = async (url, opts = {}) => {
     return ok({ participants });
   }
   if (u.endsWith("/roles")) return ok(GUILD_ROLES);
+
+  // The gate's second proof: a read of the user's role-connection. `null` means
+  // no token is stored, which the gate treats as a refusal.
+  if (u.includes("/role-connection")) {
+    return {
+      ok: connectionStatus === 200,
+      status: connectionStatus,
+      json: async () => ({}),
+      text: async () => "{}",
+    };
+  }
 
   const roleChange = u.match(/\/members\/([^/]+)\/roles\/([^/?]+)$/);
   if (roleChange) {
@@ -114,6 +127,9 @@ async function setup({ userId, roleIds, nick, scoutId, participant }) {
   calls.nicks.length = 0;
   forbiddenRoleIds = new Set();
   scoutNetDown = false;
+  // Default to a refused grant, so the existing cases keep testing the role
+  // signal on its own rather than quietly passing on the new one.
+  connectionStatus = 401;
   member = {
     user: { id: userId, username: "u", global_name: nick },
     nick,
@@ -483,4 +499,93 @@ test("stripUnlinkedMember leaves an already-stripped member untouched", async ()
   // which is exactly what keeps this member out of the report.
   assert.deepEqual(result, { added: [], removed: [], nickname: null });
   assert.deepEqual(calls.nicks, []);
+});
+
+// --- The second proof in the verification gate ---
+
+test("a live OAuth grant verifies someone who has no Scout role yet", async () => {
+  // The case the whole change exists for. Discord grants a connection-gated role
+  // only through its own Link flow, so when the `Scout` role was rebuilt every
+  // member lost it and none could be given it back by any API. Without this
+  // second proof, the next sync would have stripped all of them.
+  await setup({
+    userId: "c1",
+    roleIds: ["r-event", "r-ledare", "r-l12"], // no r-scout
+    nick: "Anna Andersson (AL12)",
+    scoutId: "c111",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: { 107592: "12" },
+    },
+  });
+  await storage.storeDiscordTokens("c1", {
+    access_token: "at",
+    refresh_token: "rt",
+    expires_at: Date.now() + 3600_000,
+  });
+  connectionStatus = 200;
+
+  const result = await roles.syncUserRoles(GUILD, "c1");
+
+  assert.equal(result.error, undefined);
+  assert.ok(!result.added?.includes("Overifierad"), "must not be stripped");
+  assert.deepEqual(calls.removed, [], "nothing should be taken away");
+});
+
+test("an unreachable Discord changes nothing at all", async () => {
+  // If "could not ask" counted as "not verified", one Discord outage would strip
+  // every member in a single nightly run. Same rule the ScoutNet guard follows.
+  await setup({
+    userId: "c2",
+    roleIds: ["r-event", "r-ledare", "r-l12"], // no r-scout
+    nick: "Erik Svensson (AL12)",
+    scoutId: "c222",
+    participant: {
+      fee_id: 33293,
+      cancelled_date: null,
+      first_name: "Erik",
+      last_name: "Svensson",
+      questions: { 107592: "12" },
+    },
+  });
+  await storage.storeDiscordTokens("c2", {
+    access_token: "at",
+    refresh_token: "rt",
+    expires_at: Date.now() + 3600_000,
+  });
+  connectionStatus = 503;
+
+  const result = await roles.syncUserRoles(GUILD, "c2");
+
+  assert.match(result.error, /Kunde inte avgöra verifiering/);
+  assert.deepEqual(calls.added, []);
+  assert.deepEqual(calls.removed, []);
+  assert.deepEqual(calls.nicks, []);
+});
+
+test("the role alone still verifies, without a network probe", async () => {
+  // The role is checked first because it is free, so a member who has it costs no
+  // extra request even when their grant would be refused.
+  await setup({
+    userId: "c3",
+    roleIds: ["r-scout", "r-event"],
+    nick: "Kim Nilsson",
+    scoutId: "c333",
+    participant: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Kim",
+      last_name: "Nilsson",
+      questions: {},
+    },
+  });
+  connectionStatus = 401; // would refuse, and must never be consulted
+
+  const result = await roles.syncUserRoles(GUILD, "c3");
+
+  assert.equal(result.error, undefined);
+  assert.ok(!result.added?.includes("Overifierad"));
 });

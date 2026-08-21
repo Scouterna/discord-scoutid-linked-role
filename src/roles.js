@@ -2,6 +2,7 @@ import config from "./config.js";
 import * as scoutnet from "./scoutnet.js";
 import * as discord from "./discord.js";
 import * as storage from "./storage.js";
+import * as metadata from "./metadata.js";
 
 const UNVERIFIED_ROLE = "Overifierad";
 
@@ -262,9 +263,40 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
     options.member ?? (await discord.getGuildMember(guildId, discordUserId));
   const currentRoleIds = new Set(member.roles);
 
-  // Verification gate: Scout role missing → treat as unverified, strip access
+  // Verification gate — two independent proofs, either of which is enough.
+  //
+  // The role is Discord's answer: a connection-gated role it grants through its
+  // own Link flow and revokes when the user disconnects the app. Strongest, and
+  // not something the bot can forge.
+  //
+  // The OAuth grant is the same fact seen from the other side: if Discord still
+  // answers for this user's token, the app is still authorised. It exists as a
+  // second proof because the first one **cannot be backfilled** — Discord grants
+  // a connection role only when the user clicks Link, so rebuilding the role
+  // would otherwise have required all 18 members to re-verify by hand.
+  //
+  // OR rather than AND, deliberately. During the migration most members have a
+  // live grant and no role yet; AND would have stripped every one of them. In
+  // steady state the two agree, and either alone is genuine evidence.
+  //
+  // The role is checked first because it costs nothing — the member object is
+  // already in hand — so the network probe only runs for people who lack it.
   const scoutRole = roleMap.get(config.SCOUTNET_SCOUT_ROLE.toLowerCase());
-  const isVerified = scoutRole && currentRoleIds.has(scoutRole.id);
+  let isVerified = Boolean(scoutRole && currentRoleIds.has(scoutRole.id));
+
+  if (!isVerified) {
+    const connection = await metadata.verifyConnection(discordUserId);
+    if (connection.status === "accepted") {
+      isVerified = true;
+    } else if (connection.status === "unknown") {
+      // Never act on "could not ask". A Discord outage would otherwise strip
+      // everyone at once, which is the same failure a swallowed ScoutNet error
+      // used to cause one user at a time.
+      return {
+        error: `Kunde inte avgöra verifiering, inget ändrades: ${connection.detail}`,
+      };
+    }
+  }
 
   // Compute desired roles + suffix based on verification state.
   //

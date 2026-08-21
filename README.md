@@ -27,11 +27,20 @@ waiting role until an admin happened to run the command.
 
 ### Security boundary
 
-The `Scout` role — a Discord *managed* role granted by the Linked Role
-verification — is the boundary. The bot can never grant it: Discord does, against
-the `verified` metadata this app pushes, and Discord takes it away when the user
-disconnects the app. That revocation is the whole point, and it is why the
-boundary is a managed role rather than one the bot controls. If a linked user loses it (they disconnected the
+The boundary takes **two independent proofs, either of which is enough**:
+
+1. The `Scout` role — a Discord *managed* role, granted through Discord's own
+   Link flow and revoked when the user disconnects the app. The bot can never
+   grant it, which is what makes it trustworthy.
+2. A live OAuth grant — if Discord still answers for the user's stored token, the
+   app is still authorised. The same fact, seen from the other side.
+
+The second exists because the first cannot be backfilled: Discord grants a
+connection-gated role only when the user clicks Link, so a rebuilt role cannot be
+restored to existing members by any API. Either proof missing is fine; both
+missing means the next sync strips every bot-managed role and applies
+`Overifierad`. The stored link is kept, so the user can re-verify without an admin
+re-entering their member number. If a linked user loses it (they disconnected the
 app, or left and rejoined the server), the next sync strips every bot-managed
 role and applies `Overifierad`. The stored link is kept, so the user can
 re-verify without an admin re-entering their member number.

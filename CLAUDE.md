@@ -295,7 +295,30 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 - The bot cannot modify users above it in Discord's role hierarchy (403 is expected for admins)
 - `register.js` only needs Discord API, but imports storage.js which connects to Table Storage — storage errors during registration are harmless
 - Interaction responses use a 1-second delay before processing to avoid race conditions with Discord's deferred response handling
-- **Scout-rollen är säkerhetsgränsen.** Saknar en länkad användare Scout-rollen i Discord (managed Linked Role) så strippas alla bot-hanterade roller och `Overifierad` sätts vid nästa `syncUserRoles`. Storage-länken behålls så användaren kan re-verifiera utan att admin behöver fråga efter scoutid igen.
+- **Verifieringsgränsen har två bevis, och vartdera räcker** (`syncUserRoles`).
+  Saknas båda strippas alla bot-hanterade roller och `Overifierad` sätts.
+  Storage-länken behålls så användaren kan re-verifiera utan att admin behöver
+  fråga efter scoutid igen.
+
+  1. **Scout-rollen** — en connection-gated roll som Discord delar ut via sitt
+     eget Link-flöde och återkallar när användaren kopplar bort appen. Starkast,
+     och inget boten kan förfalska.
+  2. **Ett levande OAuth-grant** — svarar Discord för användarens token är appen
+     fortfarande auktoriserad. Samma faktum sett från andra sidan.
+
+  Det andra beviset finns för att det första **inte går att backfilla**: Discord
+  delar ut en connection-roll bara när användaren klickar Link, så när
+  `Scout`-rollen byggdes om 2026-08-20 tappade alla 18 den och ingen kunde få den
+  tillbaka via något API. `OR` och inte `AND` — under migrationen har de flesta
+  ett levande grant men ingen roll, och `AND` hade strippat varje en av dem.
+
+  Rollen kontrolleras först eftersom den är gratis; nätverksproben körs bara för
+  den som saknar rollen. **`verifyConnection` har tre svar, inte två**: `accepted`,
+  `rejected` (401 — användaren har återkallat), och `unknown` (Discord svarade
+  inte). På `unknown` ändras ingenting, av samma skäl som ett ScoutNet-fel kastar.
+  Ett *saknat* token räknas som `rejected`, med flit den mindre generösa läsningen
+  — annars finns ingen väg därifrån till verifierad och `/link-scoutid` blir en
+  permanent förbigång av gränsen.
 - **Ett ScoutNet-fel får aldrig se ut som ett tomt svar.**
   `getDesiredRoles` **kastar** när ScoutNet inte går att nå. Tidigare svalde den
   felet och svarade `[scout]` — samma svar som "inte anmäld i eventet", och det
@@ -707,7 +730,7 @@ den finns.
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
-| `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, och att `utan token` skiljs från `fel` |
+| `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |

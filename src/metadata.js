@@ -61,6 +61,62 @@ export async function updateMetadata(discordUserId) {
 }
 
 /**
+ * Is the user's Discord OAuth grant still alive?
+ *
+ * This is the second half of the verification gate, and it exists because the
+ * first half cannot be automated: Discord grants a connection-gated role only
+ * through its own Link flow, so after the `Scout` role was rebuilt every member
+ * would have had to click it again. A live OAuth grant proves the same thing the
+ * role does — the user still has this app authorised — and it can be checked
+ * without anyone doing anything.
+ *
+ * **Three answers, not two**, and that is the whole design:
+ *
+ * - `accepted` — Discord answered for this user's token. The grant is live.
+ * - `rejected` — Discord refused the token (401). The user revoked the app, and
+ *   that is exactly the revocation the boundary exists to catch.
+ * - `unknown` — Discord could not answer: unreachable, a 5xx, a socket error.
+ *   **The caller must not act on this.** Treating "could not ask" as a no is how
+ *   a Discord outage would strip the whole server, which is the same mistake a
+ *   swallowed ScoutNet error made in `getDesiredRoles`.
+ *
+ * A **missing stored token is `rejected`, not `unknown`** — deliberately the less
+ * generous reading. It is tempting to argue that a missing token means *our*
+ * storage lost something and the user should not pay for it. But no path leads
+ * from that state to a verified one except the user re-linking, so `unknown`
+ * would leave them with full access permanently and turn `/link-scoutid` into a
+ * standing bypass of the boundary. It also matches what already happens: those
+ * members have no `Scout` role either, so a sync strips them today.
+ * `/audit-scoutid` category 3 is where they surface, and the remedy is what it
+ * has always been — they open the verification URL themselves.
+ */
+export async function verifyConnection(discordUserId) {
+  const tokens = await storage.getDiscordTokens(discordUserId);
+  if (!tokens) {
+    return { status: "rejected", detail: "inget sparat Discord-token" };
+  }
+
+  try {
+    const { ok, status } = await discord.getRoleConnection(
+      discordUserId,
+      tokens,
+    );
+    if (ok) return { status: "accepted", detail: `HTTP ${status}` };
+    if (status === 401 || status === 403) {
+      return { status: "rejected", detail: `HTTP ${status}` };
+    }
+    return { status: "unknown", detail: `HTTP ${status}` };
+  } catch (e) {
+    // A failed refresh lands here. `invalid_grant` is Discord saying the refresh
+    // token is gone, which is a real no; a socket error is not.
+    if (/invalid_grant/i.test(e.message)) {
+      return { status: "rejected", detail: e.message };
+    }
+    return { status: "unknown", detail: e.message };
+  }
+}
+
+/**
  * Re-push metadata for every linked user.
  *
  * **Why this exists.** Nothing pushed `verified` until 2026-08-20, so Discord
