@@ -506,16 +506,18 @@ export async function registerStatusCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
   const command = {
     name: "status-scoutid",
-    description:
-      "Visa status för en person, eller server-sammanfattning utan argument (admin)",
+    description: "Visa allt boten vet om en person (admin)",
     default_member_permissions: "8", // ADMINISTRATOR
     options: [
       {
+        // Required, since 2026-08-21. Without an argument this command ran
+        // `runAudit()` and printed its summary — the same computation over the
+        // same data as `/audit-scoutid`, just shorter. One command per question:
+        // this one answers "what about this person".
         name: "person",
-        description:
-          "Person att visa status för (utelämna för server-sammanfattning)",
+        description: "Person att visa status för",
         type: 6, // USER
-        required: false,
+        required: true,
       },
     ],
   };
@@ -604,6 +606,43 @@ export async function registerLinkCommand(guildId) {
 }
 
 // --- Interaction verification ---
+
+export async function registerAdoptionCommand(guildId) {
+  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
+  const command = {
+    name: "adoption-scoutid",
+    description:
+      "Hur många av de anmälda som har länkat sig, per grupp (admin)",
+    default_member_permissions: "8", // ADMINISTRATOR
+    options: [
+      {
+        // Off by default: naming everyone who has not linked is thousands of
+        // lines, and the counts are what most questions need.
+        name: "saknas",
+        description: "Lista namnen på dem som inte länkat sig",
+        type: 5, // BOOLEAN
+        required: false,
+      },
+    ],
+  };
+
+  return await retryWithBackoff(async () => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${config.DISCORD_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+    if (response.ok) return await response.json();
+    const error = new Error(
+      `Error registering adoption command: [${response.status}] ${await response.text()}`,
+    );
+    error.status = response.status;
+    throw error;
+  });
+}
 
 export async function registerScanCommand(guildId) {
   const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;

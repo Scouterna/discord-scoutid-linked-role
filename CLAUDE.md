@@ -772,6 +772,7 @@ den finns.
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry, att fel bär sin HTTP-status, att mentions alltid tystas |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
+| `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
 | `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
@@ -864,12 +865,46 @@ bygga om tretton kategorier för ett tal.
 
 ### Kommandon
 
+**Ett kommando per fråga.** De växte ihop, och två av dem svarade på samma sak:
+`/status-scoutid` utan argument körde `runAudit()` och skrev dess sammanfattning —
+samma beräkning över samma data som `/audit-scoutid`, bara kortare. `person` är
+därför obligatoriskt sedan 2026-08-21.
+
+| Kommando | Verb | Frågan det svarar på |
+| --- | --- | --- |
+| `/refresh-scoutid` | **ändrar** | vad rollerna ska vara, och sätter dem (`dryrun:true` visar utan att ändra) |
+| `/audit-scoutid` | granskar | vad som är inkonsekvent, just nu |
+| `/adoption-scoutid` | granskar | hur många av de anmälda som har länkat sig, per grupp |
+| `/status-scoutid person:` | granskar | allt boten vet om en person |
+| `/scan-scoutid` | **ändrar** | vad som hänt sedan förra körningen (medlemshändelser) |
+
+Kvar att röja: auditens rolldrift-kategori återimplementerar dry-run-synken, så två
+kodvägar svarar på "vad skulle ändras" och kan säga olika saker — auditen hoppar
+över medlemmar boten inte kan ändra, dry-runen gör det inte. Auditen borde anropa
+dry-runen.
+
 - `/audit-scoutid` — full rapport (admin). Filattachment om >2000 tecken.
 - `/scan-scoutid` — kör medlemsscannern nu (admin). `dryrun:true` = visa utan att posta.
 - `/refresh-scoutid` — synka roller. `person:` en användare, `alla:true` hela
   servern (admin), `dryrun:true` visar utan att ändra. Slash-kommandonas flaggor
   heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
-- `/status-scoutid` — utan argument: server-sammanfattning. Med `person`: detaljerad status för en användare.
+- `/status-scoutid person:` — detaljerad status för en användare. `person` krävs.
+- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin).
+  `saknas:true` listar namnen.
+
+  **Grupperingen kommer helt ur configen** — [src/adoption.js](src/adoption.js)
+  nämner ingen kategori vid namn. `SCOUTNET_FEE_ROLES` ger kategorin,
+  `SCOUTNET_DIVISION_ROLES` avgör om den delas upp och på vilken fråga, och
+  `SCOUTNET_CATEGORY_ROLES` ger rubriknamnet. En kategori utan divisionsconfig är
+  *en* grupp; får den en rad i `SCOUTNET_DIVISION_ROLES` delas den upp utan
+  kodändring. Det är exakt vad som behövs den dag CMT:s funktion finns i en
+  ScoutNet-fråga — idag går den inte att dela upp, eftersom svaren är opaka
+  alternativ-id:n och de tre CMT-`fee_id`:na är 40 + 1 + 1 där de två ensamma har
+  avgift 0.
+
+  Rubriken speglar configen: en kategori utan flat roll etiketteras med sin nyckel,
+  så `25697:cmt` ger "cmt" och `25697:CMT` ger "CMT". Rolluppslagningen är
+  skiftlägesokänslig, så det är fritt att välja.
 
 ## Krav på Discord-servern
 
