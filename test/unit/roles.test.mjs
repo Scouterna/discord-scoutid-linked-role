@@ -60,6 +60,22 @@ test("a linked member always gets the scout role", async () => {
   assert.deepEqual(await roles.getDesiredRoles("1"), ["scout"]);
 });
 
+test("the `cancelled` flag alone counts as cancelled", async () => {
+  // ScoutNet carries two fields and the boolean is the broader one: of 2769 live
+  // records, 175 had `cancelled: true` and only 168 had a `cancelled_date`. The
+  // seven in between were unconfirmed, unpaid registrations cancelled without a
+  // date, and reading only the date let them through as live participants.
+  await withParticipants({
+    1: {
+      fee_id: FEE.deltagare,
+      cancelled: true,
+      cancelled_date: null,
+      questions: { 88168: "7" },
+    },
+  });
+  assert.deepEqual(await roles.getDesiredRoles("1"), ["scout"]);
+});
+
 test("a cancelled registration counts as not registered", async () => {
   await withParticipants({
     1: {

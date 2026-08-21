@@ -368,7 +368,18 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 - Participants endpoint: `https://scoutnet.se/api/project/get/participants?id={EVENT_ID}&key={API_KEY}`
 - Response has `participants` object keyed by member_no
-- Each participant has: `fee_id`, `cancelled_date`, `questions` (object of questionId → answer)
+- Each participant has: `fee_id`, `cancelled`, `cancelled_date`, `questions`
+  (object of questionId → answer)
+- **Avbokning har två fält, och boolean:en är det bredare.** Av 2 769 poster hade
+  175 `cancelled: true` men bara 168 ett `cancelled_date` — och inget hade datum
+  utan flagga. Ett datum implicerar alltså flaggan, aldrig omvänt. Läs därför
+  `scoutnet.isCancelled()` och aldrig fälten direkt; predikatet finns för att de
+  sex läsställena inte ska kunna drifta isär igen. De sju i mellanrummet var
+  obekräftade och obetalda anmälningar (`fee_id: null`, `confirmed: false`) som
+  avbokats administrativt utan datum. Ingen av dem var länkad och ingen hade
+  avgift, så inget blev av det — men en person med flaggan *och* en avgift hade
+  behållit sin divisionsroll och sina kanaler, och varken synken eller auditens
+  kategori 5 hade sett det
 - Participant data is cached in process memory for 10 minutes (see `src/storage.js`)
 
 ## Discord Developer Portal

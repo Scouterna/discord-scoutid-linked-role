@@ -241,6 +241,35 @@ test("a cancelled participant is reported", async () => {
   assert.equal(counts(result).cancelled, 1);
 });
 
+test("a participant cancelled by flag alone is reported too", async () => {
+  // The case that reading only `cancelled_date` missed: ScoutNet had 175 records
+  // with `cancelled: true` and 168 with a date. Without this the audit would call
+  // such a member perfectly consistent while ScoutNet considers them gone.
+  //
+  // Asserts on the item rather than the count, because the cases in this file
+  // accumulate members deliberately and a total would pin the fixture order
+  // instead of the behaviour.
+  members = [
+    ...members,
+    M("u9", "Flaggad Person (07)", ["r-scout", "r-event", "r-d07"]),
+  ];
+  await link("u9", "999");
+  participants["999"] = {
+    fee_id: 25694,
+    cancelled: true,
+    cancelled_date: null,
+    first_name: "Flaggad",
+    last_name: "Person",
+    questions: { 88168: "7" },
+  };
+  const result = await audit.runAudit(GUILD);
+  const items = result.categories.find((c) => c.id === "cancelled").items;
+  assert.ok(
+    items.some((i) => i.includes("u9") && i.includes("utan datum")),
+    `flaggad-men-odaterad saknas i rapporten: ${items.join(" | ")}`,
+  );
+});
+
 test("a Discord name unrelated to the ScoutNet name is reported", async () => {
   // The signal for a mislink: someone linked to the wrong scoutid.
   members = [
