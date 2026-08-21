@@ -623,11 +623,14 @@ async function handleAuditCommand(interaction) {
     if (message.length <= 2000) {
       await discord.editInteractionResponse(token, message);
     } else {
+      // The attachment gets the plain-text rendering: Discord renders markup and
+      // mentions in a message, never in a file, so the markdown version arrives
+      // as literal `__…__` and raw numeric ids.
       await discord.editInteractionResponseWithFile(
         token,
-        `Audit-rapport (${result.totals.issues} avvikelser, full lista i bifogad fil)`,
+        `Audit-rapport: ${result.totals.issues} fynd hos ${result.totals.affectedUsers} personer — full lista i bifogad fil`,
         "audit-scoutid.txt",
-        message,
+        audit.formatAuditText(result),
       );
     }
   } catch (e) {

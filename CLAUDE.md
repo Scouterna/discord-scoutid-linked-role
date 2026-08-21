@@ -829,7 +829,7 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 ### Kategorier som kontrolleras
 
 1. **Scout-roll utan storage-länk** — användare med Scout-rollen men ingen ScoutID-länkning i Table Storage
-2. **Länkade utan Scout-rollen** — Discord Linked Role har fallit bort (frånkopplad app, lämnad/återansluten server). Användaren måste re-verifiera via `/linked-role` själv eftersom Scout är en managed roll
+2. **Saknar Scout-rollen *och* har ingen giltig Discord-koppling** — Discord Linked Role har fallit bort (frånkopplad app, lämnad/återansluten server). Användaren måste re-verifiera via `/linked-role` själv eftersom Scout är en managed roll
 3. **Länkade utan sparade Discord-tokens** — länken räcker för roller och smeknamn men inte för att prata med Discord i användarens namn, så `updateMetadata` kan inte pusha Linked Role-metadata. Felet är tyst: allt fungerar till Scout-rollen faller bort, och då kan varken admin eller bot laga det — personen måste själv köra om `/linked-role`. **`/link-scoutid` lagar inte det här**, den skapar bara länken. Exakt vad Redis-wipen 2026-05-26 lämnade efter sig, eftersom länkar och tokens försvann tillsammans
 4. **Storage-länk utan guild-medlem** — gamla länkningar för användare som lämnat servern
 5. **Avbokade i ScoutNet** — länkade användare med `cancelled_date` satt
@@ -842,7 +842,25 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 12. **Multipla division-roller** — användare som har t.ex. `Deltagare-05` och `Deltagare-07` samtidigt
 13. **Fel nickname-suffix** — användare där `(X)` i nicket inte matchar förväntat värde
 
-Auditen är helt läsande — inga `addRole`/`removeRole`/nickname-anrop — så den går att köra lokalt mot prod-credentials när slash-kommandot inte räcker.
+Auditen är helt läsande — inga `addRole`/`removeRole`/nickname-anrop — så den går
+att köra lokalt mot prod-credentials när slash-kommandot inte räcker. Sedan
+grinden fick två bevis **frågar kategori 2 båda**: en medlem utan Scout-rollen men
+med levande OAuth-grant är inget fynd, utan en rad i kategorins `note`. Innan dess
+listade den 17 personer som inte var i någon fara alls, med identiska råd ingen av
+dem behövde — och en audit som skriker lika högt om ett icke-problem som om ett
+problem är en ingen läser. Proben är en `GET`, så auditen är fortfarande läsande.
+
+**Två format, för Discord renderar inte bilagor.** `formatAuditMarkdown` är för
+meddelandet: `**fetstil**` och `<@id>` blir namn. Över 2 000 tecken blir rapporten
+en `.txt`, och där renderas ingenting — den kom fram som literala `__…__` och råa
+sifferid:n, oläslig precis när den är lång nog att behöva läsas. `formatAuditText`
+löser upp namnen ur `audit.names`, strippar markup och stryker under rubrikerna.
+
+**Rubriken räknar personer, inte bara fynd.** En person kan förekomma i fyra
+kategorier, så "23 avvikelser" lästes som en nödsituation när sanningen var två
+medlemmar som behövde göra något. `totals.affectedUsers` plockas ur
+omnämnandena i itemtexten — mentionformatet är fast, och alternativet är att
+bygga om tretton kategorier för ett tal.
 
 ### Kommandon
 
