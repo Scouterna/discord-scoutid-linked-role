@@ -181,7 +181,11 @@ test("the summary names who has to act themselves", async () => {
     await metadata.pushAllMetadata({ dryRun: true }),
   );
   assert.match(summary, /utan Discord-token/);
-  assert.match(summary, /linked-role/);
+  // Names the action, not a command that does not exist. `/linked-role` is an
+  // HTTP route, and opening it does not grant a connection-gated role anyway —
+  // only clicking Link inside Discord does.
+  assert.match(summary, /Kanaler och roller/);
+  assert.match(summary, /Länka/);
   assert.match(summary, /u3/);
 });
 

@@ -3,6 +3,7 @@ import * as discord from "./discord.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 import * as roles from "./roles.js";
+import { RELINK_INSTRUCTION } from "./metadata.js";
 
 /**
  * Server consistency audit.
@@ -150,14 +151,14 @@ export async function runAudit(guildId) {
         const name =
           member.nick || member.user.global_name || member.user.username;
         items.push(
-          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen köra \`/linked-role\` igen, eller \`/link-scoutid person:<@${u.discordUserId}> scoutid:${u.scoutId}\``,
+          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen ${RELINK_INSTRUCTION}`,
         );
       }
     }
     categories.push({
       id: "linked_no_scout_role",
       title:
-        "Länkade men saknar Scout-rollen — får access borttagen vid nästa /refresh-scoutid",
+        "Länkade men saknar Scout-rollen — strippas vid nästa synk *om* även deras Discord-koppling är död",
       items,
     });
   }
@@ -188,7 +189,7 @@ export async function runAudit(guildId) {
           ? member.nick || member.user.global_name || member.user.username
           : "ej i guilden";
         items.push(
-          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen öppna \`/linked-role\`-URL:en; \`/link-scoutid\` lagar inte det här`,
+          `- <@${u.discordUserId}> (${name}) scoutid=\`${u.scoutId}\` — be hen ${RELINK_INSTRUCTION}. \`/link-scoutid\` lagar inte det här, och utan token finns inget andra bevis heller`,
         );
       }
     }

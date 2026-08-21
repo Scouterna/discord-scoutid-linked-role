@@ -415,6 +415,17 @@ slipper en ny roll, men mellan "borttagen från alla" och "Discord har delat ut
 igen" ser grinden ingen som verifierad, och återutdelar Discord inte automatiskt
 finns ingen väg tillbaka.
 
+**Att öppna verifierings-URL:en räcker inte för att få rollen.** `Scout` är
+connection-gated, så Discord delar ut den *bara* när användaren klickar Länka på
+rollen inifrån Discord — bevisat genom uteslutning 2026-08-20: varken en
+API-push eller ett direktbesök på URL:en gav rollen, men Länka-knappen gjorde
+det. URL:en är ändå inte meningslös: den förnyar metadatan och tokenet, vilket
+är precis vad grindens andra bevis läser. Användartexterna säger därför
+`Kanaler och roller → Scout → Länka` och inte "kör `/linked-role`", som beskrev
+en HTTP-route som ett slash-kommando — formuleringen finns numera på ett ställe,
+`RELINK_INSTRUCTION` i [src/metadata.js](src/metadata.js), eftersom fem kopior
+hade drivit isär till att alla vara fel på samma sätt.
+
 **Länkningsvägen kan inte tillämpa verifieringsgrinden**, och det är inte en
 brist som går att laga: Discord delar ut Linked Role-rollen efter att användaren
 avslutat på *sin* sida, alltså efter att vår callback kört och success-sidan

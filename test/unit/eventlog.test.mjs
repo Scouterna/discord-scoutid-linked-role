@@ -191,7 +191,13 @@ test("losing the Scout role gets its own unmistakable line", async () => {
   // It is the one failure an admin cannot fix for the user, and it would
   // otherwise read as an ordinary role removal.
   assert.match(sent[0].content, /Scout-rollen/);
-  assert.match(sent[0].content, /re-verifiera/);
+  // And it has to say what the user must actually *do*. This asserted the word
+  // "re-verifiera" while the line told people to run `/linked-role`, which is
+  // not a command — the assertion was satisfied by advice nobody could follow.
+  // Pin the action instead: clicking Link on the role inside Discord is the only
+  // thing that grants a connection-gated role.
+  assert.match(sent[0].content, /Kanaler och roller/);
+  assert.match(sent[0].content, /Länka/);
 });
 
 test("a whole-guild resync is one summary plus only the changed users", async () => {

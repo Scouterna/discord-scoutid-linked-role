@@ -9,7 +9,7 @@ import * as storage from "./storage.js";
 import * as roles from "./roles.js";
 import * as audit from "./audit.js";
 import * as eventlog from "./eventlog.js";
-import { updateMetadata } from "./metadata.js";
+import { updateMetadata, RELINK_INSTRUCTION } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
 import { getSuccessPageHTML } from "./templates.js";
 
@@ -771,7 +771,7 @@ async function handleLinkCommand(interaction) {
       messageParts.push("Metadata pushad → Discord uppdaterar Scout-rollen.");
     } catch (e) {
       messageParts.push(
-        `⚠️ Kunde inte pusha metadata (Scout-rollen kan behöva re-verifieras via \`/linked-role\`): ${e.message}`,
+        `⚠️ Kunde inte pusha metadata — hen kan behöva ${RELINK_INSTRUCTION}: ${e.message}`,
       );
     }
 

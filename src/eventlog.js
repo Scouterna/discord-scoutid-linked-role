@@ -30,6 +30,7 @@
 
 import config from "./config.js";
 import * as discord from "./discord.js";
+import { RELINK_INSTRUCTION } from "./metadata.js";
 
 const FLUSH_INTERVAL_MS = 3000;
 const MAX_MESSAGE_CHARS = 1900; // 2000 minus room for the trailing newline
@@ -174,7 +175,7 @@ export function logSync({ discordUserId, callerId, result }) {
   // `/linked-role`. It reads as an ordinary role removal in the diff, so say so.
   if (wasStripped(result)) {
     logEvent(
-      `🔒 <@${discordUserId}> saknar Scout-rollen — roller strippade, ${UNVERIFIED} satt (måste re-verifiera via /linked-role själv)`,
+      `🔒 <@${discordUserId}> saknar Scout-rollen — roller strippade, ${UNVERIFIED} satt (måste ${RELINK_INSTRUCTION})`,
     );
     return;
   }
