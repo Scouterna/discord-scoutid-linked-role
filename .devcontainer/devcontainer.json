@@ -86,7 +86,21 @@
     "AZURE_CONFIG_DIR": "/home/node/.azure-scouterna",
     // The host's ~/.kube/config points at rancher-desktop, which does not
     // exist in here. Default to the cluster this project actually uses.
-    "KUBECONFIG": "/home/node/.kube/wsj27.yaml"
+    "KUBECONFIG": "/home/node/.kube/wsj27.yaml",
+    // Claude Code keeps its state in two places, and only one of them is
+    // inside the mounted directory: the tokens in ~/.claude/.credentials.json,
+    // but the account (oauthAccount/userID), onboarding and per-project trust
+    // in ~/.claude.json — a sibling *file*, not a file in the directory. That
+    // one is container-local, so every rebuild started from an empty one and
+    // asked for a login again, with valid credentials sitting right next to it.
+    //
+    // CLAUDE_CONFIG_DIR moves the file inside the mount, to
+    // /home/node/.claude/.claude.json. Deliberately still separate from the
+    // host's own ~/.claude.json: its project keys are `/workspaces/...` and the
+    // host's are `c--Users-...`, so one file per side is what is wanted.
+    // Bind-mounting the host file instead does not work — Claude writes it by
+    // rename, which replaces the inode the mount points at.
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
   },
 
   // 3000 app · 3010 wsj27-bot · 10002 Azurite table · 4040 ngrok inspector

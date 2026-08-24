@@ -530,10 +530,17 @@ Tre egenskaper som måste hålla om det här ändras:
 - **Pausen mellan skrivningar tas bara när något faktiskt skrevs.** 200 ms per
   användare oavsett är åtta minuters sömn vid 2 500 personer för att rapportera
   att inget hänt. Det riktiga rate limit-skyddet är 429-retryn i `discord.js`.
-- **Sammanfattningsraden loggas även när ingenting ändrades**, till skillnad från
-  per-användarraderna. Ett schemalagt jobb som inte loggar något går inte att
-  skilja från ett schemalagt jobb som slutat köra — och det här finns just för att
-  ingen ska behöva komma ihåg det, så dess puls måste synas. En rad per natt.
+- **Nattjobbet är tyst när ingenting ändrades.** Det skrev tidigare en
+  sammanfattning varje natt, med argumentet att ett schemalagt jobb som inte
+  loggar något inte går att skilja från ett som slutat köra. Sant — men priset var
+  365 rader om året som säger att inget hände, och en kanal som mest säger det är
+  en kanal folk slutar läsa. Tystnad är alltså normaltillståndet; en rad betyder
+  att något rörde sig.
+
+  Vad som ersätter pulsen: ett dött CronJob syns som en gammal `LAST SCHEDULE` i
+  `kubectl get cronjob`, och misslyckanden ligger kvar via `failedJobsHistoryLimit`.
+  Räcker inte det återställer en *veckopuls* signalen till en hundradel av bruset,
+  och den behöver inget tillstånd — bara en veckodagskontroll.
 
 `/refresh-scoutid dryrun:true` kör samma sak från Discord utan att skriva.
 `dryRun` är en **parameter, aldrig en modulflagga**: servern hanterar
