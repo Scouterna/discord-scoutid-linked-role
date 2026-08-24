@@ -298,14 +298,22 @@ export function logSyncAll({ callerId, results }) {
 /**
  * The same report for the nightly CronJob, which has no caller to name.
  *
- * The summary line is written **even when nothing changed**, unlike the
- * per-user lines. A scheduled job that logs nothing is indistinguishable from a
- * scheduled job that stopped running, and this one exists precisely so that
- * nobody has to remember it — so its heartbeat has to be visible. One line a
- * night is a price worth paying for that.
+ * **Silent when nothing changed.** This used to write a summary every night on
+ * the argument that a scheduled job logging nothing cannot be told apart from one
+ * that stopped running. True, but it bought that at the price of 365 lines a year
+ * saying nothing happened — and a channel that mostly says nothing happened is one
+ * people stop reading, which costs more than the heartbeat was worth. The steady
+ * state is silence; a line means something moved.
+ *
+ * The trade is real, so it is worth knowing what replaces it: a dead CronJob shows
+ * as a stale `LAST SCHEDULE` in `kubectl get cronjob`, and failures are retained
+ * by `failedJobsHistoryLimit`. If that proves too passive, a weekly pulse would
+ * restore the signal at a hundredth of the noise — and needs no state, just a
+ * day-of-week check.
  */
 export function logScheduledSyncAll({ results }) {
   const { changed, errors } = partitionSyncResults(results);
+  if (changed.length === 0 && errors.length === 0) return;
   logEvent(
     `🌙 Nattlig rollsynk — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,
   );

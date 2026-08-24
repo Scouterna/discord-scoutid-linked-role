@@ -317,9 +317,6 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
       };
     }
   } else {
-    console.log(
-      `User ${discordUserId} is linked (scoutid=${scoutId}) but lacks Scout role — stripping access`,
-    );
     desiredRoles = [UNVERIFIED_ROLE];
     nicknameSuffix = "";
   }
@@ -423,6 +420,16 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
         }
       }
     }
+  }
+
+  // Logged here rather than at the gate, and only when something moved. At the
+  // gate it read as an event — "stripping access" — for what is usually a
+  // *state*: the nightly run printed it for the same two already-stripped
+  // members every night, describing an action it was not taking.
+  if (!isVerified && (added.length > 0 || removed.length > 0 || nicknameSet)) {
+    console.log(
+      `User ${discordUserId} (scoutid=${scoutId}) has neither proof — access stripped`,
+    );
   }
 
   return { added, removed, nickname: nicknameSet };

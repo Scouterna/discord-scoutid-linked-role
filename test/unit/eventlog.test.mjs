@@ -237,11 +237,12 @@ test("a rename alone counts as a change", async () => {
   assert.match(all, /Anna A \(AL12\)/);
 });
 
-test("the scheduled sync logs a summary even when nothing changed", async () => {
-  // Deliberately different from the per-user lines, which stay silent. A
-  // scheduled job that logs nothing is indistinguishable from a scheduled job
-  // that stopped running — and this one exists precisely so nobody has to
-  // remember it, so its heartbeat has to be visible. One line a night.
+test("the scheduled sync says nothing when nothing changed", async () => {
+  // This asserted the opposite until 2026-08-24, on the argument that a job which
+  // logs nothing cannot be told apart from one that stopped running. True, but it
+  // cost 365 lines a year saying nothing happened — and a channel that mostly says
+  // nothing happened is one people stop reading, which is worse than the missing
+  // heartbeat. A dead CronJob shows as a stale LAST SCHEDULE instead.
   eventlog.logScheduledSyncAll({
     results: [
       { discordUserId: "1", added: [], removed: [] },
@@ -249,12 +250,23 @@ test("the scheduled sync logs a summary even when nothing changed", async () => 
     ],
   });
   const { posts: sent } = await drain();
+  assert.deepEqual(sent, [], "a quiet night must produce no message at all");
+});
+
+test("the scheduled sync still reports when something moved", async () => {
+  // The other half: silence must mean "nothing happened", not "the reporting
+  // broke". A single change has to bring the summary back with it.
+  eventlog.logScheduledSyncAll({
+    results: [
+      { discordUserId: "1", added: ["CMT"], removed: [] },
+      { discordUserId: "2", added: [], removed: [] },
+    ],
+  });
+  const { posts: sent } = await drain();
   const all = sent.map((p) => p.content).join("\n");
   assert.match(all, /Nattlig rollsynk/);
-  assert.match(all, /2 användare, 0 ändrade, 0 fel/);
-  // Still no per-user noise.
-  assert.doesNotMatch(all, /<@1>/);
-  // And no caller, because there was none — this is where `<@undefined>` would
-  // show up if the summary line were copied from logSyncAll.
-  assert.doesNotMatch(all, /undefined/);
+  assert.match(all, /2 användare, 1 ändrade, 0 fel/);
+  assert.match(all, /<@1>/);
+  assert.doesNotMatch(all, /<@2>/, "unchanged users stay out of it");
+  assert.doesNotMatch(all, /undefined/, "no caller to name in a scheduled run");
 });
