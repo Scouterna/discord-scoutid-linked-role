@@ -39,7 +39,7 @@ jobs:
             | tar -xz -C /usr/local/bin actionlint
           actionlint -color
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           # Matches the devcontainer and the runtime image, so a version-specific
           # failure shows up here rather than in the image.
