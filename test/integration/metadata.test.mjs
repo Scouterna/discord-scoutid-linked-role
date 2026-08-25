@@ -53,6 +53,17 @@ globalThis.fetch = async (url, opts = {}) => {
     return ok({});
   }
 
+  if (u.includes("oauth2/token")) {
+    // A refresh attempt. The body is how Discord says the grant is gone.
+    return {
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: async () => ({ error: "invalid_grant" }),
+      text: async () => '{"error": "invalid_grant"}',
+    };
+  }
+
   if (u.includes("scoutnet.se")) {
     if (scoutNetDown) throw new Error("ScoutNet unreachable");
     return ok({ participants });
@@ -197,6 +208,24 @@ test("an unreachable Discord is unknown, never a no", async () => {
   connectionStatus = 500;
   await link("v3", "903");
   assert.equal((await metadata.verifyConnection("v3")).status, "unknown");
+});
+
+test("a dead refresh token is rejected, not unknown", async () => {
+  // The user revoked the app *and* their access token has expired, so the probe
+  // never reaches the role-connection read — the refresh fails first, with
+  // `invalid_grant` in the body. That is Discord saying the grant is gone, which
+  // is the same real no as a 401, and it must not hide behind "could not ask":
+  // unknown is never acted on, so it would leave the member verified forever.
+  connectionStatus = 200;
+  await storage.setLinkedScoutIDUserId("v5", "905");
+  await storage.storeDiscordTokens("v5", {
+    access_token: "expired",
+    refresh_token: "revoked",
+    expires_at: Date.now() - 1000,
+  });
+  const r = await metadata.verifyConnection("v5");
+  assert.equal(r.status, "rejected");
+  assert.match(r.detail, /invalid_grant/i);
 });
 
 test("no stored token is rejected, deliberately the less generous reading", async () => {

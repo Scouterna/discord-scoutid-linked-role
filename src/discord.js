@@ -36,6 +36,9 @@ export function getOAuthUrl() {
 function tokenRequest(what, params) {
   return request(`${API}/oauth2/token`, {
     what,
+    // The body is part of the answer here: it is where Discord says
+    // `invalid_grant`, which verifyConnection reads as a real revocation.
+    withBody: true,
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

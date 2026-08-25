@@ -849,7 +849,7 @@ den finns.
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
-| `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
+| `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar: ett onåbart Discord är aldrig ett nej, men ett dött refresh-token (`invalid_grant`) är det |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
