@@ -133,11 +133,38 @@ function wasStripped(result) {
   return Boolean(result?.added?.includes(UNVERIFIED));
 }
 
-/** A user completed the full `/linked-role` OAuth flow. */
-export function logLinked({ discordUserId, scoutId, name, roles }) {
-  const rolesText = roles?.length > 0 ? roles.join(", ") : "inga roller";
+/**
+ * A user completed the full `/linked-role` OAuth flow.
+ *
+ * `reason` says *why* when there were no roles to grant, and it is the reason
+ * this line is worth reading. A bare `→ inga roller` was the same text for a
+ * member who is not in the event, one whose registration is cancelled, and one
+ * whose roles are missing from the server — so the log recorded that something
+ * was wrong without recording what, which is the question asked afterwards.
+ * See `roles.explainMissingRoles`.
+ */
+export function logLinked({
+  discordUserId,
+  scoutId,
+  name,
+  roles,
+  reason,
+  metadataFailed,
+}) {
+  const rolesText =
+    roles?.length > 0
+      ? roles.join(", ")
+      : `inga roller${reason ? ` — ${reason}` : ""}`;
+  // A linking that could not tell Discord is not a success, and it is not a
+  // failure either: the link is stored and the roles are handed out, but the
+  // `Scout` requirement has nothing to evaluate, so Discord grants nothing and
+  // the member has to come back. Nobody can act on that unless the line says it.
+  const icon = metadataFailed ? "⚠️" : "✅";
+  const tail = metadataFailed
+    ? ` — **Discord kunde inte uppdateras**, så \`${config.SCOUTNET_SCOUT_ROLE}\` delas inte ut förrän personen gör om det (${RELINK_INSTRUCTION})`
+    : "";
   logEvent(
-    `✅ **${name || "okänt namn"}** (<@${discordUserId}>) länkade ScoutID \`${scoutId}\` → ${rolesText}`,
+    `${icon} **${name || "okänt namn"}** (<@${discordUserId}>) länkade ScoutID \`${scoutId}\` → ${rolesText}${tail}`,
   );
 }
 
@@ -175,7 +202,7 @@ export function logSync({ discordUserId, callerId, result }) {
   // `/linked-role`. It reads as an ordinary role removal in the diff, so say so.
   if (wasStripped(result)) {
     logEvent(
-      `🔒 <@${discordUserId}> saknar Scout-rollen — roller strippade, ${UNVERIFIED} satt (måste ${RELINK_INSTRUCTION})`,
+      `🔒 <@${discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen — roller strippade, ${UNVERIFIED} satt (måste ${RELINK_INSTRUCTION})`,
     );
     return;
   }
@@ -345,7 +372,7 @@ function logSyncDetail(changed, errors) {
   for (const r of changed) {
     if (wasStripped(r)) {
       logEvent(
-        `🔒 <@${r.discordUserId}> saknar Scout-rollen — roller strippade, ${UNVERIFIED} satt`,
+        `🔒 <@${r.discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen — roller strippade, ${UNVERIFIED} satt`,
       );
     } else {
       logEvent(`   ↳ <@${r.discordUserId}> — ${describeChanges(r)}`);

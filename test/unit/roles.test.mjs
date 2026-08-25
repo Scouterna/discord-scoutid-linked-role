@@ -294,3 +294,63 @@ test("CMT gets a suffix even with no division", async () => {
   });
   assert.equal(await roles.getNicknameSuffix("7"), " (CMT)");
 });
+
+// --- `explainMissingRoles`: why there was nothing to grant ---
+//
+// The linking log used to end in a bare `→ inga roller`, which said that
+// something was wrong without saying what. These cases pin the four answers
+// apart — and pin the outage *not* to look like any of the other three.
+
+test("not being in the event is named as such", async () => {
+  await withParticipants({});
+  assert.equal(await roles.explainMissingRoles("1"), "inte anmäld i eventet");
+});
+
+test("a cancelled registration is distinguished from an absent one", async () => {
+  await withParticipants({
+    1: { fee_id: FEE.cmt, cancelled: true, cancelled_date: "2026-08-01" },
+  });
+  assert.match(await roles.explainMissingRoles("1"), /avbokad.*2026-08-01/);
+  // The flag alone still counts, and says so rather than inventing a date.
+  await withParticipants({ 2: { fee_id: FEE.cmt, cancelled: true } });
+  assert.match(await roles.explainMissingRoles("2"), /avbokad.*utan datum/);
+});
+
+test("an unmapped fee_id names the id and the variable to add it to", async () => {
+  await withParticipants({
+    1: { fee_id: 99999, cancelled_date: null, questions: {} },
+  });
+  const why = await roles.explainMissingRoles("1");
+  assert.match(why, /99999/);
+  assert.match(why, /SCOUTNET_FEE_ROLES/);
+});
+
+test("a live, mapped participant has nothing to explain", async () => {
+  await withParticipants({
+    1: { fee_id: FEE.cmt, cancelled_date: null, questions: {} },
+  });
+  // null, not a sentence: an empty result for this person means the roles are
+  // missing from the guild or the writes failed, and saying "not registered"
+  // would send whoever reads it to ScoutNet to look for someone who is there.
+  assert.equal(await roles.explainMissingRoles("1"), null);
+});
+
+test("a ScoutNet outage is reported as an outage, never as absence", async () => {
+  await withScoutNetDown();
+  // The whole reason this function exists rather than a check on the role list:
+  // the linking path asks with `allowIncomplete`, so "not registered" and
+  // "could not ask" both arrive as ["scout"]. Printing the unknown as a known
+  // no would move getDesiredRoles' original bug into the log.
+  const why = await roles.explainMissingRoles("1");
+  assert.match(why, /kunde inte nå ScoutNet/);
+  assert.doesNotMatch(why, /anmäld/);
+});
+
+test("explaining never throws, whatever ScoutNet does", async () => {
+  await storage.clearScoutNetCache();
+  globalThis.fetch = async () => {
+    throw new Error("socket hang up");
+  };
+  // It explains a linking; it must not be able to fail one.
+  assert.match(await roles.explainMissingRoles("1"), /kunde inte nå ScoutNet/);
+});

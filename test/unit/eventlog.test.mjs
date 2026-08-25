@@ -20,6 +20,10 @@ process.env.TABLE_CONNECTION_STRING =
 process.env.TABLE_NAME = "unittest";
 process.env.DISCORD_TOKEN = "fake";
 process.env.LOG_CHANNEL_ID = "C1";
+// Deliberately not "Scout": every member-facing sentence about the role reads
+// the name from `SCOUTNET_SCOUT_ROLE`, and a test that used the default name
+// would pass just as happily against a hardcoded copy.
+process.env.SCOUTNET_SCOUT_ROLE = "Scout-Test";
 
 const eventlog = await import("../../src/eventlog.js");
 
@@ -150,6 +154,56 @@ test("a successful link names the roles it granted", async () => {
   assert.match(sent[0].content, /Ledare-12/);
 });
 
+test("a link with nothing to grant says why", async () => {
+  eventlog.logLinked({
+    discordUserId: "1",
+    scoutId: "3259703",
+    name: "Sandra Gauffin",
+    roles: [],
+    reason: "inte anmäld i eventet",
+  });
+  const { posts: sent } = await drain();
+  // The line this replaces ended at "inga roller", which recorded that
+  // something was wrong without recording what — and the answer is not
+  // recoverable afterwards, because it is a state ScoutNet has since changed.
+  assert.match(sent[0].content, /inga roller — inte anmäld i eventet/);
+});
+
+test("a link that granted roles carries no explanation", async () => {
+  eventlog.logLinked({
+    discordUserId: "1",
+    scoutId: "12345",
+    name: "Anna Andersson",
+    roles: ["WSJ-event", "CMT"],
+    reason: "inte anmäld i eventet",
+  });
+  const { posts: sent } = await drain();
+  // Roles won: a reason left over from a caller that computed one anyway must
+  // not contradict the list of what was actually handed out.
+  assert.match(sent[0].content, /→ WSJ-event, CMT$/m);
+  assert.doesNotMatch(sent[0].content, /inte anmäld/);
+});
+
+test("a link Discord was never told about is not reported as a success", async () => {
+  eventlog.logLinked({
+    discordUserId: "1",
+    scoutId: "3259703",
+    name: "Sandra Gauffin",
+    roles: ["WSJ-event", "CMT"],
+    metadataFailed: true,
+  });
+  const { posts: sent } = await drain();
+  // The roles were handed out, so the line cannot just say "failed" — but with
+  // no `verified` pushed, Discord grants no Scout role and the member has to
+  // come back. A ✅ would hide the only part anyone has to act on.
+  assert.doesNotMatch(sent[0].content, /✅/);
+  assert.match(sent[0].content, /⚠️/);
+  assert.match(sent[0].content, /WSJ-event, CMT/);
+  assert.match(sent[0].content, /Discord kunde inte uppdateras/);
+  assert.match(sent[0].content, /`Scout-Test`/);
+  assert.match(sent[0].content, /Kanaler och roller → Scout-Test → Länka/);
+});
+
 test("a manual link records who linked whom", async () => {
   eventlog.logManualLink({
     discordUserId: "1",
@@ -190,7 +244,7 @@ test("losing the Scout role gets its own unmistakable line", async () => {
   const { posts: sent } = await drain();
   // It is the one failure an admin cannot fix for the user, and it would
   // otherwise read as an ordinary role removal.
-  assert.match(sent[0].content, /Scout-rollen/);
+  assert.match(sent[0].content, /Scout-Test-rollen/);
   // And it has to say what the user must actually *do*. This asserted the word
   // "re-verifiera" while the line told people to run `/linked-role`, which is
   // not a command — the assertion was satisfied by advice nobody could follow.

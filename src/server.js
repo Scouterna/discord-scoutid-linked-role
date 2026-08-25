@@ -10,9 +10,9 @@ import * as roles from "./roles.js";
 import * as audit from "./audit.js";
 import * as adoption from "./adoption.js";
 import * as eventlog from "./eventlog.js";
-import { updateMetadata, RELINK_INSTRUCTION } from "./metadata.js";
+import { updateMetadata, RELINK_INSTRUCTION, RELINK_PATH } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
-import { getSuccessPageHTML } from "./templates.js";
+import { getSuccessPageHTML, getIncompletePageHTML } from "./templates.js";
 
 const app = express();
 app.use(cookieParser(config.COOKIE_SECRET));
@@ -179,9 +179,31 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     //
     // Existing `scoutid-token` rows are inert. They can be dropped whenever.
 
-    // Link accounts and push metadata
+    // Link accounts, then push the metadata Discord grants `Scout` against.
+    //
+    // The push is caught, and that is the difference between a bad evening and a
+    // confusing one. Unwrapped, it reached the outer catch and answered a member
+    // whose link had *already been stored* with a bare 500 — no roles, no
+    // nickname, no line in the event log, and nothing telling her what to do. So
+    // she did the only thing the page allowed and tried again: three runs of the
+    // whole flow in ten seconds on 2026-08-24, two of which got through, which
+    // is why #server-logg carried the same line twice.
+    //
+    // Everything below this point works without the push, so it still runs. What
+    // must *not* happen is claiming success: with no `verified` stored, Discord
+    // evaluates the `Scout` requirement as unmet and grants nothing, so the
+    // member has to come back — and the page now says so.
     await storage.setLinkedScoutIDUserId(discordUserId, scoutIDUser.scoutid);
-    await updateMetadata(discordUserId);
+    let metadataError = null;
+    try {
+      await updateMetadata(discordUserId);
+    } catch (e) {
+      metadataError = e;
+      console.error(
+        `Could not push metadata for ${discordUserId}, linking continues:`,
+        e.message,
+      );
+    }
 
     // Assign Discord roles
     let assignedRoles = [];
@@ -219,14 +241,33 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       await updateNickname(discordUserId, scoutIDUser.name + suffix);
     }
 
+    // Nothing granted — say why, in the line someone reads two hours later.
+    // `explainMissingRoles` returns null when the person *is* a live, mapped
+    // participant, and then an empty result means something else entirely: the
+    // roles are missing from the guild, or the writes were refused.
+    const noRolesReason =
+      assignedRoles.length === 0
+        ? ((await roles.explainMissingRoles(scoutIDUser.scoutid)) ??
+          "rollerna kunde inte delas ut — finns de i servern?")
+        : null;
+
     eventlog.logLinked({
       discordUserId,
       scoutId: scoutIDUser.scoutid,
       name: scoutIDUser.name,
       roles: assignedRoles,
+      reason: noRolesReason,
+      metadataFailed: Boolean(metadataError),
     });
 
-    res.send(getSuccessPageHTML());
+    res.send(
+      metadataError
+        ? getIncompletePageHTML({
+            relinkPath: RELINK_PATH,
+            scoutRole: config.SCOUTNET_SCOUT_ROLE,
+          })
+        : getSuccessPageHTML(),
+    );
   } catch (e) {
     console.error(e);
     res.sendStatus(500);
@@ -455,7 +496,7 @@ async function handleRefreshCommand(interaction) {
       } else {
         await discord.editInteractionResponse(
           token,
-          `${prefixFor(dryRun)}<@${targetUserId}>: ${formatChanges(result)}`,
+          `${prefixFor(dryRun)}<@${targetUserId}>: ${formatChanges(result)}${noteFor(result)}`,
         );
       }
     } else {
@@ -474,7 +515,7 @@ async function handleRefreshCommand(interaction) {
       } else {
         await discord.editInteractionResponse(
           token,
-          `${prefixFor(dryRun)}<@${callerId}>: ${formatChanges(result)}`,
+          `${prefixFor(dryRun)}<@${callerId}>: ${formatChanges(result)}${noteFor(result)}`,
         );
       }
     }
@@ -816,7 +857,9 @@ async function handleLinkCommand(interaction) {
     // Requires user's OAuth tokens to still be in storage from a previous /linked-role.
     try {
       await updateMetadata(targetUserId);
-      messageParts.push("Metadata pushad → Discord uppdaterar Scout-rollen.");
+      messageParts.push(
+        `Metadata pushad → Discord uppdaterar ${config.SCOUTNET_SCOUT_ROLE}-rollen.`,
+      );
     } catch (e) {
       messageParts.push(
         `⚠️ Kunde inte pusha metadata — hen kan behöva ${RELINK_INSTRUCTION}: ${e.message}`,
@@ -844,6 +887,18 @@ function formatChanges({ added, removed }) {
   if (removed?.length > 0) parts.push(`Tog bort: ${removed.join(", ")}`);
   if (parts.length === 0) return "Inga ändringar";
   return parts.join(". ");
+}
+
+/**
+ * The sync's own explanation for having nothing to give, appended to the reply.
+ *
+ * "Inga ändringar" is true for a member who already has every role *and* for
+ * one who is verified but simply not in the event, and those are opposite
+ * situations: the first needs nothing, the second needs a registration in
+ * ScoutNet. Only the sync knows which, so it says so — see `syncUserRoles`.
+ */
+function noteFor({ note } = {}) {
+  return note ? ` — ${note}` : "";
 }
 
 // --- Helper functions ---

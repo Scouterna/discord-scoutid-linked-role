@@ -42,7 +42,7 @@ export async function getOAuthTokens(code) {
     const error = new Error(
       `Error fetching OAuth tokens: [${response.status}] ${response.statusText}`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -71,7 +71,7 @@ export async function getAccessToken(userId, tokens) {
       const error = new Error(
         `Error refreshing access token: [${response.status}] ${response.statusText}`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     });
 
@@ -93,7 +93,7 @@ export async function getUserData(tokens) {
     const error = new Error(
       `Error fetching user data: [${response.status}] ${response.statusText}`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -108,7 +108,7 @@ export async function getUserGuilds(tokens) {
     const error = new Error(
       `Error fetching user guilds: [${response.status}] ${response.statusText}`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -146,7 +146,7 @@ export async function pushMetadata(userId, tokens, metadata, platformUsername) {
       const error = new Error(
         `Error pushing metadata: [${response.status}] ${response.statusText}`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     }
   });
@@ -194,7 +194,7 @@ export async function updateGuildMemberNickname(guildId, userId, nickname) {
     const error = new Error(
       `Error updating nickname in guild ${guildId}: [${response.status}]`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   }).catch(() => false);
 }
@@ -207,7 +207,7 @@ export async function getGuildRoles(guildId) {
     });
     if (response.ok) return await response.json();
     const error = new Error(`Error fetching guild roles: [${response.status}]`);
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -225,7 +225,7 @@ export async function getGuildMembers(guildId) {
       const error = new Error(
         `Error fetching guild members: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     });
     if (!page.length) break;
@@ -267,7 +267,7 @@ export async function getGuildMember(guildId, userId) {
     const error = new Error(
       `Error fetching guild member: [${response.status}]`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -283,7 +283,7 @@ export async function addRoleToUser(guildId, userId, roleId) {
       const error = new Error(
         `Error adding role ${roleId}: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     }
     return true;
@@ -301,7 +301,7 @@ export async function removeRoleFromUser(guildId, userId, roleId) {
       const error = new Error(
         `Error removing role ${roleId}: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     }
     return true;
@@ -340,7 +340,7 @@ export async function postChannelMessage(channelId, content) {
     const error = new Error(
       `Error posting to channel ${channelId}: [${response.status}]`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -373,7 +373,7 @@ export async function getNewestAuditLogId(guildId, actionType) {
     const error = new Error(
       `Error fetching audit log for guild ${guildId}: [${response.status}]`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -425,7 +425,7 @@ export async function getAuditLogEntries(
       const error = new Error(
         `Error fetching audit log for guild ${guildId}: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     });
 
@@ -639,7 +639,7 @@ export async function registerAdoptionCommand(guildId) {
     const error = new Error(
       `Error registering adoption command: [${response.status}] ${await response.text()}`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -677,7 +677,7 @@ export async function registerScanCommand(guildId) {
     const error = new Error(
       `Error registering scan command: [${response.status}] ${await response.text()}`,
     );
-    error.status = response.status;
+    attachStatus(error, response);
     throw error;
   });
 }
@@ -714,7 +714,7 @@ export async function editInteractionResponse(interactionToken, content) {
       const error = new Error(
         `Error editing interaction response: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     }
     return true;
@@ -748,7 +748,7 @@ export async function editInteractionResponseWithFile(
       const error = new Error(
         `Error editing interaction response with file: [${response.status}]`,
       );
-      error.status = response.status;
+      attachStatus(error, response);
       throw error;
     }
     return true;
@@ -757,15 +757,73 @@ export async function editInteractionResponseWithFile(
 
 // --- Retry helper ---
 
+/** Never wait longer than this for one retry, however long Discord asks. */
+const MAX_RETRY_DELAY_MS = 10_000;
+/** Nor short enough to be a hot loop: Discord can answer `retry_after: 0`. */
+const MIN_RETRY_DELAY_MS = 250;
+
+/**
+ * Copy the HTTP status onto an error, and on a 429 the wait Discord asked for.
+ *
+ * Every call site already stamped the status — callers branch on it (memberscan
+ * tells a 403 on the audit log from a real failure by this field alone). The
+ * rate-limit hint rides along on the same line so that no future call site can
+ * forget it: it is the difference between a retry that works and one that is
+ * guaranteed to be too early.
+ *
+ * `Retry-After` is seconds and may be fractional. Discord repeats the number in
+ * the JSON body as `retry_after`; the header is used because it is on every
+ * response without having to read the body first.
+ */
+function attachStatus(error, response) {
+  error.status = response.status;
+  if (response.status === 429) {
+    const seconds = Number(response.headers?.get?.("retry-after"));
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      error.retryAfterMs = seconds * 1000;
+    }
+  }
+  return error;
+}
+
+/**
+ * How long to wait before retry number `attempt`.
+ *
+ * **Discord's own number wins when it sent one, and that is the whole fix.** A
+ * blind `2^attempt * 1000` ladder ignores the answer to the exact question it
+ * is guessing at, and guessing low means every retry arrives before the window
+ * opens. Measured on 2026-08-24: a metadata push was told to wait 3.584s and
+ * was retried after 1s, then told 2.402s and retried after 2s, then gave up —
+ * three requests, all refused, on a call that would have succeeded once. The
+ * member got a 500 page for a linking that had already been stored.
+ *
+ * Clamped at both ends: never a hot loop, and never long enough to outlast the
+ * pod's 60s termination grace (two retries at the cap plus the 10s preStop
+ * still fits, so a rollout cannot be held up by one rate-limited call).
+ *
+ * Exported for the test — the rule is worth pinning directly rather than
+ * inferring it from how long a test slept.
+ */
+export function retryDelayMs(attempt, retryAfterMs) {
+  const asked = Number.isFinite(retryAfterMs)
+    ? retryAfterMs
+    : Math.pow(2, attempt) * 1000;
+  return Math.min(Math.max(asked, MIN_RETRY_DELAY_MS), MAX_RETRY_DELAY_MS);
+}
+
 async function retryWithBackoff(fn, maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       if (error.status === 429 && attempt < maxRetries - 1) {
-        const delay = Math.pow(2, attempt) * 1000;
+        const delay = retryDelayMs(attempt, error.retryAfterMs);
+        const asked =
+          error.retryAfterMs != null
+            ? ` (Discord bad om ${error.retryAfterMs}ms)`
+            : "";
         console.log(
-          `Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+          `Rate limited, retrying in ${delay}ms${asked} (attempt ${attempt + 1}/${maxRetries})`,
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {

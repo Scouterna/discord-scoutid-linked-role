@@ -468,6 +468,44 @@ däremot är lagat är att rapporten inte längre påstår motsatsen —
 delades ut, så händelseloggens rad visar `WSJ-event, cmt` utan att hävda `scout`.
 Saknas `scout` i raden gick Discords halva av flödet inte i mål.
 
+#### En misslyckad metadata-push river inte längre hela länkningen
+
+`await updateMetadata(...)` låg oskyddat i callbacken, så ett *tillfälligt* fel
+på det enda anropet nådde yttre catchen och svarade en medlem vars länk redan
+var sparad med ett naket `500`: inga roller, inget smeknamn, ingen rad i
+händelseloggen, och ingenting som sa vad hon skulle göra. Hon gjorde det enda
+sidan tillät och körde om — tre gånger på tio sekunder 2026-08-24, varav två gick
+igenom, vilket är varför `#server-logg` fick samma rad två gånger.
+
+Pushen fångas nu, och allt som inte beror på den körs ändå. Vad som med flit
+*inte* händer är att påstå att det gick bra: utan `verified` hos Discord
+utvärderas `Scout`-kravet som ouppfyllt och rollen delas inte ut, så medlemmen
+måste tillbaka. Därför en egen sida
+([src/templates/linked-incomplete.html](src/templates/linked-incomplete.html))
+som säger just det, och en `⚠️`-rad i händelseloggen i stället för `✅`.
+
+**Rollnamnet i medlemsvänd text kommer ur configen.** Sidan och varje mening om
+rollen läser `SCOUTNET_SCOUT_ROLE` i stället för att stava "Scout" själva — en
+HTML-fil är det lättaste stället för en sådan kopia att gömma sig, eftersom
+ingenting som importerar den någonsin skulle falla. Följden är att värdet i
+configmappen numera är *läst av medlemmar*: det står `Scout` och inte `scout`
+därför, medan uppslagningen mot guilden fortsätter vara skiftlägesokänslig.
+
+#### Retryn respekterar Discords `retry_after`
+
+`retryWithBackoff` väntade `2^attempt * 1000` blint, alltså gissade på svaret
+till exakt den fråga Discord redan besvarat — och gissade lågt, så varje
+omförsök kom före fönstret öppnat. Mätt 2026-08-24: pushen fick vänta-beskedet
+3,584 s och kördes om efter 1 s, sedan 2,402 s och kördes om efter 2 s, och gav
+upp. Tre anrop, alla nekade, på något som hade lyckats en gång.
+
+`attachStatus` lägger nu `retryAfterMs` på felet på alla 18 anropsställen — samma
+rad som redan satte statuskoden, så inget framtida anropsställe kan glömma den —
+och `retryDelayMs` låter Discords siffra vinna, klämd mellan 250 ms (aldrig en
+hot loop) och 10 s (två omförsök i taket plus 10 s preStop ryms i podens 60 s
+`terminationGracePeriodSeconds`, så ett rate limit kan inte hålla upp en
+rollout).
+
 ## Config format reference
 
 Aktuell prod-config — [k8s/configmap.yaml](k8s/configmap.yaml) är enda källan.
@@ -483,7 +521,8 @@ LOG_CHANNEL_ID=
 LOG_MEMBER_EVENTS=join,leave,nickname
 
 # Marker-roller (alla länkade / alla event-anmälda)
-SCOUTNET_SCOUT_ROLE=scout
+# Läses av medlemmar, inte bara av rolluppslagningen: därför guildens skiftläge.
+SCOUTNET_SCOUT_ROLE=Scout
 SCOUTNET_EVENT_ROLE=wsj-event
 
 # fee_id:category
@@ -569,6 +608,33 @@ med vem som länkade vem, rollsynk per användare, och `/refresh-scoutid
 alla:true` som en sammanfattningsrad plus en rad per *ändrad* användare.
 `Overifierad` satt får en egen tydligare rad, eftersom det är det enda felet en
 admin inte kan laga för användaren.
+
+**En länkning som inte gav några roller säger varför.** Raden slutade tidigare
+på `→ inga roller`, vilket är samma text för "inte anmäld i eventet", "avbokad
+anmälan" och "rollerna finns inte i servern" — den loggade alltså att något var
+fel utan att logga vad, och svaret går inte att rekonstruera efteråt eftersom
+det är ett tillstånd i ScoutNet som sedan hunnit ändras. Det kostade en person
+en kväll 2026-08-24: hon länkade sig, fick bara `Scout`, och varken loggen eller
+`/refresh-scoutid person:` ("Inga ändringar") nämnde att hon inte fanns i
+deltagarlistan.
+
+Förklaringen kommer från `roles.explainMissingRoles`, och två egenskaper är hela
+poängen med att den finns:
+
+- **Ett ScoutNet-avbrott rapporteras som ett avbrott, aldrig som frånvaro.**
+  Länkningsvägen frågar med `allowIncomplete`, så "inte anmäld" och "kunde inte
+  fråga" kommer båda tillbaka som `[scout]` — det här är enda stället som
+  fortfarande kan skilja dem. Att skriva ut det okända som ett känt nej hade
+  bara flyttat `getDesiredRoles`' ursprungliga bugg in i loggen.
+- **Den kastar aldrig**, och den bär aldrig med `e.message` från ScoutNet:
+  strängen hamnar i en Discord-kanal, och API-nyckeln ligger i query-strängen på
+  anropet som just misslyckades. Detaljen hör i podloggen.
+
+`syncUserRoles` returnerar samma förklaring som `note`, och `/refresh-scoutid
+person:` lägger den efter "Inga ändringar" — som är sant både för den som redan
+har allt och för den som aldrig kunde få något, alltså det minst användbara sanna
+svar som finns. Den frågas bara när önskelistan är den nakna markören, så den som
+har sina roller får ingen not.
 
 ### Medlemshändelser — [src/memberscan.js](src/memberscan.js)
 
@@ -775,17 +841,18 @@ den finns.
 | Fil | Täcker |
 | --- | --- |
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
-| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar |
-| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry, att fel bär sin HTTP-status, att mentions alltid tystas |
-| `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken |
+| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, och att `explainMissingRoles` håller ett avbrott skilt från en frånvaro |
+| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas |
+| `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
-| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, och att ett ScoutNet-avbrott inte ändrar någonting |
+| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
 | `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
+| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500` |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
 
 **`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad

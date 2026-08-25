@@ -160,6 +160,56 @@ export async function getNicknameSuffix(
 }
 
 /**
+ * Why does this person have no event roles to be given?
+ *
+ * Returns a short clause, or **null** when there is nothing to explain — a live
+ * registration with a mapped fee, where an empty result means the roles are
+ * missing from the guild or the write failed, not that the person is absent.
+ *
+ * The linking flow's log line used to end in a bare `→ inga roller`, which is
+ * the same seven characters for "not registered in the event", "registration
+ * cancelled" and "the roles do not exist in the server" — three different jobs
+ * for whoever reads it, and the common one was the one nobody could tell.
+ *
+ * **Never throws**, because it explains a linking and must not be able to fail
+ * one. And a ScoutNet outage is reported *as an outage*, never as "not
+ * registered": the linking path asks with `allowIncomplete`, so both come back
+ * as `[scoutRole]` and this is the only place that can still tell them apart.
+ * Letting an unknown print as a known no is the mistake `getDesiredRoles`
+ * exists to prevent — writing it into the log instead of into the role list
+ * would just move it somewhere harder to notice.
+ */
+export async function explainMissingRoles(scoutnetMemberId) {
+  if (!config.SCOUTNET_EVENT_ID) return "eventroller är avstängda";
+
+  let participant;
+  try {
+    participant = await scoutnet.getParticipant(scoutnetMemberId);
+  } catch (e) {
+    console.error(
+      `Could not explain the empty role set for member ${scoutnetMemberId}:`,
+      e.message,
+    );
+    // Deliberately without `e.message`: this string is written to a Discord
+    // channel, and ScoutNet's API key travels in the query string of the call
+    // that just failed. The detail belongs in the pod log, which has it above.
+    return "kunde inte nå ScoutNet — rollerna kommer vid nästa synk";
+  }
+
+  if (!participant) return "inte anmäld i eventet";
+  if (scoutnet.isCancelled(participant)) {
+    return `avbokad anmälan (${scoutnet.cancelledLabel(participant)})`;
+  }
+  if (participant.fee_id == null) {
+    return "anmäld utan avgiftskategori — obekräftad anmälan?";
+  }
+  if (!config.SCOUTNET_FEE_ROLES?.[String(participant.fee_id)]) {
+    return `fee_id ${participant.fee_id} saknar mappning i SCOUTNET_FEE_ROLES`;
+  }
+  return null;
+}
+
+/**
  * All statically known managed role names (for removal logic).
  * Division roles are handled separately via prefix matching.
  * UNVERIFIED_ROLE is always included so that it's added when needed and
@@ -432,7 +482,19 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
     );
   }
 
-  return { added, removed, nickname: nicknameSet };
+  // Why nothing was there to give, when that is the whole answer. `/refresh-
+  // scoutid person:` reported "Inga ändringar" for a member who was verified
+  // and simply not in the event — true, and the least useful true thing to say:
+  // it reads as "already correct" for someone whose roles never arrived. Only
+  // asked when the wish list is the bare marker, so a member who has their
+  // roles gets no note, and it costs nothing: the participant list is in the
+  // process cache from the call above.
+  const note =
+    isVerified && desiredRoles.length === 1
+      ? await explainMissingRoles(scoutId)
+      : null;
+
+  return { added, removed, nickname: nicknameSet, note };
 }
 
 /**

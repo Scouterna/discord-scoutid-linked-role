@@ -40,7 +40,12 @@ data:
   # in secrets.tfvars only because that is where the Terraform variable sits.
   SCOUTNET_EVENT_ID: "43490"
 
-  SCOUTNET_SCOUT_ROLE: scout
+  # Rolluppslagningen är skiftlägesokänslig, men värdet är sedan 2026-08-25
+  # också *medlemsvänt*: sidan efter en halvfärdig länkning och varje mening om
+  # rollen läser namnet härifrån i stället för att stava det själva. Därför
+  # `Scout` och inte `scout` — det är vad rollen heter i Discord, och det är den
+  # texten en medlem får läsa.
+  SCOUTNET_SCOUT_ROLE: Scout
   SCOUTNET_EVENT_ROLE: WSJ-event
   # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
   # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till

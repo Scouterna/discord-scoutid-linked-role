@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nästan klart – ScoutID &amp; Discord</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        padding: 40px;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        max-width: 500px;
+        width: 100%;
+      }
+
+      .warning-icon {
+        width: 80px;
+        height: 80px;
+        background: #f0ad4e;
+        border-radius: 50%;
+        margin: 0 auto 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 40px;
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 20px;
+        font-size: 28px;
+      }
+
+      .message {
+        color: #666;
+        font-size: 18px;
+        line-height: 1.6;
+        margin-bottom: 30px;
+      }
+
+      .info-box {
+        background: #f8f9fa;
+        border-left: 4px solid #f0ad4e;
+        padding: 15px;
+        margin: 20px 0;
+        border-radius: 4px;
+        text-align: left;
+      }
+
+      .info-box h3 {
+        color: #333;
+        margin-bottom: 10px;
+        font-size: 16px;
+      }
+
+      .info-box p {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 5px;
+      }
+
+      .path {
+        font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+        background: #eceff3;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="warning-icon">!</div>
+
+      <h1>Nästan klart</h1>
+
+      <div class="message">
+        Ditt ScoutID är kopplat till Discord, men Discord kunde inte uppdateras
+        just nu. Därför får du inte <strong>{{SCOUT_ROLE}}</strong>-rollen
+        förrän du försöker en gång till.
+      </div>
+
+      <div class="info-box">
+        <h3>Gör så här</h3>
+        <p>• Vänta en minut — orsaken är oftast tillfällig.</p>
+        <p>• Gå till <span class="path">{{RELINK_PATH}}</span> i Discord.</p>
+        <p>
+          • Du behöver inte göra om något annat: kopplingen till ScoutID är
+          sparad.
+        </p>
+      </div>
+
+      <p style="font-size: 14px; color: #999">
+        Händer det igen: hör av dig i servern, det är loggat och en admin kan se
+        vad som gick fel.
+      </p>
+    </div>
+  </body>
+</html>

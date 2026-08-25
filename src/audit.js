@@ -179,7 +179,7 @@ export async function runAudit(guildId) {
     }
     categories.push({
       id: "linked_no_scout_role",
-      title: "Saknar Scout-rollen *och* har ingen giltig Discord-koppling",
+      title: `Saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen *och* har ingen giltig Discord-koppling`,
       items,
       note,
     });

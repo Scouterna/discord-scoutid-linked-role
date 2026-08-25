@@ -241,7 +241,12 @@ test("roles outside the bot's configuration are left alone", async () => {
   // Nothing to do — and in particular no attempt on a role the bot never granted.
   assert.deepEqual(calls.added, []);
   assert.deepEqual(calls.removed, []);
-  assert.deepEqual(result, { added: [], removed: [], nickname: null });
+  assert.deepEqual(result, {
+    added: [],
+    removed: [],
+    nickname: null,
+    note: null,
+  });
 });
 
 test("losing the Scout role strips every managed role and sets Overifierad", async () => {
@@ -588,4 +593,64 @@ test("the role alone still verifies, without a network probe", async () => {
 
   assert.equal(result.error, undefined);
   assert.ok(!result.added?.includes("Overifierad"));
+});
+
+test("a verified member who is not in the event is told that, not just 'no changes'", async () => {
+  // Exactly the case that sent someone looking for a bug on 2026-08-24: linked,
+  // verified, Scout role granted, and nothing else — because ScoutNet had never
+  // heard of them. The sync had nothing to do and said so, which reads as
+  // "already correct" when it means "your registration is missing".
+  await setup({
+    userId: "u1",
+    roleIds: ["r-scout"],
+    nick: "Sandra Gauffin",
+    scoutId: "3259703",
+    participant: null,
+  });
+
+  const result = await roles.syncUserRoles(GUILD, "u1");
+  assert.deepEqual(result.added, []);
+  assert.deepEqual(result.removed, []);
+  assert.equal(result.note, "inte anmäld i eventet");
+});
+
+test("a member who has their roles carries no note", async () => {
+  await setup({
+    userId: "u1",
+    roleIds: ["r-scout", "r-event", "r-cmt"],
+    nick: "Anna Andersson (CMT)",
+    scoutId: "111",
+    participant: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Anna",
+      last_name: "Andersson",
+      questions: {},
+    },
+  });
+
+  const result = await roles.syncUserRoles(GUILD, "u1");
+  // Nothing changed here either, and here that genuinely means "already
+  // correct". A note on both would make the note worthless.
+  assert.deepEqual(result.added, []);
+  assert.equal(result.note, null);
+});
+
+test("a ScoutNet outage leaves no note claiming absence", async () => {
+  await setup({
+    userId: "u1",
+    roleIds: ["r-scout"],
+    nick: "Sandra Gauffin",
+    scoutId: "3259703",
+    participant: null,
+  });
+  scoutNetDown = true;
+  await storage.clearScoutNetCache();
+
+  const result = await roles.syncUserRoles(GUILD, "u1");
+  // The sync bails out before the first write on a ScoutNet failure, so there
+  // is no note to write — and the error says what happened. What must never
+  // appear is "inte anmäld i eventet" for someone nobody could ask about.
+  assert.match(result.error, /Kunde inte hämta ScoutNet-data/);
+  assert.equal(result.note, undefined);
 });

@@ -70,6 +70,48 @@ test("getGuildMembers handles an empty guild", async () => {
   assert.deepEqual(await discord.getGuildMembers("G1"), []);
 });
 
+test("the retry waits as long as Discord asked, not as long as it guessed", () => {
+  // The fixed 2^attempt ladder ignored the answer to the very question it was
+  // guessing at. On 2026-08-24 Discord asked for 3.584s, was retried after 1s,
+  // then asked for 2.402s and was retried after 2s — three refusals on a call
+  // that would have succeeded once, and a member got a 500 page for a linking
+  // that had already been stored.
+  assert.equal(discord.retryDelayMs(0, 3584), 3584);
+  assert.equal(discord.retryDelayMs(1, 2402), 2402);
+  // No hint: the ladder is still the fallback.
+  assert.equal(discord.retryDelayMs(0, undefined), 1000);
+  assert.equal(discord.retryDelayMs(2, undefined), 4000);
+  // Clamped at both ends — `retry_after: 0` must not become a hot loop, and no
+  // single wait may outlast the pod's termination grace.
+  assert.equal(discord.retryDelayMs(0, 0), 250);
+  assert.equal(discord.retryDelayMs(0, 99_000), 10_000);
+});
+
+test("a 429 with Retry-After is honoured over the backoff ladder", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls > 1) return ok([{ id: "r1", name: "scout" }]);
+    return {
+      ok: false,
+      status: 429,
+      headers: { get: (h) => (h === "retry-after" ? "0.3" : null) },
+      json: async () => ({}),
+      text: async () => "{}",
+    };
+  };
+  const started = Date.now();
+  await discord.getGuildRoles("G1");
+  const elapsed = Date.now() - started;
+  assert.equal(calls, 2);
+  // Behavioural, not just arithmetic: proves the header reaches the sleep at
+  // all. The ladder would have spent 1000ms here.
+  assert.ok(
+    elapsed >= 250 && elapsed < 900,
+    `waited ${elapsed}ms, expected roughly the 300ms Discord asked for`,
+  );
+});
+
 test("a 429 is retried and the call still succeeds", async () => {
   let calls = 0;
   globalThis.fetch = async () => {
