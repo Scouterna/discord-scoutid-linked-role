@@ -2,16 +2,27 @@ import crypto from "crypto";
 
 import * as storage from "./storage.js";
 import config from "./config.js";
+import { request, retryDelayMs } from "./http.js";
 
 /**
- * Discord API client for OAuth2, role management, and interactions.
+ * Discord API client: OAuth2, role management, audit log and interactions.
+ *
+ * Every call goes through `request` in http.js, which owns the rate-limit retry
+ * and stamps `error.status` — callers branch on it.
  */
+
+const API = "https://discord.com/api/v10";
+
+const bot = () => ({ Authorization: `Bot ${config.DISCORD_TOKEN}` });
+const bearer = (accessToken) => ({ Authorization: `Bearer ${accessToken}` });
+const json = (headers) => ({ ...headers, "Content-Type": "application/json" });
+
+export { retryDelayMs };
 
 // --- OAuth2 ---
 
 export function getOAuthUrl() {
   const state = crypto.randomUUID();
-
   const url = new URL("https://discord.com/api/oauth2/authorize");
   url.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
   url.searchParams.set("redirect_uri", config.DISCORD_REDIRECT_URI);
@@ -22,212 +33,145 @@ export function getOAuthUrl() {
   return { state, url: url.toString() };
 }
 
-export async function getOAuthTokens(code) {
-  const url = "https://discord.com/api/v10/oauth2/token";
-  const body = new URLSearchParams({
-    client_id: config.DISCORD_CLIENT_ID,
-    client_secret: config.DISCORD_CLIENT_SECRET,
+function tokenRequest(what, params) {
+  return request(`${API}/oauth2/token`, {
+    what,
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.DISCORD_CLIENT_ID,
+      client_secret: config.DISCORD_CLIENT_SECRET,
+      ...params,
+    }),
+  });
+}
+
+export function getOAuthTokens(code) {
+  return tokenRequest("Error fetching OAuth tokens", {
     grant_type: "authorization_code",
     code,
     redirect_uri: config.DISCORD_REDIRECT_URI,
   });
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      body,
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error fetching OAuth tokens: [${response.status}] ${response.statusText}`,
-    );
-    attachStatus(error, response);
-    throw error;
-  });
 }
 
+/**
+ * The user's access token, refreshed and re-stored if it has expired.
+ *
+ * The comparison is deliberately `>` on the expiry rather than `<=` on its
+ * negation: a stored token with no `expires_at` compares false either way, and
+ * this direction then uses the token instead of spending a refresh on it.
+ */
 export async function getAccessToken(userId, tokens) {
   if (Date.now() > tokens.expires_at) {
-    const url = "https://discord.com/api/v10/oauth2/token";
-    const body = new URLSearchParams({
-      client_id: config.DISCORD_CLIENT_ID,
-      client_secret: config.DISCORD_CLIENT_SECRET,
+    const fresh = await tokenRequest("Error refreshing access token", {
       grant_type: "refresh_token",
       refresh_token: tokens.refresh_token,
     });
-
-    const newTokens = await retryWithBackoff(async () => {
-      const response = await fetch(url, {
-        body,
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-      if (response.ok) {
-        const tokens = await response.json();
-        tokens.expires_at = Date.now() + tokens.expires_in * 1000;
-        return tokens;
-      }
-      const error = new Error(
-        `Error refreshing access token: [${response.status}] ${response.statusText}`,
-      );
-      attachStatus(error, response);
-      throw error;
-    });
-
-    await storage.storeDiscordTokens(userId, newTokens);
-    return newTokens.access_token;
+    fresh.expires_at = Date.now() + fresh.expires_in * 1000;
+    await storage.storeDiscordTokens(userId, fresh);
+    return fresh.access_token;
   }
   return tokens.access_token;
 }
 
 // --- User data ---
 
-export async function getUserData(tokens) {
-  const url = "https://discord.com/api/v10/oauth2/@me";
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error fetching user data: [${response.status}] ${response.statusText}`,
-    );
-    attachStatus(error, response);
-    throw error;
+export function getUserData(tokens) {
+  return request(`${API}/oauth2/@me`, {
+    what: "Error fetching user data",
+    headers: bearer(tokens.access_token),
   });
 }
 
-export async function getUserGuilds(tokens) {
-  const url = "https://discord.com/api/v10/users/@me/guilds";
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error fetching user guilds: [${response.status}] ${response.statusText}`,
-    );
-    attachStatus(error, response);
-    throw error;
+export function getUserGuilds(tokens) {
+  return request(`${API}/users/@me/guilds`, {
+    what: "Error fetching user guilds",
+    headers: bearer(tokens.access_token),
   });
 }
 
 // --- Linked role metadata ---
 
+const roleConnectionUrl = () =>
+  `${API}/users/@me/applications/${config.DISCORD_CLIENT_ID}/role-connection`;
+
 /**
- * `platformUsername` is the only part of this that Discord ever *shows*: it is
- * the line under "ScoutID" on the user's connection card. The metadata keys are
- * read by role requirements and otherwise invisible, which is why the card said
- * nothing for the first year — nobody was setting this field.
+ * `platformUsername` is the only part of this Discord ever *shows*: it is the
+ * line under "ScoutID" on the user's connection card. The metadata keys are read
+ * by role requirements and are otherwise invisible.
  */
 export async function pushMetadata(userId, tokens, metadata, platformUsername) {
-  const url = `https://discord.com/api/v10/users/@me/applications/${config.DISCORD_CLIENT_ID}/role-connection`;
-
-  await retryWithBackoff(async () => {
-    const accessToken = await getAccessToken(userId, tokens);
-    const response = await fetch(url, {
-      method: "PUT",
-      body: JSON.stringify({
-        platform_name: "ScoutID",
-        platform_username: platformUsername ?? "",
-        metadata,
-      }),
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      console.error(
-        `Error pushing metadata: [${response.status}] ${response.statusText}: ${body}`,
-      );
-      const error = new Error(
-        `Error pushing metadata: [${response.status}] ${response.statusText}`,
-      );
-      attachStatus(error, response);
-      throw error;
-    }
+  const accessToken = await getAccessToken(userId, tokens);
+  await request(roleConnectionUrl(), {
+    what: "Error pushing metadata",
+    parse: "none",
+    withBody: true,
+    method: "PUT",
+    headers: json(bearer(accessToken)),
+    body: JSON.stringify({
+      platform_name: "ScoutID",
+      platform_username: platformUsername ?? "",
+      metadata,
+    }),
   });
 }
 
 /**
- * Read back the role-connection Discord holds for a user, with *their* token.
- *
- * A read, deliberately: this is used as a liveness probe for the user's OAuth
- * grant, and probing with a write would mean the check has side effects on the
- * thing it is checking.
- *
- * Returns the status code alongside the body so the caller can tell the three
- * cases apart — 200 means the grant is live, 401 means the user revoked it, and
- * anything else means Discord could not answer, which is *not* the same as a no.
+ * Read back the role-connection Discord holds for a user, with *their* token —
+ * the liveness probe for their OAuth grant, so it must be a read. The status
+ * comes back unjudged: 200 is a live grant, 401 a revoked one, and anything
+ * else is *not* a no.
  */
 export async function getRoleConnection(userId, tokens) {
   const accessToken = await getAccessToken(userId, tokens);
-  const url = `https://discord.com/api/v10/users/@me/applications/${config.DISCORD_CLIENT_ID}/role-connection`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const response = await request(roleConnectionUrl(), {
+    parse: "raw",
+    headers: bearer(accessToken),
   });
   return { status: response.status, ok: response.ok };
 }
 
 // --- Guild member management ---
 
+/** Returns false instead of throwing: a rename is never worth failing a sync over. */
 export async function updateGuildMemberNickname(guildId, userId, nickname) {
-  const url = `https://discord.com/api/v10/guilds/${guildId}/members/${userId}`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
+  try {
+    await request(`${API}/guilds/${guildId}/members/${userId}`, {
+      what: `Error updating nickname in guild ${guildId}`,
+      parse: "none",
       method: "PATCH",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
+      headers: json(bot()),
       body: JSON.stringify({ nick: nickname }),
     });
-    if (response.ok) {
-      console.log(
-        `Updated nickname for ${userId} in guild ${guildId} to "${nickname}"`,
-      );
-      return true;
-    }
-    const error = new Error(
-      `Error updating nickname in guild ${guildId}: [${response.status}]`,
+    console.log(
+      `Updated nickname for ${userId} in guild ${guildId} to "${nickname}"`,
     );
-    attachStatus(error, response);
-    throw error;
-  }).catch(() => false);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export async function getGuildRoles(guildId) {
-  const url = `https://discord.com/api/v10/guilds/${guildId}/roles`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(`Error fetching guild roles: [${response.status}]`);
-    attachStatus(error, response);
-    throw error;
+export function getGuildRoles(guildId) {
+  return request(`${API}/guilds/${guildId}/roles`, {
+    what: "Error fetching guild roles",
+    headers: bot(),
   });
 }
 
+/**
+ * Every member, following the pagination past Discord's 1000-per-page cap.
+ * Stopping at the first page would make the member scan report everyone past
+ * member 1000 as having left the server.
+ */
 export async function getGuildMembers(guildId) {
   const members = [];
   let after = "0";
-  while (true) {
-    const url = `https://discord.com/api/v10/guilds/${guildId}/members?limit=1000&after=${after}`;
-    const page = await retryWithBackoff(async () => {
-      const response = await fetch(url, {
-        headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-      });
-      if (response.ok) return await response.json();
-      const error = new Error(
-        `Error fetching guild members: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    });
+  for (;;) {
+    const page = await request(
+      `${API}/guilds/${guildId}/members?limit=1000&after=${after}`,
+      { what: "Error fetching guild members", headers: bot() },
+    );
     if (!page.length) break;
     members.push(...page);
     if (page.length < 1000) break;
@@ -236,75 +180,47 @@ export async function getGuildMembers(guildId) {
   return members;
 }
 
+export function getGuildMember(guildId, userId) {
+  return request(`${API}/guilds/${guildId}/members/${userId}`, {
+    what: "Error fetching guild member",
+    headers: bot(),
+  });
+}
+
 let cachedBotUserId = null;
 
 export async function getCurrentBotUserId() {
-  if (cachedBotUserId) return cachedBotUserId;
-  const url = "https://discord.com/api/v10/users/@me";
-  const response = await fetch(url, {
-    headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-  });
-  if (!response.ok) {
-    throw new Error(`Error fetching bot user: [${response.status}]`);
-  }
-  const data = await response.json();
-  cachedBotUserId = data.id;
+  cachedBotUserId ??= (
+    await request(`${API}/users/@me`, {
+      what: "Error fetching bot user",
+      headers: bot(),
+    })
+  ).id;
   return cachedBotUserId;
 }
 
 export async function getBotMember(guildId) {
-  const botUserId = await getCurrentBotUserId();
-  return await getGuildMember(guildId, botUserId);
+  return getGuildMember(guildId, await getCurrentBotUserId());
 }
 
-export async function getGuildMember(guildId, userId) {
-  const url = `https://discord.com/api/v10/guilds/${guildId}/members/${userId}`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error fetching guild member: [${response.status}]`,
-    );
-    attachStatus(error, response);
-    throw error;
+const roleUrl = (guildId, userId, roleId) =>
+  `${API}/guilds/${guildId}/members/${userId}/roles/${roleId}`;
+
+export function addRoleToUser(guildId, userId, roleId) {
+  return request(roleUrl(guildId, userId, roleId), {
+    what: `Error adding role ${roleId}`,
+    parse: "none",
+    method: "PUT",
+    headers: bot(),
   });
 }
 
-export async function addRoleToUser(guildId, userId, roleId) {
-  const url = `https://discord.com/api/v10/guilds/${guildId}/members/${userId}/roles/${roleId}`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "PUT",
-      headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-    });
-    if (!response.ok) {
-      const error = new Error(
-        `Error adding role ${roleId}: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    }
-    return true;
-  });
-}
-
-export async function removeRoleFromUser(guildId, userId, roleId) {
-  const url = `https://discord.com/api/v10/guilds/${guildId}/members/${userId}/roles/${roleId}`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` },
-    });
-    if (!response.ok) {
-      const error = new Error(
-        `Error removing role ${roleId}: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    }
-    return true;
+export function removeRoleFromUser(guildId, userId, roleId) {
+  return request(roleUrl(guildId, userId, roleId), {
+    what: `Error removing role ${roleId}`,
+    parse: "none",
+    method: "DELETE",
+    headers: bot(),
   });
 }
 
@@ -314,34 +230,20 @@ export async function removeRoleFromUser(guildId, userId, roleId) {
  * Post a plain message to a channel as the bot.
  *
  * `allowed_mentions: { parse: [] }` is not optional. Log lines carry `<@id>` so
- * a moderator can click through to the person, and without this every entry
- * would ping them — turning an audit trail into a notification storm aimed at
- * whoever was just synced.
+ * a moderator can click through, and without this every entry would ping the
+ * person it is about — an audit trail turned into a notification storm.
  *
  * The bot's role grants only Manage Roles and Manage Nicknames, so it can write
- * here purely on the channel overwrite granted in wsj27-infra. A 403 therefore
+ * here purely on a channel overwrite granted in wsj27-infra. A 403 therefore
  * means the overwrite is missing, not that the token is wrong.
  */
-export async function postChannelMessage(channelId, content) {
-  const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        content,
-        allowed_mentions: { parse: [] },
-      }),
-    });
-    if (response.ok) return true;
-    const error = new Error(
-      `Error posting to channel ${channelId}: [${response.status}]`,
-    );
-    attachStatus(error, response);
-    throw error;
+export function postChannelMessage(channelId, content) {
+  return request(`${API}/channels/${channelId}/messages`, {
+    what: `Error posting to channel ${channelId}`,
+    parse: "none",
+    method: "POST",
+    headers: json(bot()),
+    body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
   });
 }
 
@@ -352,84 +254,54 @@ export const AUDIT_MEMBER_ROLE_UPDATE = 25;
 export const AUDIT_MEMBER_KICK = 20;
 export const AUDIT_MEMBER_BAN_ADD = 22;
 
-/**
- * The id of the newest audit-log entry, or null if the log is empty.
- *
- * Used to seed the cursor on a first run: the point is to start reporting from
- * now on, not to replay however much history Discord still holds.
- */
-export async function getNewestAuditLogId(guildId, actionType) {
-  const params = new URLSearchParams({ limit: "1" });
-  if (actionType != null) params.set("action_type", String(actionType));
-  return await retryWithBackoff(async () => {
-    const response = await fetch(
-      `https://discord.com/api/v10/guilds/${guildId}/audit-logs?${params}`,
-      { headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` } },
-    );
-    if (response.ok) {
-      const body = await response.json();
-      return body.audit_log_entries?.[0]?.id ?? null;
-    }
-    const error = new Error(
-      `Error fetching audit log for guild ${guildId}: [${response.status}]`,
-    );
-    attachStatus(error, response);
-    throw error;
+function auditLogPage(guildId, params) {
+  return request(`${API}/guilds/${guildId}/audit-logs?${params}`, {
+    what: `Error fetching audit log for guild ${guildId}`,
+    headers: bot(),
   });
 }
 
 /**
- * Audit-log entries newer than `after`, oldest first. `after` is required — pass
- * `getNewestAuditLogId` first to establish one, or this would page through the
- * guild's whole retained history.
- *
- * This is the only source that knows *who* made a change. A snapshot diff can
- * see that roles moved; only the audit log can say a moderator did it rather
- * than this bot, which is the whole point of reporting role changes at all.
- *
- * **Pagination runs backwards on purpose.** Discord returns entries newest-first
- * and `after` does not change that: `?after=X&limit=100` yields the 100 *newest*
- * entries above X, so if 150 accumulated, the 50 closest to X are simply absent.
- * Advancing the cursor past them would skip them forever. A single
- * `/refresh-scoutid alla:true` writes one entry per changed user, so filling a
- * 100-entry window is an ordinary Tuesday here, not a rare edge case. Instead
- * page down with `before` until an entry at or below the cursor appears.
- *
- * Returns `{ entries, truncated }`. `truncated` means the hard cap was reached
- * before the cursor — the caller must say so rather than imply it saw everything.
- *
+ * The id of the newest audit-log entry, or null if the log is empty. Used to
+ * seed the cursor on a first run — the point is to start reporting from now on,
+ * not to replay however much history Discord still holds.
+ */
+export async function getNewestAuditLogId(guildId, actionType) {
+  const params = new URLSearchParams({ limit: "1" });
+  if (actionType != null) params.set("action_type", String(actionType));
+  const body = await auditLogPage(guildId, params);
+  return body.audit_log_entries?.[0]?.id ?? null;
+}
+
+/**
+ * Audit-log entries newer than `after`, oldest first, as `{ entries, truncated }`.
  * Throws with `status = 403` when the bot's role lacks View Audit Log.
+ *
+ * **Pagination runs backwards on purpose.** Discord returns newest-first and
+ * `after` does not change that: `?after=X&limit=100` yields the 100 *newest*
+ * entries above X, so with 150 waiting the 50 closest to X are absent, and
+ * advancing the cursor past them skips them forever. Paging down with `before`
+ * until an entry at or below the cursor appears covers the gap — and one
+ * `/refresh-scoutid alla:true` fills a 100-entry window routinely.
  */
 export async function getAuditLogEntries(
   guildId,
   { actionType, after, cap = 500 },
 ) {
-  if (after == null)
+  if (after == null) {
     throw new Error("getAuditLogEntries requires an `after` cursor");
+  }
   const entries = [];
+  const afterId = BigInt(after);
   let before = null;
   let truncated = false;
-  const afterId = BigInt(after);
 
-  while (true) {
+  for (;;) {
     const params = new URLSearchParams({ limit: "100" });
     if (actionType != null) params.set("action_type", String(actionType));
     if (before) params.set("before", before);
 
-    const page = await retryWithBackoff(async () => {
-      const response = await fetch(
-        `https://discord.com/api/v10/guilds/${guildId}/audit-logs?${params}`,
-        { headers: { Authorization: `Bot ${config.DISCORD_TOKEN}` } },
-      );
-      if (response.ok) return await response.json();
-      const error = new Error(
-        `Error fetching audit log for guild ${guildId}: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    });
-
-    const batch = page.audit_log_entries ?? [];
+    const batch = (await auditLogPage(guildId, params)).audit_log_entries ?? [];
     if (batch.length === 0) break;
 
     let reachedCursor = false;
@@ -448,239 +320,131 @@ export async function getAuditLogEntries(
     before = batch[batch.length - 1].id;
   }
 
-  // Oldest first, so the log reads in the order things happened.
-  entries.reverse();
+  entries.reverse(); // oldest first, so the log reads in the order things happened
   return { entries, truncated };
 }
 
 // --- Slash commands ---
 
-export async function registerGuildCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
+const USER = 6;
+const STRING = 3;
+const BOOLEAN = 5;
+const ADMIN_ONLY = "8"; // default_member_permissions: ADMINISTRATOR
+
+/**
+ * Every command this bot answers. `dryrun` and not `torrkor` throughout: the
+ * option name is an interface admins type, and it is the same word in every CLI
+ * they have used. Descriptions stay Swedish — those are prose.
+ */
+export const COMMANDS = [
+  {
     name: "refresh-scoutid",
     description: "Uppdatera ScoutID-roller",
     options: [
       {
         name: "person",
         description: "Person att uppdatera (admin krävs för andra)",
-        type: 6, // USER
-        required: false,
+        type: USER,
       },
       {
         name: "alla",
         description: "Uppdatera alla länkade användare (admin krävs)",
-        type: 5, // BOOLEAN
-        required: false,
+        type: BOOLEAN,
       },
       {
-        // `dryrun` and not `torrkor`: the option name is a public interface
-        // that admins type, and it is the same word in every CLI they have
-        // used. Descriptions stay Swedish — those are prose.
         name: "dryrun",
         description: "Visa vad som skulle ändras utan att ändra något",
-        type: 5, // BOOLEAN
-        required: false,
+        type: BOOLEAN,
       },
     ],
-  };
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const errorText = await response.text();
-    throw new Error(
-      `Error registering command: [${response.status}] ${errorText}`,
-    );
-  });
-}
-
-export async function registerStatusCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
+  },
+  {
     name: "status-scoutid",
     description: "Visa allt boten vet om en person (admin)",
-    default_member_permissions: "8", // ADMINISTRATOR
+    default_member_permissions: ADMIN_ONLY,
     options: [
       {
-        // Required, since 2026-08-21. Without an argument this command ran
-        // `runAudit()` and printed its summary — the same computation over the
-        // same data as `/audit-scoutid`, just shorter. One command per question:
-        // this one answers "what about this person".
+        // Required, so this command answers only "what about this person".
+        // The server-wide picture is `/audit-scoutid` and `/adoption-scoutid`.
         name: "person",
         description: "Person att visa status för",
-        type: 6, // USER
+        type: USER,
         required: true,
       },
     ],
-  };
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const errorText = await response.text();
-    throw new Error(
-      `Error registering command: [${response.status}] ${errorText}`,
-    );
-  });
-}
-
-export async function registerAuditCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
+  },
+  {
     name: "audit-scoutid",
     description:
       "Lista avvikelser mellan Discord, ScoutID-länkar och ScoutNet (admin)",
-    default_member_permissions: "8", // ADMINISTRATOR
-  };
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const errorText = await response.text();
-    throw new Error(
-      `Error registering command: [${response.status}] ${errorText}`,
-    );
-  });
-}
-
-export async function registerLinkCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
-    name: "link-scoutid",
+    default_member_permissions: ADMIN_ONLY,
+  },
+  {
+    name: "scan-scoutid",
     description:
-      "Länka manuellt en Discord-användare till ett ScoutNet member_no (admin)",
-    default_member_permissions: "8", // ADMINISTRATOR
+      "Kör medlemsscannern nu i stället för att vänta på schemat (admin)",
+    default_member_permissions: ADMIN_ONLY,
     options: [
       {
-        name: "person",
-        description: "Discord-användare att länka",
-        type: 6, // USER
-        required: true,
-      },
-      {
-        name: "scoutid",
-        description: "ScoutNet member_no",
-        type: 3, // STRING
-        required: true,
+        name: "dryrun",
+        description:
+          "Visa vad som skulle rapporteras utan att posta eller spara",
+        type: BOOLEAN,
       },
     ],
-  };
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const errorText = await response.text();
-    throw new Error(
-      `Error registering command: [${response.status}] ${errorText}`,
-    );
-  });
-}
-
-// --- Interaction verification ---
-
-export async function registerAdoptionCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
+  },
+  {
     name: "adoption-scoutid",
     description:
       "Hur många av de anmälda som har länkat sig, per grupp (admin)",
-    default_member_permissions: "8", // ADMINISTRATOR
+    default_member_permissions: ADMIN_ONLY,
     options: [
       {
         // Off by default: naming everyone who has not linked is thousands of
         // lines, and the counts are what most questions need.
         name: "saknas",
         description: "Lista namnen på dem som inte länkat sig",
-        type: 5, // BOOLEAN
-        required: false,
+        type: BOOLEAN,
       },
     ],
-  };
-
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error registering adoption command: [${response.status}] ${await response.text()}`,
-    );
-    attachStatus(error, response);
-    throw error;
-  });
-}
-
-export async function registerScanCommand(guildId) {
-  const url = `https://discord.com/api/v10/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`;
-  const command = {
-    name: "scan-scoutid",
+  },
+  {
+    name: "link-scoutid",
     description:
-      "Kör medlemsscannern nu i stället för att vänta på schemat (admin)",
-    default_member_permissions: "8", // ADMINISTRATOR
+      "Länka manuellt en Discord-användare till ett ScoutNet member_no (admin)",
+    default_member_permissions: ADMIN_ONLY,
     options: [
       {
-        // Renamed from `torrkor` when `/refresh-scoutid` gained the same option:
-        // two words for one concept in one command set is worse than either.
-        name: "dryrun",
-        description:
-          "Visa vad som skulle rapporteras utan att posta eller spara",
-        type: 5, // BOOLEAN
-        required: false,
+        name: "person",
+        description: "Discord-användare att länka",
+        type: USER,
+        required: true,
+      },
+      {
+        name: "scoutid",
+        description: "ScoutNet member_no",
+        type: STRING,
+        required: true,
       },
     ],
-  };
+  },
+];
 
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
+/** Register one command definition against a guild. */
+export function registerCommand(guildId, command) {
+  return request(
+    `${API}/applications/${config.DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+    {
+      what: `Error registering /${command.name}`,
+      withBody: true,
       method: "POST",
-      headers: {
-        Authorization: `Bot ${config.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
+      headers: json(bot()),
       body: JSON.stringify(command),
-    });
-    if (response.ok) return await response.json();
-    const error = new Error(
-      `Error registering scan command: [${response.status}] ${await response.text()}`,
-    );
-    attachStatus(error, response);
-    throw error;
-  });
+    },
+  );
 }
+
+// --- Interaction verification ---
 
 export function verifyInteraction(publicKey, signature, timestamp, body) {
   const ed25519DerPrefix = "302a300506032b6570032100";
@@ -702,39 +466,29 @@ export function verifyInteraction(publicKey, signature, timestamp, body) {
 
 // --- Interaction responses ---
 
-export async function editInteractionResponse(interactionToken, content) {
-  const url = `https://discord.com/api/v10/webhooks/${config.DISCORD_CLIENT_ID}/${interactionToken}/messages/@original`;
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
-    if (!response.ok) {
-      const error = new Error(
-        `Error editing interaction response: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    }
-    return true;
+const interactionUrl = (token) =>
+  `${API}/webhooks/${config.DISCORD_CLIENT_ID}/${token}/messages/@original`;
+
+export function editInteractionResponse(interactionToken, content) {
+  return request(interactionUrl(interactionToken), {
+    what: "Error editing interaction response",
+    parse: "none",
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
   });
 }
 
-export async function editInteractionResponseWithFile(
+export function editInteractionResponseWithFile(
   interactionToken,
   content,
   filename,
   fileContent,
 ) {
-  const url = `https://discord.com/api/v10/webhooks/${config.DISCORD_CLIENT_ID}/${interactionToken}/messages/@original`;
   const form = new FormData();
   form.append(
     "payload_json",
-    JSON.stringify({
-      content,
-      attachments: [{ id: 0, filename }],
-    }),
+    JSON.stringify({ content, attachments: [{ id: 0, filename }] }),
   );
   form.append(
     "files[0]",
@@ -742,93 +496,10 @@ export async function editInteractionResponseWithFile(
     filename,
   );
 
-  return await retryWithBackoff(async () => {
-    const response = await fetch(url, { method: "PATCH", body: form });
-    if (!response.ok) {
-      const error = new Error(
-        `Error editing interaction response with file: [${response.status}]`,
-      );
-      attachStatus(error, response);
-      throw error;
-    }
-    return true;
+  return request(interactionUrl(interactionToken), {
+    what: "Error editing interaction response with file",
+    parse: "none",
+    method: "PATCH",
+    body: form,
   });
-}
-
-// --- Retry helper ---
-
-/** Never wait longer than this for one retry, however long Discord asks. */
-const MAX_RETRY_DELAY_MS = 10_000;
-/** Nor short enough to be a hot loop: Discord can answer `retry_after: 0`. */
-const MIN_RETRY_DELAY_MS = 250;
-
-/**
- * Copy the HTTP status onto an error, and on a 429 the wait Discord asked for.
- *
- * Every call site already stamped the status — callers branch on it (memberscan
- * tells a 403 on the audit log from a real failure by this field alone). The
- * rate-limit hint rides along on the same line so that no future call site can
- * forget it: it is the difference between a retry that works and one that is
- * guaranteed to be too early.
- *
- * `Retry-After` is seconds and may be fractional. Discord repeats the number in
- * the JSON body as `retry_after`; the header is used because it is on every
- * response without having to read the body first.
- */
-function attachStatus(error, response) {
-  error.status = response.status;
-  if (response.status === 429) {
-    const seconds = Number(response.headers?.get?.("retry-after"));
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      error.retryAfterMs = seconds * 1000;
-    }
-  }
-  return error;
-}
-
-/**
- * How long to wait before retry number `attempt`.
- *
- * **Discord's own number wins when it sent one, and that is the whole fix.** A
- * blind `2^attempt * 1000` ladder ignores the answer to the exact question it
- * is guessing at, and guessing low means every retry arrives before the window
- * opens. Measured on 2026-08-24: a metadata push was told to wait 3.584s and
- * was retried after 1s, then told 2.402s and retried after 2s, then gave up —
- * three requests, all refused, on a call that would have succeeded once. The
- * member got a 500 page for a linking that had already been stored.
- *
- * Clamped at both ends: never a hot loop, and never long enough to outlast the
- * pod's 60s termination grace (two retries at the cap plus the 10s preStop
- * still fits, so a rollout cannot be held up by one rate-limited call).
- *
- * Exported for the test — the rule is worth pinning directly rather than
- * inferring it from how long a test slept.
- */
-export function retryDelayMs(attempt, retryAfterMs) {
-  const asked = Number.isFinite(retryAfterMs)
-    ? retryAfterMs
-    : Math.pow(2, attempt) * 1000;
-  return Math.min(Math.max(asked, MIN_RETRY_DELAY_MS), MAX_RETRY_DELAY_MS);
-}
-
-async function retryWithBackoff(fn, maxRetries = 3) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (error.status === 429 && attempt < maxRetries - 1) {
-        const delay = retryDelayMs(attempt, error.retryAfterMs);
-        const asked =
-          error.retryAfterMs != null
-            ? ` (Discord bad om ${error.retryAfterMs}ms)`
-            : "";
-        console.log(
-          `Rate limited, retrying in ${delay}ms${asked} (attempt ${attempt + 1}/${maxRetries})`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      } else {
-        throw error;
-      }
-    }
-  }
 }

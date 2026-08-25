@@ -2,43 +2,26 @@ import { TableClient } from "@azure/data-tables";
 import config from "./config.js";
 
 /**
- * Durable storage backed by Azure Table Storage.
+ * Durable storage backed by Azure Table Storage. One table, partitioned by type:
  *
- * Data model — a single table, partitioned by record type:
- *   PartitionKey   RowKey          value (+ expiresAt for state)
- *   link           discordUserId   scoutId
- *   discord-token  userId          JSON
- *   scoutid-token  userId          JSON   (legacy — no longer written, see below)
- *   state          state           JSON   + expiresAt   (OAuth, 10 min)
- *   membersnapshot current         chunk0..chunkN + chunks + auditCursors
+ *   PartitionKey    RowKey          value
+ *   link            discordUserId   scoutId
+ *   discord-token   userId          JSON
+ *   state           state           JSON + expiresAt   (OAuth, 10 min)
+ *   membersnapshot  current         chunk0..chunkN + chunks + auditCursors
  *
- * Table Storage has no native TTL, so state rows carry an `expiresAt`
- * (epoch ms) and are treated as absent past that time (lazy expiry).
- *
- * The `scoutid-token` partition is **no longer written or read** (2026-08-21).
- * Nothing could use those tokens: ScoutID's access token expires within the hour
- * and nothing refreshes it, so every call made with a stored one failed — 16 of
- * 16 when measured. Keeping an OAuth credential at rest that protects nothing is
- * liability, not caution. Existing rows are inert and can be dropped whenever.
- *
- * The ScoutNet participant cache is NOT stored here — the full list exceeds
- * Table Storage's 64 KB/property limit, and it's a throwaway cache, so it
- * lives in process memory (see below).
+ * There is no native TTL, so state rows carry an `expiresAt` and are treated as
+ * absent past it. The ScoutNet participant cache is **not** here — it exceeds the
+ * per-property limit and is throwaway, so it lives in process memory below.
  */
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const SCOUTNET_TTL_MS = 10 * 60 * 1000;
 
-// `allowInsecureConnection` defaults to false, and the SDK then refuses a plain
-// http endpoint before it even opens a socket — which is every Azurite setup,
-// including the docker-compose one this project documents for local dev. It
-// failed with "Cannot connect to http://azurite:10002/... while
-// allowInsecureConnection is false".
-//
-// Gated on the connection string actually being http, so it cannot loosen
-// anything in production: the real account is https, the flag stays false there,
-// and a misconfiguration that downgraded prod to http would still be refused —
-// it would have to say so in the connection string to get here.
+// `allowInsecureConnection` defaults to false and the SDK then refuses a plain
+// http endpoint before opening a socket — which is every Azurite setup. Gated on
+// the connection string actually saying http, so it cannot loosen anything in
+// production: the real account is https and the flag stays false there.
 const insecureEndpoint =
   /(^|;)\s*(TableEndpoint\s*=\s*http:\/\/|DefaultEndpointsProtocol\s*=\s*http\s*(;|$))/i.test(
     config.TABLE_CONNECTION_STRING ?? "",
@@ -56,8 +39,7 @@ async function ensureTable() {
   try {
     await client.createTable();
   } catch (err) {
-    // 409 = table already exists, which is the normal steady state.
-    if (err?.statusCode !== 409) throw err;
+    if (err?.statusCode !== 409) throw err; // 409 = exists, the steady state
   }
   tableReady = true;
 }
@@ -78,12 +60,9 @@ async function setValue(partitionKey, rowKey, value, expiresAt) {
 }
 
 /**
- * A cheap round trip to Table Storage, for the readiness probe.
- *
- * A 404 is the expected answer and counts as healthy: what is being proved is
- * that the request was signed, routed and answered — not that anything is
- * stored under that key. A wrong account key answers 403 and an unreachable
- * endpoint does not answer at all, and `getEntity` turns both into a throw.
+ * A cheap round trip, for the readiness probe. A 404 counts as healthy: what is
+ * proved is that the request was signed, routed and answered. A wrong key answers
+ * 403 and an unreachable endpoint not at all, and `getEntity` throws on both.
  */
 export async function ping() {
   await ensureTable();
@@ -103,8 +82,6 @@ export async function getDiscordTokens(userId) {
   const e = await getEntity("discord-token", userId);
   return e ? JSON.parse(e.value) : null;
 }
-
-// --- ScoutID tokens ---
 
 // --- OAuth state (short-lived) ---
 
@@ -129,7 +106,7 @@ export async function getStateData(state) {
   return JSON.parse(e.value);
 }
 
-// --- Discord <-> ScoutID link (durable) ---
+// --- Discord ↔ ScoutID link (durable) ---
 
 export async function setLinkedScoutIDUserId(discordUserId, scoutUserId) {
   await ensureTable();
@@ -155,14 +132,9 @@ export async function getAllLinkedUsers() {
 }
 
 /**
- * Discord user ids that still have stored OAuth tokens, as a Set.
- *
- * One paginated listing per partition rather than a point read per user: the
- * audit needs this for every linked user at once, and the SDK follows the
- * continuation token here where a per-user loop would cost one request each.
- *
- * `type` is "discord-token" or "scoutid-token". Only row keys are needed, so
- * the token values are never deserialised — nothing sensitive is returned.
+ * Discord user ids that still have stored OAuth tokens. One paginated listing
+ * rather than a point read per user, since the audit needs all of them at once.
+ * Only row keys are selected, so no token value is ever deserialised.
  */
 export async function getUserIdsWithTokens(type) {
   await ensureTable();
@@ -170,72 +142,50 @@ export async function getUserIdsWithTokens(type) {
   const entities = client.listEntities({
     queryOptions: { filter: `PartitionKey eq '${type}'`, select: ["RowKey"] },
   });
-  for await (const e of entities) {
-    ids.add(e.rowKey);
-  }
+  for await (const e of entities) ids.add(e.rowKey);
   return ids;
 }
 
 // --- Guild member snapshot (durable) ---
 //
-// The previous state of the guild's member list, so a scheduled scan can tell
-// what changed since last time. It has to be durable and it has to be shared:
-// the web deployment runs two replicas and the scan runs as a CronJob, so
-// process memory would be both duplicated and lost between runs.
+// The previous state of the member list, so a scheduled scan can tell what
+// changed. Durable and shared, because the web deployment runs two replicas and
+// the scan runs as a CronJob.
 //
-// **Why it is chunked.** A single Table Storage string property holds at most
-// **32K UTF-16 characters** — that is what the documented "64 KB" means, since
-// the service counts two bytes per character. Measured against the live guild a
-// member costs ~60 characters here (id, nick, username), so one property would
-// hold roughly 500 members and then start failing — the sort of ceiling that is
-// invisible until a big intake pushes past it. Splitting across properties of
-// one entity moves the limit to the 1 MB per-entity cap, well beyond any
-// contingent this will ever hold.
+// **Chunked**, because one string property holds at most 32K UTF-16 *characters* —
+// that is what the documented "64 KB" means, the service counting two bytes per
+// character. A member costs ~60 characters, so one property caps out around 500
+// members; spreading across properties of one entity moves the ceiling to the
+// 1 MB per-entity cap.
 //
-// The chunk size is in characters, not bytes, and deliberately far below the
-// maximum. Two things were measured, not assumed. A chunk of exactly 32768
-// characters is rejected outright with `PropertyValueTooLarge`. Worse, at 16384
-// characters Azurite returned the data *silently corrupted* — a multi-byte `ä`
-// came back as two replacement characters, mid-property — while 8192 round-tripped
-// 2500 members byte-identically. Whether the real service shares that behaviour
-// was not established; the margin costs nothing but property count, and the 1 MB
-// entity cap binds long before the 252-property one.
+// 8192 rather than the maximum, because the failure modes above it are not all
+// loud: exactly 32768 is rejected with `PropertyValueTooLarge`, but at 16384
+// Azurite returns the data *silently corrupted* — a multi-byte `ä` comes back as
+// two replacement characters mid-property — while 8192 round-trips 2500 members
+// byte-identically. `chars` records the expected length so the read side can
+// catch a corruption that announces itself no other way.
 //
-// Because that corruption was silent, `chars` records the expected length and
-// the read side checks it. A snapshot that fails the check is treated as absent,
-// so the scan reseeds a baseline instead of reporting a diff full of members who
-// never joined and never left.
+// Written and read as **one entity**, so the snapshot can never be torn: a partial
+// write would diff into bogus joins and leaves. `chunks` says how many properties
+// to read, and stale chunks from a larger snapshot are dropped by "Replace".
 //
-// Written and read as one entity, so the snapshot can never be torn: a partial
-// write would produce a diff full of bogus joins and leaves. `chunks` records
-// how many properties to read back, and stale chunks from a previously larger
-// snapshot are harmless because "Replace" drops properties not written.
-//
-// `auditCursors` rides along in the same entity for the same reason: they are the
-// Discord audit-log cursors, and they have to advance in the same atomic write as
-// the member list. Two entities could disagree after a partial failure, and the
-// disagreement would either duplicate or lose entries.
-//
-// One cursor **per action type**, as a JSON map of `actionType -> entry id`, not
-// one shared cursor over the whole log. A shared cursor would let a burst of one
-// type crowd out another: `/refresh-scoutid alla:true` writes an entry per changed
-// user, and a kick that happened in the same window would sit below the cap and
-// be skipped forever once the cursor moved past it. Per-type cursors also mean
-// each fetch can filter server-side, so a noisy type costs nothing to a quiet one.
+// `auditCursors` rides along in the same entity because it has to advance in the
+// same atomic write, or the two could disagree after a partial failure and either
+// duplicate or lose entries. One cursor **per action type**, so a burst of one
+// type cannot crowd out another and each fetch can filter server-side.
 
 const SNAPSHOT_CHUNK_CHARS = 8 * 1024;
 
 /**
- * Store the member snapshot. `members` is `{ [discordUserId]: [nick, username] }`
- * — arrays rather than objects because the key names would otherwise be repeated
- * once per member and roughly double the size.
- *
- * `auditCursors` maps audit-log action type to the newest entry already reported.
+ * Store the snapshot. `members` is `{ [discordUserId]: [nick, username] }` —
+ * arrays, or the key names would repeat per member and roughly double the size.
+ * `auditCursors` maps action type to the newest entry already reported.
  */
 export async function storeMemberSnapshot(members, auditCursors = null) {
   await ensureTable();
   const json = JSON.stringify(members);
   const entity = { partitionKey: "membersnapshot", rowKey: "current" };
+
   let chunks = 0;
   for (let i = 0; i < json.length; i += SNAPSHOT_CHUNK_CHARS) {
     entity[`chunk${chunks++}`] = json.slice(i, i + SNAPSHOT_CHUNK_CHARS);
@@ -243,31 +193,25 @@ export async function storeMemberSnapshot(members, auditCursors = null) {
   entity.chunks = chunks;
   entity.chars = json.length;
   entity.savedAt = Date.now();
-  // Stored as a JSON string, so the snowflake ids stay exact: they exceed the
-  // range a double represents precisely and would come back rounded if written
-  // as numbers.
+  // A JSON string, so the snowflake ids stay exact: they exceed the range a
+  // double represents precisely and would come back rounded as numbers.
   entity.auditCursors = JSON.stringify(auditCursors ?? {});
   await client.upsertEntity(entity, "Replace");
 }
 
 /**
- * Read the snapshot back as `{ members, auditCursors }`, or null if there has
- * never been one. A null return is the signal to seed a baseline rather than
- * report every current member as a new arrival.
- *
- * Reads the pre-existing single `lastAuditId` as the role-update cursor when
- * `auditCursors` is absent, so the snapshot written before per-type cursors
- * existed does not cause the whole role history to be replayed once.
+ * Read the snapshot back as `{ members, auditCursors }`, or **null** when there
+ * has never been a usable one — the signal to seed a baseline rather than report
+ * every current member as a new arrival. A pre-existing single `lastAuditId` is
+ * honoured as the role-update cursor so no history gets replayed.
  */
 export async function getMemberSnapshot() {
   await ensureTable();
   const e = await getEntity("membersnapshot", "current");
   if (!e) return null;
 
-  // An entity that exists but carries no chunk count is corrupt, not absent, and
-  // the two must not look alike: absent means "first run, seed a baseline",
-  // corrupt means something ate the data. Returning null for both silently is
-  // how a storage problem gets mistaken for a fresh install.
+  // Corrupt, not absent — the two return the same null, so the distinction has
+  // to live in the log.
   if (!e.chunks) {
     console.error(
       "Member snapshot exists but has no chunk count — treating it as absent. " +
@@ -291,6 +235,7 @@ export async function getMemberSnapshot() {
     );
     return null;
   }
+
   try {
     let auditCursors = {};
     if (e.auditCursors) auditCursors = JSON.parse(e.auditCursors);
@@ -304,13 +249,10 @@ export async function getMemberSnapshot() {
   }
 }
 
-// --- ScoutNet cache (short-lived, in-memory) ---
+// --- ScoutNet cache (short-lived, in process memory) ---
 //
-// The full event participant list can be several MB, which exceeds Azure
-// Table Storage's 64 KB per-property / 1 MB per-entity limit. Since this is a
-// purely ephemeral performance cache (10-minute TTL, only avoids re-hitting
-// the ScoutNet API), it lives in process memory instead. A cache miss after a
-// restart or on a fresh replica just triggers one extra ScoutNet fetch.
+// The participant list is several MB, past both the per-property and per-entity
+// limits, and it is a pure performance cache: a miss costs one extra fetch.
 
 const scoutNetCache = new Map(); // type -> { value, expiresAt }
 

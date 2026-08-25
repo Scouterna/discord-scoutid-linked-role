@@ -464,7 +464,7 @@ brist som går att laga: Discord delar ut Linked Role-rollen efter att användar
 avslutat på *sin* sida, alltså efter att vår callback kört och success-sidan
 renderats. En kontroll där hade fallit för varje förstagångslänkning. Vad som
 däremot är lagat är att rapporten inte längre påstår motsatsen —
-`addDiscordRoles` hoppar över managed roller och returnerar vad som *faktiskt*
+`roles.grantRoles` hoppar över managed roller och returnerar vad som *faktiskt*
 delades ut, så händelseloggens rad visar `WSJ-event, cmt` utan att hävda `scout`.
 Saknas `scout` i raden gick Discords halva av flödet inte i mål.
 
@@ -499,10 +499,11 @@ omförsök kom före fönstret öppnat. Mätt 2026-08-24: pushen fick vänta-bes
 3,584 s och kördes om efter 1 s, sedan 2,402 s och kördes om efter 2 s, och gav
 upp. Tre anrop, alla nekade, på något som hade lyckats en gång.
 
-`attachStatus` lägger nu `retryAfterMs` på felet på alla 18 anropsställen — samma
-rad som redan satte statuskoden, så inget framtida anropsställe kan glömma den —
-och `retryDelayMs` låter Discords siffra vinna, klämd mellan 250 ms (aldrig en
-hot loop) och 10 s (två omförsök i taket plus 10 s preStop ryms i podens 60 s
+Sedan refaktoreringen 2026-08-25 går varje Discord-anrop genom `request` i
+[src/http.js](src/http.js), som sätter `retryAfterMs` på felet — inget
+anropsställe kan glömma den, för det finns bara ett — och `retryDelayMs` låter
+Discords siffra vinna, klämd mellan 250 ms (aldrig en hot loop) och 10 s (två
+omförsök i taket plus 10 s preStop ryms i podens 60 s
 `terminationGracePeriodSeconds`, så ett rate limit kan inte hålla upp en
 rollout).
 
@@ -568,7 +569,7 @@ Tre egenskaper som måste hålla om det här ändras:
   `syncAllUserRoles` hämtar båda en gång. Pinnat i `integration/syncall`.
 - **Pausen mellan skrivningar tas bara när något faktiskt skrevs.** 200 ms per
   användare oavsett är åtta minuters sömn vid 2 500 personer för att rapportera
-  att inget hänt. Det riktiga rate limit-skyddet är 429-retryn i `discord.js`.
+  att inget hänt. Det riktiga rate limit-skyddet är 429-retryn i `http.js`.
 - **Nattjobbet är tyst när ingenting ändrades.** Det skrev tidigare en
   sammanfattning varje natt, med argumentet att ett schemalagt jobb som inte
   loggar något inte går att skilja från ett som slutat köra. Sant — men priset var
@@ -848,7 +849,7 @@ den finns.
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
-| `integration/metadata` | Att pushen bär `verified: true`, att ett dött ScoutID-token inte kostar användaren flaggan, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
+| `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar, där ett onåbart Discord aldrig får bli ett nej |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |

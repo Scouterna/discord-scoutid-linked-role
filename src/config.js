@@ -2,14 +2,17 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-// The parsers below are exported alongside the assembled config so they can be
-// tested directly. They are pure string-to-object functions, and testing them
-// through repeated re-imports of this module meant dotenv printing its banner to
-// stdout once per case — which corrupted the test runner's own output stream.
+// The parsers are exported alongside the assembled config so they can be tested
+// directly: they are pure string-to-object functions, and driving them through
+// repeated re-imports of this module makes dotenv print its banner to stdout once
+// per case, which corrupts the test runner's own output stream.
+//
+// Every parser returns null for an empty or unusable value, so a caller can tell
+// "not configured" from "configured as nothing".
 
 /**
- * Parse fee roles from env var format "feeId:category,feeId:category"
- * Example: "25694:deltagare,27561:deltagare,25696:ist,25702:IST-Direktresa,33293:ledare,34850:ledare,25697:cmt,25693:cmt"
+ * `"feeId:category,feeId:category"` → `{ feeId: category }`.
+ * Example: `"25694:deltagare,25697:cmt"`.
  */
 export function parseFeeRoles(str) {
   if (!str) return null;
@@ -22,12 +25,11 @@ export function parseFeeRoles(str) {
 }
 
 /**
- * Parse nickname suffix patterns from env var.
- * Format: "category:withDiv:withoutDiv,..."
- * Example: "deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,IST-Direktresa::IST,cmt::CMT"
+ * `"category:withDiv:withoutDiv,..."` → `{ category: { withDiv, withoutDiv } }`.
+ * Example: `"deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT"`.
  *
- * {div} is replaced with the zero-padded division number.
- * Empty string means no suffix for that case.
+ * `{div}` is replaced with the zero-padded division number; an empty half means
+ * no suffix in that case.
  */
 export function parseNicknameSuffixes(str) {
   if (!str) return null;
@@ -42,12 +44,11 @@ export function parseNicknameSuffixes(str) {
 }
 
 /**
- * Parse division role patterns from env var.
- * Format: "category:questionId:withDivPattern:withoutDivRole,..."
- * Example: "deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande"
+ * `"category:questionId:withDiv:withoutDiv,..."` →
+ * `{ category: { questionId, withDiv, withoutDiv } }`.
+ * Example: `"deltagare:88168:Deltagare-{div}:Deltagare-Väntande"`.
  *
- * Each category has its own question ID for the division number.
- * {div} is replaced with the zero-padded (2-digit min) division number.
+ * Each category reads its own ScoutNet question for the division number.
  */
 export function parseDivisionRoles(str) {
   if (!str) return null;
@@ -66,18 +67,15 @@ export function parseDivisionRoles(str) {
 }
 
 /**
- * Parse flat per-category roles from env var.
- * Format: "category:roleName,..."
- * Example: "ledare:Ledare,ist:IST"
+ * `"category:roleName,..."` → `{ category: roleName }`.
  *
- * Granted *in addition to* the category's division role, so a leader in troop
- * 12 ends up with both `Ledare-12` and `Ledare`. Categories that already get a
- * flat role because they have no division config (`cmt` → `CMT`) need no entry.
+ * Granted *in addition to* the category's division role, so a leader in troop 12
+ * ends up with both `Ledare-12` and `Ledare`. A category with no division config
+ * already gets a flat role (`cmt` → `CMT`) and needs no entry.
  *
  * This exists for Discord AutoMod, which can only *exempt* roles and never
- * target them, with a hard cap of 20 exempt roles. Expressing "everyone except
- * participants" through the per-division roles would need 151 of them; through
- * flat markers it needs two.
+ * target them, with a hard cap of 20 exempt roles: "everyone except
+ * participants" needs 151 per-division roles, or two flat markers.
  */
 export function parseCategoryRoles(str) {
   if (!str) return null;
@@ -90,20 +88,12 @@ export function parseCategoryRoles(str) {
 }
 
 /**
- * Parse the member-event switch.
- * Format: comma-separated event names, e.g. "join,leave,nickname".
+ * The member-event switch: a comma-separated list of `join`, `leave`, `nickname`
+ * and `roles`. Empty, `"off"` or `"none"` disables the scheduled scan entirely.
  *
- * Accepted: join, leave, nickname, roles. Empty, "off" or "none" disables the
- * scheduled member scan entirely.
- *
- * `roles` reports only role changes made by *someone other than this bot*, read
- * from the Discord audit log — the bot already logs its own as it makes them, and
- * a `/refresh-scoutid alla:true` would otherwise echo as one line per user. What
- * is left is a moderator editing roles by hand, named.
- *
- * It is off by default because it needs a permission the others do not: **View
- * Audit Log** on the bot's role. With it missing the scan logs a warning and
- * skips role changes; everything else is unaffected.
+ * `roles` is off by default because it needs a permission the others do not —
+ * **View Audit Log** on the bot's role, since only the audit log knows who made
+ * a change. Without it the scan warns and skips the category.
  */
 export function parseMemberEvents(str) {
   const raw = (str ?? "join,leave,nickname").trim().toLowerCase();

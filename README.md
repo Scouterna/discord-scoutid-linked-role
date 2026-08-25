@@ -37,13 +37,11 @@ The boundary takes **two independent proofs, either of which is enough**:
 
 The second exists because the first cannot be backfilled: Discord grants a
 connection-gated role only when the user clicks Link, so a rebuilt role cannot be
-restored to existing members by any API. Either proof missing is fine; both
-missing means the next sync strips every bot-managed role and applies
-`Overifierad`. The stored link is kept, so the user can re-verify without an admin
-re-entering their member number. If a linked user loses it (they disconnected the
-app, or left and rejoined the server), the next sync strips every bot-managed
-role and applies `Overifierad`. The stored link is kept, so the user can
-re-verify without an admin re-entering their member number.
+restored to existing members by any API. Losing one proof — disconnecting the
+app, or leaving and rejoining the server — is fine; losing both means the next
+sync strips every bot-managed role and applies `Overifierad`. The stored link is
+kept, so the user can re-verify without an admin re-entering their member
+number.
 
 ## Roles
 
@@ -230,6 +228,11 @@ What is covered:
   errors carrying their HTTP status, mentions always suppressed.
 - **`unit/eventlog`** — never throws, never delays, never loses the buffer, and
   splits below Discord's 2000-character limit.
+- **`unit/memberscan`** — the scan summary, and the audit-log pagination that
+  runs backwards on purpose.
+- **`unit/adoption`** — the grouping follows the config and nothing else: giving
+  a category a division config splits it, removing one collapses it, with no
+  code change either way.
 - **`unit/server`** — the interactions endpoint, driven over a real socket with a
   real ed25519 keypair: forged signatures rejected, PING answered, every command
   acknowledged within Discord's 3-second window, and the admin gate enforced.
@@ -238,10 +241,11 @@ What is covered:
 - **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
   nickname limit, and that a ScoutNet outage changes nothing at all.
-- **`integration/metadata`** — that the Linked Role push carries `verified: true`,
-  that a dead ScoutID token costs the user only the display fields and never that
-  flag, and that "no stored token" is reported apart from "failed" — they need
-  different remedies and only one of them has one.
+- **`integration/metadata`** — that the Linked Role push carries `verified: true`
+  and never contacts ScoutID, that a ScoutNet outage costs only the displayed
+  name and never the flag, that "no stored token" is reported apart from
+  "failed" — and `verifyConnection`'s three answers, where an unreachable
+  Discord is never a no but a dead refresh token is.
 - **`integration/syncall`** — `syncAllUserRoles`: that guild state is fetched
   *once* per run rather than once per user, that an unchanged server writes
   nothing, and that a dry run writes nothing at all. Cost properties rather than
@@ -250,6 +254,9 @@ What is covered:
 - **`integration/health`** — `/readyz` against a real table, which is the only
   way to test the answer that matters: 200 when storage genuinely works.
 - **`integration/audit`** — all 13 categories, and that the audit never writes.
+- **`integration/linking`** — the ScoutID callback over a real socket: a failed
+  metadata push still stores the link, grants roles and sets the nickname — and
+  answers with the page that says what is missing, instead of a 500.
 - **`integration/memberscan`** — the whole flow in sequence.
 
 Two of those are worth understanding before changing them. **A clean guild must
@@ -353,18 +360,25 @@ ScoutID's client registration needs `/scoutid-oauth-callback` as its redirect.
 
 ```
 src/
-├── server.js      Express app: OAuth callbacks + Discord interactions endpoint
+├── server.js      Express app: health, OAuth callbacks, interactions endpoint
+├── commands.js    The slash command handlers server.js dispatches to
 ├── config.js      Environment parsing (fee/division/suffix mini-formats)
-├── discord.js     Discord API: OAuth, roles, nicknames, command registration
+├── discord.js     Discord API: OAuth, roles, nicknames, command definitions
+├── http.js        The one fetch wrapper: errors carry status, 429s retry
+├── guild.js       Config-derived role names and member helpers, shared
 ├── scoutid.js     ScoutID OIDC (PKCE)
 ├── scoutnet.js    ScoutNet participants API
 ├── roles.js       Role/nickname determination and sync
-├── audit.js       Consistency checks behind /audit-scoutid and /status-scoutid
+├── metadata.js    Linked-role metadata push + OAuth grant probe
+├── audit.js       Consistency checks behind /audit-scoutid
+├── adoption.js    Linked-vs-registered coverage behind /adoption-scoutid
 ├── eventlog.js    Buffered event log → #server-logg
 ├── memberscan.js  Scheduled member diff (joins, leaves, renames, kicks, bans)
+├── refresh.js     Nightly whole-server sync (CronJob entrypoint)
 ├── storage.js     Azure Table Storage (links, tokens, OAuth state)
 ├── register.js    One-time metadata + slash command registration
-└── templates/     Success page served after linking
+├── templates.js   Loads the pages below and injects the configured role name
+└── templates/     Pages served after linking
 ```
 
 Links and OAuth tokens are stored durably in Table Storage. OAuth state expires

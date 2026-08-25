@@ -1,58 +1,50 @@
 import config from "./config.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
+import { divisionRoleName } from "./guild.js";
 
 /**
  * Adoption: how many registered participants have actually linked, per group.
  *
- * **Nothing here knows what a `deltagare` or a `cmt` is.** The grouping falls out
- * of the three config maps, which is what makes it survive a reorganisation:
+ * **Nothing here knows what a `deltagare` or a `cmt` is.** The grouping falls
+ * out of the three config maps, which is what makes it survive a
+ * reorganisation:
  *
  *   SCOUTNET_FEE_ROLES      fee_id → category
  *   SCOUTNET_DIVISION_ROLES category → question + role patterns
  *   SCOUTNET_CATEGORY_ROLES category → flat role name, used here as the label
  *
  * A category with a division config splits by the answer to its question; one
- * without is a single group. So the day a division config is added for a category
- * that lacks one, the split appears with no code change — which is the whole
- * reason not to special-case anything.
+ * without is a single group. Give a category a division config and the split
+ * appears with no code change, which is the reason not to special-case anything.
  *
  * The labels are the configured *role* names, so the report speaks the same
  * vocabulary as Discord rather than inventing a second one.
  */
 
-/** Zero-padded the same way `getDesiredRoles` pads it, or the roles would not match. */
-const pad = (d) => String(d).padStart(2, "0");
+/** A category's heading: its flat role if it has one, else its config key. */
+const categoryLabel = (cfg, category) =>
+  cfg.SCOUTNET_CATEGORY_ROLES?.[category] ?? category;
 
-/** What to call a category in a heading: its flat role if it has one, else its key. */
-function categoryLabel(cfg, category) {
-  return cfg.SCOUTNET_CATEGORY_ROLES?.[category] ?? category;
-}
-
-/**
- * Which group does this participant belong to? Returns the label only — the
- * caller does the counting.
- */
+/** Which group this participant falls in — the label only; the caller counts. */
 function groupLabel(cfg, category, participant) {
   const divConfig = cfg.SCOUTNET_DIVISION_ROLES?.[category];
   if (!divConfig) return categoryLabel(cfg, category);
-  const answer = participant.questions?.[divConfig.questionId];
-  return answer
-    ? divConfig.withDiv.replace("{div}", pad(answer))
-    : divConfig.withoutDiv;
+  return divisionRoleName(
+    divConfig,
+    participant.questions?.[divConfig.questionId],
+  );
 }
 
 /**
  * Count registered against linked, per group.
  *
- * `participants` is ScoutNet's map keyed by member number, and `linkedScoutIds`
+ * `participants` is ScoutNet's map keyed by member number and `linkedScoutIds`
  * is the set of scoutids in storage — the join works directly because a scoutid
  * *is* a ScoutNet member number.
  *
- * `cfg` defaults to the live config and exists so a test can prove the claim in
- * the header: give a category a division config and it splits, take it away and
- * it collapses, with no code change either way. That property is the whole design
- * and it is not observable without being able to vary the config.
+ * `cfg` defaults to the live config so a test can vary it: the claim in the
+ * header is not observable otherwise.
  */
 export function computeAdoption({
   participants,
@@ -73,9 +65,9 @@ export function computeAdoption({
 
     if (!category) {
       // Not dropped silently: an unmapped fee means these people get no category
-      // role at all, which is worth seeing next to the coverage numbers.
+      // role at all, which belongs next to the coverage numbers.
       unmapped.push({
-        name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(),
+        name: scoutnet.fullName(p),
         memberNo,
         feeId: p.fee_id ?? null,
         linked: isLinked,
@@ -97,11 +89,7 @@ export function computeAdoption({
     const g = groups.get(label);
     g.total++;
     if (isLinked) g.linked++;
-    else
-      g.missing.push({
-        name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(),
-        memberNo,
-      });
+    else g.missing.push({ name: scoutnet.fullName(p), memberNo });
   }
 
   const categories = [...cats.values()].map((c) => {
@@ -120,7 +108,7 @@ export function computeAdoption({
   return { total, linked, categories, unmapped };
 }
 
-/** Reads the live data and computes. Kept apart so the maths is testable without a network. */
+/** Reads the live data and computes. Split out so the maths needs no network. */
 export async function runAdoption() {
   const [participants, linkedUsers] = await Promise.all([
     scoutnet.getParticipants(),
@@ -136,9 +124,8 @@ const pct = (linked, total) =>
   total === 0 ? "–" : `${Math.round((linked / total) * 100)}%`;
 
 /**
- * Plain text, for the attachment. Discord renders nothing in a file, and this
- * report is far past the 2000-character limit the moment there is more than one
- * category — 130 groups at full size.
+ * Plain text, for the attachment. Discord renders nothing in a file, and at 130
+ * groups this report is far past the 2000-character message limit.
  */
 export function formatAdoptionText(result, { includeMissing = false } = {}) {
   const lines = ["ADOPTION — LÄNKADE AV ANMÄLDA", ""];

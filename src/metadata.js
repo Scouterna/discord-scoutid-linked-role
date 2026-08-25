@@ -5,28 +5,16 @@ import * as storage from "./storage.js";
 
 /**
  * Linked Role metadata: what this app tells Discord about a user, and what the
- * `Scout` role's requirement reads.
- *
- * Lives in its own module rather than inside the OAuth callback in server.js for
- * two reasons. It has to be callable without a user present — the whole point of
- * storing Discord refresh tokens is that the push can be redone in the
- * background — and inside a route handler it was unreachable from the test
- * suites.
+ * Scout role's requirement reads. Its own module because it has to be callable
+ * with no user present — that is what the stored refresh tokens are for.
  */
 
 /**
- * What a member has to do to get the `Scout` role back, in words they can act on.
- *
- * One constant instead of five copies, because the five copies had drifted into
- * being wrong in the same way: they all said "kör `/linked-role`". That is not a
- * command — it is an HTTP route on this service — so moderators repeated it and
- * members went looking for a slash command that does not exist.
- *
- * The route alone is not the answer either. `Scout` is connection-gated, so
- * Discord grants it *only* when the user clicks Link on the role from inside
- * Discord. Opening the verification URL refreshes the metadata and the stored
- * token, which is enough for the gate's second proof — but it never grants the
- * role. Proven by elimination 2026-08-20.
+ * What a member has to do to get the Scout role back, in words they can act on.
+ * Not "run `/linked-role`" — that is an HTTP route, not a command — and not the
+ * route alone either: Scout is connection-gated, so Discord grants it *only*
+ * when the user clicks Link from inside Discord. The verification URL refreshes
+ * the metadata and token (the gate's second proof) but never grants the role.
  */
 export const RELINK_PATH = `Kanaler och roller → ${config.SCOUTNET_SCOUT_ROLE} → Länka`;
 
@@ -36,68 +24,40 @@ export const RELINK_INSTRUCTION = `länka om ${config.SCOUTNET_SCOUT_ROLE}-rolle
 /**
  * Push metadata for one linked user, using their stored Discord tokens.
  *
- * Needs no user interaction: the stored token carries `role_connections.write`,
- * and `discord.getAccessToken` refreshes it when it has expired.
+ * `verified` is the *only* key the registered schema declares (see register.js)
+ * and what the Scout requirement reads. A constant `true` is the normal shape for
+ * a linked-role criterion: the value carries no information, the **absence** does
+ * — Discord clears the metadata when the user disconnects the app, which is
+ * precisely the revocation the Scout role represents.
+ *
+ * `scoutid` is outside the schema, so Discord stores it and no requirement reads
+ * it. Kept because it makes the stored connection self-describing.
  */
 export async function updateMetadata(discordUserId) {
   const scoutId = await storage.getLinkedScoutIDUserId(discordUserId);
   if (!scoutId) throw new Error("ingen storage-länk");
 
   const discordTokens = await storage.getDiscordTokens(discordUserId);
-  if (!discordTokens) {
-    throw new Error("Discord OAuth-tokens saknas i storage");
-  }
+  if (!discordTokens) throw new Error("Discord OAuth-tokens saknas i storage");
 
-  // `verified` is the *only* key the registered schema declares (see
-  // register.js), and it is what the `Scout` Linked Role's requirement reads.
-  //
-  // A constant `true` is the normal shape for a Linked Role criterion: the value
-  // carries no information, the *absence* does. Discord clears this metadata when
-  // the user disconnects the app, and that is precisely the revocation the Scout
-  // role exists to represent.
-  //
-  // `scoutid` is outside the schema too, so Discord stores it but no requirement
-  // reads it. Kept because it costs nothing and makes the stored connection
-  // self-describing.
-  //
-  // It used to fetch the name and email from ScoutID first. That call could only
-  // ever fail: the stored ScoutID access token is dead for every link in the
-  // table (measured 2026-08-20 — 16 of 16 attempts), because nothing refreshes
-  // it. So it cost one guaranteed-failing HTTP request per user and wrote a
-  // misleading `Unexpected token '<'` line for each. Nothing read the fields
-  // either: they are not in the registered schema, and the field Discord *does*
-  // display on a connection card is `platform_username`, which is separate.
-  //
-  // The name that matters comes from ScoutNet — it is what the nickname is built
-  // from and what the audit compares against.
-  const metadata = { verified: true, scoutid: scoutId };
-
-  // The connection card's visible line. ScoutNet's name, because that is the one
-  // already on show inside the server — the bot writes it into the nickname — so
-  // it adds no exposure the guild does not have. Deliberately *not* the scoutid:
-  // that number is admin-facing today, and a connection card can be seen wider
-  // than the channels are.
-  //
-  // Wrapped, and the push happens either way. A ScoutNet outage must not cost the
-  // user their `verified` flag — the same reason the ScoutID lookup was removed
-  // from here. The cost of that choice is honest and small: a push made while
-  // ScoutNet is down clears the displayed name until the next one, because PUT
-  // replaces the whole object.
+  // The connection card's visible line. ScoutNet's name, because the bot already
+  // writes it into the nickname, so it exposes nothing the guild cannot see —
+  // deliberately not the scoutid, which is admin-facing while a connection card
+  // can be seen wider. Wrapped, and the push happens either way: an outage must
+  // not cost anyone their `verified` flag. The price is that a push made during
+  // one clears the displayed name until the next, since PUT replaces the object.
   let platformUsername = "";
   try {
-    const participant = await scoutnet.getParticipant(scoutId);
-    if (participant) {
-      platformUsername = [participant.first_name, participant.last_name]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-    }
+    platformUsername = scoutnet.fullName(
+      await scoutnet.getParticipant(scoutId),
+    );
   } catch (e) {
     console.error(
       `Kunde inte hämta ScoutNet-namn för ${scoutId}: ${e.message}`,
     );
   }
 
+  const metadata = { verified: true, scoutid: scoutId };
   await discord.pushMetadata(
     discordUserId,
     discordTokens,
@@ -108,34 +68,15 @@ export async function updateMetadata(discordUserId) {
 }
 
 /**
- * Is the user's Discord OAuth grant still alive?
+ * Is the user's Discord OAuth grant still alive? The gate's second proof, and the
+ * one that needs nothing from the user. **Three answers, not two**: `accepted`
+ * (the grant is live), `rejected` (the user revoked the app — the revocation the
+ * boundary exists to catch), `unknown` (Discord could not answer — **the caller
+ * must not act on this**, or an outage strips the whole server).
  *
- * This is the second half of the verification gate, and it exists because the
- * first half cannot be automated: Discord grants a connection-gated role only
- * through its own Link flow, so after the `Scout` role was rebuilt every member
- * would have had to click it again. A live OAuth grant proves the same thing the
- * role does — the user still has this app authorised — and it can be checked
- * without anyone doing anything.
- *
- * **Three answers, not two**, and that is the whole design:
- *
- * - `accepted` — Discord answered for this user's token. The grant is live.
- * - `rejected` — Discord refused the token (401). The user revoked the app, and
- *   that is exactly the revocation the boundary exists to catch.
- * - `unknown` — Discord could not answer: unreachable, a 5xx, a socket error.
- *   **The caller must not act on this.** Treating "could not ask" as a no is how
- *   a Discord outage would strip the whole server, which is the same mistake a
- *   swallowed ScoutNet error made in `getDesiredRoles`.
- *
- * A **missing stored token is `rejected`, not `unknown`** — deliberately the less
- * generous reading. It is tempting to argue that a missing token means *our*
- * storage lost something and the user should not pay for it. But no path leads
- * from that state to a verified one except the user re-linking, so `unknown`
- * would leave them with full access permanently and turn `/link-scoutid` into a
- * standing bypass of the boundary. It also matches what already happens: those
- * members have no `Scout` role either, so a sync strips them today.
- * `/audit-scoutid` category 3 is where they surface, and the remedy is what it
- * has always been — they open the verification URL themselves.
+ * A **missing stored token is `rejected`**, the less generous reading on purpose:
+ * no path leads from there to verified except the user re-linking, so `unknown`
+ * would grant permanent access and make `/link-scoutid` a standing bypass.
  */
 export async function verifyConnection(discordUserId) {
   const tokens = await storage.getDiscordTokens(discordUserId);
@@ -164,20 +105,11 @@ export async function verifyConnection(discordUserId) {
 }
 
 /**
- * Re-push metadata for every linked user.
+ * Re-push metadata for every linked user, from their stored Discord tokens.
  *
- * **Why this exists.** Nothing pushed `verified` until 2026-08-20, so Discord
- * holds no value for it for anyone who linked before that. Switching the `Scout`
- * role's requirement on while that is true would evaluate it as unsatisfied for
- * every one of them, revoke the role, and let the nightly sync strip them by the
- * verification gate. This closes that gap without anyone having to do anything:
- * the stored Discord tokens are enough.
- *
- * Returns `{ pushed, noTokens, failed }`, each an array of ids. **`noTokens` is
- * the number that matters** — those users cannot be repaired from here at all
- * (it is `/audit-scoutid` category 3), and they are exactly who will lose the
- * role when the requirement goes on. Knowing that list *before* flipping the
- * switch is the point of running this first.
+ * **`noTokens` is the number that matters**: those users cannot be repaired from
+ * here, and they are exactly who loses the Scout role when its requirement is
+ * switched on. Reading that list before flipping the switch is the point.
  */
 export async function pushAllMetadata({ dryRun = false } = {}) {
   const linkedUsers = await storage.getAllLinkedUsers();
@@ -186,11 +118,9 @@ export async function pushAllMetadata({ dryRun = false } = {}) {
   const failed = [];
 
   for (const { discordUserId } of linkedUsers) {
-    // Checked separately from the push so a missing token is reported as its own
-    // category rather than as a failure — the two need different remedies, and
-    // only one of them has a remedy at all.
-    const tokens = await storage.getDiscordTokens(discordUserId);
-    if (!tokens) {
+    // Its own category rather than a failure: the two need different remedies,
+    // and only one of them has a remedy at all.
+    if (!(await storage.getDiscordTokens(discordUserId))) {
       noTokens.push(discordUserId);
       continue;
     }
@@ -204,7 +134,7 @@ export async function pushAllMetadata({ dryRun = false } = {}) {
     } catch (e) {
       failed.push({ discordUserId, error: e.message });
     }
-    // Courtesy pause; the 429 retry in discord.js is the real guard.
+    // Courtesy pause; the 429 retry in http.js is the real guard.
     await new Promise((r) => setTimeout(r, 200));
   }
 
@@ -216,40 +146,38 @@ export function formatPushSummary({ pushed, noTokens, failed, dryRun, total }) {
     `${total} länkade: ${pushed.length} pushade, ${noTokens.length} utan Discord-token, ${failed.length} fel.`,
   ];
   if (noTokens.length > 0) {
-    lines.push("");
     lines.push(
+      "",
       "Utan sparade Discord-tokens — kan inte lagas härifrån. De tappar",
-    );
-    lines.push(
       `${config.SCOUTNET_SCOUT_ROLE}-rollen om deras Discord-koppling också dör, och måste då`,
+      "länka om den själva:",
+      `  ${RELINK_PATH}`,
+      "",
+      ...noTokens.map((id) => `  ${id}`),
     );
-    lines.push("länka om den själva:");
-    lines.push(`  ${RELINK_PATH}`);
-    lines.push("");
-    for (const id of noTokens) lines.push(`  ${id}`);
   }
   if (failed.length > 0) {
-    lines.push("");
-    lines.push("Fel:");
-    for (const f of failed) lines.push(`  ${f.discordUserId} — ${f.error}`);
+    lines.push(
+      "",
+      "Fel:",
+      ...failed.map((f) => `  ${f.discordUserId} — ${f.error}`),
+    );
   }
   if (dryRun) {
-    lines.push("");
-    lines.push("(dry-run: ingenting pushat — 'pushade' är vad som skulle gå)");
+    lines.push(
+      "",
+      "(dry-run: ingenting pushat — 'pushade' är vad som skulle gå)",
+    );
   }
   return lines.join("\n");
 }
 
-// --- CLI entrypoint ---
-//
-// Guarded so importing this module from server.js does not start a push.
-
-const isCli = process.argv[1]?.endsWith("metadata.js");
-
-if (isCli) {
-  const dryRun = process.argv.includes("--dry-run");
+// Guarded so importing this module from the server does not start a push.
+if (process.argv[1]?.endsWith("metadata.js")) {
   try {
-    const result = await pushAllMetadata({ dryRun });
+    const result = await pushAllMetadata({
+      dryRun: process.argv.includes("--dry-run"),
+    });
     console.log(formatPushSummary(result));
     if (result.failed.length > 0) process.exit(1);
   } catch (e) {
