@@ -22,12 +22,14 @@ Kubernetes Deployment it ships *is* called `discord-wsj27-bot`, and those two
 names are unrelated.
 
 Open this folder and **Reopen in Container**. For the multi-root view, then open
-`/workspaces/discord-scoutid-linked-role/.devcontainer/wsj27.code-workspace`
-from inside the container — the host `.code-workspace` uses paths relative to
-`~/code`, which does not exist in here.
+`/workspaces/wsj27.code-workspace` from inside the container. That file lives
+in the host `code/` directory (machine-local, deliberately not checked into any
+repo — its container paths are useless on the host) and is bind-mounted in by
+devcontainer.json.
 
-If a sibling repo is missing, Docker creates an empty directory for it and
-`post-create.sh` skips it. Nothing else breaks.
+Every mount source must exist on the host **before** the container is (re)built
+— a missing sibling repo or workspace file fails the start outright with a
+mount error (measured 2026-08-31); Docker does not create empty stand-ins.
 
 ## Tooling
 

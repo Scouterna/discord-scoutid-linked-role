@@ -28,7 +28,7 @@ fi
 # `node`. Without this, `az login` fails to write its token cache and Claude
 # Code cannot save approvals — both with a bare permission error that gives no
 # hint that ownership is the cause.
-for vol in /home/node/.azure-scouterna /home/node/.config/gh "$(dirname "$0")/../.claude"; do
+for vol in /home/node/.azure-scouterna /home/node/.config/gh "$(dirname "$0")/../.claude" /workspaces/wsj27-cms/node_modules; do
   [ -d "$vol" ] || continue
   if [ "$(stat -c %u "$vol")" != "$(id -u)" ]; then
     log "Taking ownership of $vol"
@@ -113,6 +113,34 @@ install_deps() {
 
 install_deps /workspaces/discord-scoutid-linked-role "discord-scoutid-linked-role"
 install_deps /workspaces/wsj27-discord-bot "wsj27-discord-bot"
+
+# --- wsj27-cms dependencies (pnpm) ------------------------------------------
+# The CMS pins pnpm via packageManager, and pnpm's own version manager fetches
+# that version from registry.npmjs.org no matter what .npmrc says — dead on the
+# mirror network. Install the pinned version through the mirror instead, then
+# install into the node_modules named volume (see devcontainer.json for why the
+# volume exists).
+install_cms_deps() {
+  local dir=/workspaces/wsj27-cms
+  [ -f "$dir/package.json" ] || { warn "wsj27-cms not mounted, skipping"; return; }
+
+  log "wsj27-cms: dependencies (pnpm)"
+  local registry pinned
+  registry="$(cd "$dir" && npm config get registry)"
+  if ! (cd "$dir" && npm ping >/dev/null 2>&1); then
+    warn "registry $registry unreachable — leaving node_modules untouched."
+    return
+  fi
+
+  pinned="$(node -e "console.log((require('$dir/package.json').packageManager || 'pnpm').split('+')[0])")"
+  npm install -g --no-audit --no-fund --registry="$registry" "$pinned" >/dev/null 2>&1 \
+    || { warn "wsj27-cms: could not install $pinned from $registry"; return; }
+
+  (cd "$dir" && pnpm install --frozen-lockfile) \
+    && ok "wsj27-cms: all dependencies present ($registry)" \
+    || warn "wsj27-cms: pnpm install failed"
+}
+install_cms_deps
 
 # --- Claude Code -----------------------------------------------------------
 # Not ghcr.io/anthropics/devcontainer-features/claude-code. That feature runs

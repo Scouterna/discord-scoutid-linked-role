@@ -28,6 +28,24 @@
   "mounts": [
     "source=${localWorkspaceFolder}/../wsj27-infra,target=/workspaces/wsj27-infra,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/../wsj27-discord-bot,target=/workspaces/wsj27-discord-bot,type=bind,consistency=cached",
+    // Clone Scouterna/wsj27-cms next to the other repos on the host before
+    // rebuilding — a missing mount source fails the container start outright
+    // (measured 2026-08-31; it does not auto-create or mount empty).
+    "source=${localWorkspaceFolder}/../wsj27-cms,target=/workspaces/wsj27-cms,type=bind,consistency=cached",
+
+    // The multi-root workspace file lives in the host `code/` directory —
+    // machine-local, not version-controlled with any one repo — and is bound
+    // in so it can be opened from inside the container. Like the repo mounts,
+    // a missing source fails the start: create the file before rebuilding.
+    "source=${localWorkspaceFolder}/../wsj27.code-workspace,target=/workspaces/wsj27.code-workspace,type=bind,consistency=cached",
+
+    // wsj27-cms's node_modules gets a named volume shadowing the 9p mount:
+    // pnpm imports every package with an atomic tmp-dir rename, and that
+    // rename fails intermittently with EACCES against Windows file locks
+    // (measured 2026-08-31, two runs, different packages). npm survives the
+    // same mount, so only the pnpm repo needs this. Root-owned at creation —
+    // post-create.sh takes ownership.
+    "source=wsj27-cms-node-modules,target=/workspaces/wsj27-cms/node_modules,type=volume",
 
     // Kubeconfigs are portable YAML, so the host's are reused as-is.
     // HOME/USERPROFILE are concatenated because exactly one is set per
