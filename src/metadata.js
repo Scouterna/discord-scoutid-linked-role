@@ -77,8 +77,17 @@ export async function updateMetadata(discordUserId) {
  * A **missing stored token is `rejected`**, the less generous reading on purpose:
  * no path leads from there to verified except the user re-linking, so `unknown`
  * would grant permanent access and make `/link-scoutid` a standing bypass.
+ *
+ * `readOnly` is the audit's mode: nothing may be refreshed, because a refresh
+ * rotates and re-stores the token pair — a write. A 401 is then ambiguous (an
+ * expired access token and a revoked grant answer alike, and only a refresh can
+ * tell them apart), so it comes back `unknown` instead of `rejected`. The full
+ * probe has already spent the refresh token on a 401 before judging it.
  */
-export async function verifyConnection(discordUserId) {
+export async function verifyConnection(
+  discordUserId,
+  { readOnly = false } = {},
+) {
   const tokens = await storage.getDiscordTokens(discordUserId);
   if (!tokens) {
     return { status: "rejected", detail: "inget sparat Discord-token" };
@@ -88,8 +97,16 @@ export async function verifyConnection(discordUserId) {
     const { ok, status } = await discord.getRoleConnection(
       discordUserId,
       tokens,
+      { readOnly },
     );
     if (ok) return { status: "accepted", detail: `HTTP ${status}` };
+    if (status === 401 && readOnly) {
+      return {
+        status: "unknown",
+        detail:
+          "HTTP 401 — kan vara ett utgånget access-token; bara den fulla proben kan avgöra",
+      };
+    }
     if (status === 401 || status === 403) {
       return { status: "rejected", detail: `HTTP ${status}` };
     }

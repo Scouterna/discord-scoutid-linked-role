@@ -254,6 +254,33 @@ test("losing the Scout role gets its own unmistakable line", async () => {
   assert.match(sent[0].content, /Länka/);
 });
 
+test("a strip line carries the probe's answer when there is one", async () => {
+  // "Which no did the gate act on" is a moment in Discord that nothing else
+  // records — without it in this channel, a strip and a false strip read the
+  // same afterwards. A strip that never probed (a Scout role with no link
+  // behind it) has no answer to carry, and the line must not pretend it does.
+  eventlog.logSync({
+    discordUserId: "1",
+    callerId: "1",
+    result: {
+      added: ["Overifierad"],
+      removed: ["wsj-event"],
+      stripReason: "HTTP 401",
+    },
+  });
+  eventlog.logSync({
+    discordUserId: "2",
+    callerId: "2",
+    result: { added: ["Overifierad"], removed: [] },
+  });
+  const { posts: sent } = await drain();
+  assert.match(sent[0].content, /kopplingsproben sa nej \(HTTP 401\)/);
+  const secondLine = sent[0].content
+    .split("\n")
+    .find((l) => l.includes("<@2>"));
+  assert.ok(!secondLine.includes("kopplingsproben"));
+});
+
 test("a whole-guild resync is one summary plus only the changed users", async () => {
   const results = [
     { discordUserId: "1", added: ["CMT"], removed: [] },

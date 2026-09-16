@@ -31,6 +31,13 @@ let pushes = [];
 let scoutIDCalls = 0;
 /** What Discord answers when the role-connection is *read* back. */
 let connectionStatus = 200;
+/** Access tokens Discord has already expired, whatever the stored expiry says. */
+let staleAccessTokens = new Set();
+/** How many reads went out with a stale token — the margin cases pin zero. */
+let staleReads = 0;
+/** What a refresh yields; null is Discord saying the grant is gone. */
+let refreshedTokens = null;
+let refreshCalls = 0;
 /** ScoutNet's participant list, and whether the fetch fails. */
 let participants = {};
 let scoutNetDown = false;
@@ -42,6 +49,18 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/role-connection")) {
     if ((opts.method ?? "GET") === "GET") {
       // The liveness probe. A read, so it has no effect on what it measures.
+      // A stale token answers 401 regardless of `connectionStatus`: Discord
+      // judges the token it was handed, not the one the store believes in.
+      const token = (opts.headers?.Authorization ?? "").replace("Bearer ", "");
+      if (staleAccessTokens.has(token)) {
+        staleReads++;
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({}),
+          text: async () => "{}",
+        };
+      }
       return {
         ok: connectionStatus === 200,
         status: connectionStatus,
@@ -55,6 +74,8 @@ globalThis.fetch = async (url, opts = {}) => {
 
   if (u.includes("oauth2/token")) {
     // A refresh attempt. The body is how Discord says the grant is gone.
+    refreshCalls++;
+    if (refreshedTokens) return ok(refreshedTokens);
     return {
       ok: false,
       status: 400,
@@ -194,8 +215,9 @@ test("a live grant is accepted", async () => {
 });
 
 test("a revoked grant is rejected", async () => {
-  // 401 is Discord saying the user removed the app. That *is* the revocation the
-  // Scout role exists to represent, so acting on it is the point.
+  // 401 is Discord saying no — but only after the refresh token has been asked
+  // too: a revoked app kills both, so here the retry also fails, and *that* is
+  // the revocation the Scout role exists to represent.
   connectionStatus = 401;
   await link("v2", "902");
   assert.equal((await metadata.verifyConnection("v2")).status, "rejected");
@@ -238,6 +260,91 @@ test("no stored token is rejected, deliberately the less generous reading", asyn
   const r = await metadata.verifyConnection("v4");
   assert.equal(r.status, "rejected");
   assert.match(r.detail, /inget sparat/);
+});
+
+test("an access token Discord already expired is not a revocation", async () => {
+  // The flap: the probe refreshes tokens at 04:10 and probes them at 04:10
+  // seven days later, and the stored expiry — stamped after the round trip —
+  // sits seconds later than Discord's. A 401 in that gap is a stale cache, not
+  // a revoked grant. The refresh token answers for the grant: alive here, so
+  // the probe must refresh, read again, and accept — never strip.
+  connectionStatus = 200;
+  staleAccessTokens = new Set(["at-stale"]);
+  refreshedTokens = {
+    access_token: "at-fresh",
+    refresh_token: "rt-2",
+    expires_in: 604800,
+  };
+  await storage.setLinkedScoutIDUserId("v6", "906");
+  await storage.storeDiscordTokens("v6", {
+    access_token: "at-stale",
+    refresh_token: "rt-1",
+    expires_at: Date.now() + 3600_000, // the store still believes in it
+  });
+
+  const r = await metadata.verifyConnection("v6");
+
+  assert.equal(r.status, "accepted");
+  // Discord rotates on refresh, so the new pair must be what is stored now —
+  // the old refresh token is dead the moment the refresh succeeded.
+  const stored = await storage.getDiscordTokens("v6");
+  assert.equal(stored.access_token, "at-fresh");
+  assert.equal(stored.refresh_token, "rt-2");
+});
+
+test("a token inside the refresh margin is refreshed before it is used", async () => {
+  // What keeps the weekly 04:10 collision from happening at all: a token this
+  // close to its stored expiry is already past Discord's, so it never goes out.
+  connectionStatus = 200;
+  staleReads = 0;
+  staleAccessTokens = new Set(["at-old"]);
+  refreshedTokens = {
+    access_token: "at-new",
+    refresh_token: "rt-3",
+    expires_in: 604800,
+  };
+  await storage.setLinkedScoutIDUserId("v7", "907");
+  await storage.storeDiscordTokens("v7", {
+    access_token: "at-old",
+    refresh_token: "rt-old",
+    expires_at: Date.now() + 30_000, // inside the 60 s margin
+  });
+
+  const r = await metadata.verifyConnection("v7");
+
+  assert.equal(r.status, "accepted");
+  assert.equal(staleReads, 0, "the stale token must never reach Discord");
+});
+
+test("the read-only probe never refreshes, and a 401 from it is unknown", async () => {
+  // The audit's mode. A refresh rotates and re-stores the pair — a write — so
+  // the audit may not spend it, and without it a 401 cannot be told apart from
+  // a revocation. `unknown` is the honest answer, and the audit already has
+  // words for it.
+  connectionStatus = 200;
+  refreshCalls = 0;
+  staleAccessTokens = new Set(["at-stale-ro"]);
+  refreshedTokens = {
+    access_token: "at-never",
+    refresh_token: "rt-never",
+    expires_in: 604800,
+  };
+  await storage.setLinkedScoutIDUserId("v8", "908");
+  await storage.storeDiscordTokens("v8", {
+    access_token: "at-stale-ro",
+    refresh_token: "rt-ro",
+    expires_at: Date.now() - 1000, // expired — the full probe would refresh here
+  });
+
+  const r = await metadata.verifyConnection("v8", { readOnly: true });
+
+  assert.equal(r.status, "unknown");
+  assert.equal(refreshCalls, 0, "read-only must not touch the token endpoint");
+  const stored = await storage.getDiscordTokens("v8");
+  assert.equal(stored.refresh_token, "rt-ro", "nothing may be re-stored");
+
+  staleAccessTokens = new Set();
+  refreshedTokens = null;
 });
 
 // --- platform_username: the only part of the push Discord ever displays ---

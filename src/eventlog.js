@@ -104,6 +104,17 @@ const wasStripped = (result) =>
   Boolean(result?.added?.includes(UNVERIFIED_ROLE));
 
 /**
+ * Which no the gate acted on — `stripReason` carries the probe's answer, and it
+ * is absent for a strip that never probed (a Scout role with no link behind it).
+ * Without it a strip cannot be told apart from a false one afterwards: the
+ * probe's answer is a moment in Discord that nothing else records.
+ */
+const strippedBecause = (result) =>
+  result?.stripReason
+    ? ` och kopplingsproben sa nej (${result.stripReason})`
+    : "";
+
+/**
  * A user completed the full `/linked-role` OAuth flow. `reason` says *why* when
  * there were no roles to grant — see `roles.explainMissingRoles`. `metadataFailed`
  * earns `⚠️` over `✅`: the link is stored and roles handed out, but the Scout
@@ -159,7 +170,7 @@ export function logSync({ discordUserId, callerId, result }) {
   // removal in the diff, so say so explicitly.
   if (wasStripped(result)) {
     logEvent(
-      `🔒 <@${discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen — roller strippade, ${UNVERIFIED_ROLE} satt (måste ${RELINK_INSTRUCTION})`,
+      `🔒 <@${discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(result)} — roller strippade, ${UNVERIFIED_ROLE} satt (måste ${RELINK_INSTRUCTION})`,
     );
     return;
   }
@@ -199,7 +210,7 @@ function logSyncDetail(changed, errors) {
   for (const r of changed) {
     if (wasStripped(r)) {
       logEvent(
-        `🔒 <@${r.discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen — roller strippade, ${UNVERIFIED_ROLE} satt`,
+        `🔒 <@${r.discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(r)} — roller strippade, ${UNVERIFIED_ROLE} satt`,
       );
     } else {
       logEvent(`   ↳ <@${r.discordUserId}> — ${describeChanges(r)}`);

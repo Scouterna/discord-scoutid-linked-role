@@ -246,6 +246,7 @@ test("roles outside the bot's configuration are left alone", async () => {
     removed: [],
     nickname: null,
     note: null,
+    stripReason: null,
   });
 });
 
@@ -274,6 +275,10 @@ test("losing the Scout role strips every managed role and sets Overifierad", asy
     "WSJ-event",
   ]);
   assert.ok(result.added.includes("Overifierad"));
+  // The strip must say which no it acted on — it is the only record of a state
+  // in Discord that nothing else keeps, and the difference between "the user
+  // revoked the app" and "the probe misjudged a token" lives in this string.
+  assert.match(result.stripReason, /inget sparat Discord-token/);
 
   assert.equal(
     await storage.getLinkedScoutIDUserId("u3"),

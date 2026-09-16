@@ -133,8 +133,12 @@ const CHECKS = [
     /**
      * The verification gate takes two proofs, so a missing role is only half the
      * question — asking half of it reports members who are in no danger at all.
-     * `verifyConnection` is a GET, so the audit stays read-only, and it only runs
-     * for members who lack the role.
+     * The probe runs `readOnly`, which is what actually keeps the audit from
+     * writing: the full probe refreshes an expiring token, and a refresh rotates
+     * and re-stores the pair. The price is that a 401 comes back `unknown`
+     * rather than `rejected` — only a refresh can tell an expired access token
+     * from a revoked grant, and the nightly sync is the one that gets to spend
+     * it. It only runs for members who lack the role.
      */
     run: async ({ linkedUsers, memberMap, scoutRole }) => {
       const items = [];
@@ -143,7 +147,9 @@ const CHECKS = [
         const member = memberMap.get(u.discordUserId);
         if (!member || member.roles.includes(scoutRole.id)) continue;
 
-        const connection = await verifyConnection(u.discordUserId);
+        const connection = await verifyConnection(u.discordUserId, {
+          readOnly: true,
+        });
         if (connection.status === "accepted") {
           carried++;
           continue;

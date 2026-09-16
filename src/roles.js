@@ -268,7 +268,9 @@ async function checkVerified(discordUserId, roleMap, currentRoleIds) {
       error: `Kunde inte avgöra verifiering, inget ändrades: ${connection.detail}`,
     };
   }
-  return { ok: false };
+  // The detail rides along so the strip says *which* no it acted on — the pod
+  // log and the event log are the only places the answer survives.
+  return { ok: false, detail: connection.detail };
 }
 
 /**
@@ -341,7 +343,7 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
   // not an event, and logging it every night describes an action not taken.
   if (!verified.ok && changedAnything({ added, removed, nickname })) {
     console.log(
-      `User ${discordUserId} (scoutid=${scoutId}) has neither proof — access stripped`,
+      `User ${discordUserId} (scoutid=${scoutId}) has neither proof (${verified.detail}) — access stripped`,
     );
   }
 
@@ -355,7 +357,13 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
       ? await explainMissingRoles(scoutId)
       : null;
 
-  return { added, removed, nickname, note };
+  return {
+    added,
+    removed,
+    nickname,
+    note,
+    stripReason: verified.ok ? null : verified.detail,
+  };
 }
 
 /**

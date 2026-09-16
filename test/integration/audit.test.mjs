@@ -209,6 +209,10 @@ test("a link whose Scout role fell off is reported", async () => {
 
   const result = await audit.runAudit(GUILD);
   assert.equal(counts(result).linked_no_scout_role, 1);
+  // The probe runs read-only here: the full probe answers a 401 by spending the
+  // refresh token, which rotates and re-stores the pair — a write the audit may
+  // never make. This is the case where it would happen, so pin it where it bites.
+  assert.deepEqual(mutations, [], "the probe must not refresh from the audit");
 });
 
 test("a missing Scout role with a live connection is not a finding", async () => {

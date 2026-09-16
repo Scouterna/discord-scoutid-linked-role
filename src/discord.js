@@ -58,21 +58,39 @@ export function getOAuthTokens(code) {
 }
 
 /**
- * The user's access token, refreshed and re-stored if it has expired.
+ * Refresh this much before the stored expiry. The margin exists because the
+ * stored `expires_at` is stamped *after* the network round trip, so it always
+ * sits a little later than Discord's real expiry — and the nightly probe both
+ * refreshes a token at 04:10 and probes it at 04:10 seven days later, landing
+ * inside exactly that skew. A token this close to its stored expiry is treated
+ * as already expired rather than sent to an API that agrees.
+ */
+const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+
+/** Trade the refresh token for a fresh pair, and re-store it. Discord rotates
+ * the refresh token on every use, so the store is not optional: the old one is
+ * dead the moment this call succeeds. */
+async function refreshAccessToken(userId, tokens) {
+  const fresh = await tokenRequest("Error refreshing access token", {
+    grant_type: "refresh_token",
+    refresh_token: tokens.refresh_token,
+  });
+  fresh.expires_at = Date.now() + fresh.expires_in * 1000;
+  await storage.storeDiscordTokens(userId, fresh);
+  return fresh.access_token;
+}
+
+/**
+ * The user's access token, refreshed and re-stored when its expiry is near.
  *
  * The comparison is deliberately `>` on the expiry rather than `<=` on its
- * negation: a stored token with no `expires_at` compares false either way, and
- * this direction then uses the token instead of spending a refresh on it.
+ * negation: a stored token with no `expires_at` makes the subtraction NaN,
+ * which compares false either way, and this direction then uses the token
+ * instead of spending a refresh on it.
  */
 export async function getAccessToken(userId, tokens) {
-  if (Date.now() > tokens.expires_at) {
-    const fresh = await tokenRequest("Error refreshing access token", {
-      grant_type: "refresh_token",
-      refresh_token: tokens.refresh_token,
-    });
-    fresh.expires_at = Date.now() + fresh.expires_in * 1000;
-    await storage.storeDiscordTokens(userId, fresh);
-    return fresh.access_token;
+  if (Date.now() > tokens.expires_at - TOKEN_EXPIRY_MARGIN_MS) {
+    return refreshAccessToken(userId, tokens);
   }
   return tokens.access_token;
 }
@@ -121,16 +139,41 @@ export async function pushMetadata(userId, tokens, metadata, platformUsername) {
 
 /**
  * Read back the role-connection Discord holds for a user, with *their* token —
- * the liveness probe for their OAuth grant, so it must be a read. The status
- * comes back unjudged: 200 is a live grant, 401 a revoked one, and anything
- * else is *not* a no.
+ * the liveness probe for their OAuth grant. The status comes back unjudged:
+ * 200 is a live grant, and by the time a 401 is returned the refresh token has
+ * already been asked and answered, so it is a real no.
+ *
+ * A 401 on the *stored* access token alone is not: the token is a cache of the
+ * grant, and Discord expires the cache on its own clock, slightly ahead of the
+ * stored expiry. The refresh token is the grant itself, so it settles the
+ * question — a live one yields a fresh token for a second read, a dead one
+ * throws `invalid_grant` to the caller.
+ *
+ * `readOnly` skips every refresh, and thereby every write: a refresh rotates
+ * and re-stores the pair. The audit runs in this mode, so a 401 from it is
+ * ambiguous — the caller must not judge it.
  */
-export async function getRoleConnection(userId, tokens) {
+export async function getRoleConnection(
+  userId,
+  tokens,
+  { readOnly = false } = {},
+) {
+  const read = (accessToken) =>
+    request(roleConnectionUrl(), {
+      parse: "raw",
+      headers: bearer(accessToken),
+    });
+
+  if (readOnly) {
+    const response = await read(tokens.access_token);
+    return { status: response.status, ok: response.ok };
+  }
+
   const accessToken = await getAccessToken(userId, tokens);
-  const response = await request(roleConnectionUrl(), {
-    parse: "raw",
-    headers: bearer(accessToken),
-  });
+  let response = await read(accessToken);
+  if (response.status === 401 && accessToken === tokens.access_token) {
+    response = await read(await refreshAccessToken(userId, tokens));
+  }
   return { status: response.status, ok: response.ok };
 }
 
