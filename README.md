@@ -66,7 +66,7 @@ The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 | Fee ID                     | Category         | Division question | With division       | Without division     | Flat role | Nickname suffix |
 | -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------- | --------------- |
 | 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | —         | `(12)`          |
-| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `IST`     | `(IST-05)`      |
+| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `IST`     | `(IST05)`       |
 | 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Ledare`  | `(AL12)`        |
 | 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | —         | `(CMT)`         |
 

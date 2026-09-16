@@ -64,4 +64,4 @@ data:
   # rad: den saknade markören *är* det som gör att länkfiltret träffar dem.
   # `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
   SCOUTNET_CATEGORY_ROLES: ledare:Ledare,ist:IST
-  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT

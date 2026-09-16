@@ -31,7 +31,7 @@ process.env.SCOUTNET_DIVISION_ROLES =
   "ledare:107592:Ledare-{div}:Ledare-Väntande";
 process.env.SCOUTNET_CATEGORY_ROLES = "ledare:Ledare,ist:IST";
 process.env.SCOUTNET_NICKNAME_SUFFIXES =
-  "deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT";
+  "deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT";
 
 const storage = await import("../../src/storage.js");
 const roles = await import("../../src/roles.js");

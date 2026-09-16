@@ -536,7 +536,7 @@ SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:
 SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
-SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST-{div}:IST,cmt::CMT
+SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT
 ```
 
 ## Nattlig rollsynk — [src/refresh.js](src/refresh.js)
