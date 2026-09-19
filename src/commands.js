@@ -34,6 +34,62 @@ const option = (interaction, name) =>
 
 const flag = (interaction, name) => option(interaction, name) === true;
 
+// A Discord snowflake as the client renders it: 17-20 digits, no formatting.
+const SNOWFLAKE = /^\d{17,20}$/;
+
+/**
+ * The person a command acts on, from `person` (the picker) or `personid` (a raw
+ * id typed by hand).
+ *
+ * `personid` exists because the picker cannot reach everyone: a member who has
+ * not accepted the rules gate is `pending`, and Discord hides those from every
+ * user picker and mention autocomplete. They are in the guild, they can hold a
+ * link, roles and a nickname — so the one group an admin most often needs to
+ * repair is the one the picker refuses to offer.
+ *
+ * Returns `{ id }` or `{ error }`; the caller replies with the error as-is.
+ */
+export function targetUser(interaction, { fallback = null, missing } = {}) {
+  const picked = option(interaction, "person");
+  const typed = option(interaction, "personid");
+
+  if (picked && typed != null)
+    return {
+      error:
+        "Ange antingen `person` eller `personid`, inte båda — de kan peka på olika personer.",
+    };
+
+  if (typed != null) {
+    const id = String(typed).trim();
+    return SNOWFLAKE.test(id)
+      ? { id }
+      : {
+          error: `Ogiltigt \`personid\`: \`${id}\` — ett Discord user-id är 17–20 siffror. Högerklicka på personen och välj *Kopiera användar-ID* (kräver utvecklarläge).`,
+        };
+  }
+
+  if (picked) return { id: picked };
+  return fallback ? { id: fallback } : { error: missing };
+}
+
+/**
+ * A clause naming the rules gate when the member has not passed it. Such a
+ * member takes roles and a nickname normally and still sees no channel at all,
+ * so a sync that worked and a sync that did nothing look identical from the
+ * outside — this is what separates them. Never throws: it annotates a reply
+ * that is already correct without it.
+ */
+async function pendingNote(guildId, userId) {
+  try {
+    const member = await discord.getGuildMember(guildId, userId);
+    return member?.pending
+      ? " ⏳ Hen har inte accepterat serverns regler än, och ser därför inga kanaler oavsett roller."
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 const reply = (token, content) =>
   discord.editInteractionResponse(token, content);
 
@@ -109,7 +165,6 @@ const dryRunPrefix = (dryRun) =>
  */
 const refresh = handler(async (interaction, { token, guildId, callerId }) => {
   const dryRun = flag(interaction, "dryrun");
-  const person = option(interaction, "person");
 
   if (flag(interaction, "alla")) {
     if (!isAdmin(interaction)) {
@@ -120,7 +175,13 @@ const refresh = handler(async (interaction, { token, guildId, callerId }) => {
     return;
   }
 
-  const targetUserId = person ?? callerId;
+  const { id: targetUserId, error } = targetUser(interaction, {
+    fallback: callerId,
+  });
+  if (error) {
+    await reply(token, error);
+    return;
+  }
   if (targetUserId !== callerId && !isAdmin(interaction)) {
     await reply(token, "Du måste vara admin för att uppdatera andra.");
     return;
@@ -138,7 +199,8 @@ const refresh = handler(async (interaction, { token, guildId, callerId }) => {
     token,
     result.error
       ? `<@${targetUserId}>: ${result.error}`
-      : `${dryRunPrefix(dryRun)}<@${targetUserId}>: ${formatChanges(result)}${noteFor(result)}`,
+      : `${dryRunPrefix(dryRun)}<@${targetUserId}>: ${formatChanges(result)}${noteFor(result)}` +
+          (await pendingNote(guildId, targetUserId)),
   );
 });
 
@@ -196,14 +258,12 @@ async function refreshEveryone(token, guildId, callerId, dryRun) {
 /** Everything the bot knows about one person, from all three sources. */
 const status = handler(
   async (interaction, { token, guildId }) => {
-    const targetUserId = option(interaction, "person");
-    // Discord enforces `person` as required, so this only catches a malformed
-    // interaction — but the server-wide question has its own commands.
-    if (!targetUserId) {
-      await reply(
-        token,
-        "Ange `person`. För serverbilden: `/audit-scoutid` (avvikelser) eller `/adoption-scoutid` (hur många som länkat sig).",
-      );
+    const { id: targetUserId, error } = targetUser(interaction, {
+      missing:
+        "Ange `person`, eller `personid` för den som inte syns i listan. För serverbilden: `/audit-scoutid` (avvikelser) eller `/adoption-scoutid` (hur många som länkat sig).",
+    });
+    if (error) {
+      await reply(token, error);
       return;
     }
 
@@ -241,6 +301,12 @@ const status = handler(
           ? `🎭 Nuvarande roller: ${names.join(", ")}`
           : "🎭 Nuvarande roller: (inga)",
       );
+      // Worth its own line rather than a footnote: it explains both why the
+      // person sees nothing and why the picker would not offer them.
+      if (member.pending)
+        lines.push(
+          "⏳ Har inte accepterat serverns regler — ser inga kanaler oavsett roller, och syns inte i personväljaren",
+        );
     } catch (e) {
       lines.push(`🎭 Nuvarande roller: Fel — ${e.message}`);
     }
@@ -364,7 +430,14 @@ const scan = handler(
  */
 const link = handler(
   async (interaction, { token, guildId, callerId }) => {
-    const targetUserId = option(interaction, "person");
+    const { id: targetUserId, error } = targetUser(interaction, {
+      missing:
+        "Ange `person`, eller `personid` för den som inte syns i listan (den som inte accepterat serverns regler göms av Discord i personväljaren).",
+    });
+    if (error) {
+      await reply(token, error);
+      return;
+    }
     const scoutIdInput = String(option(interaction, "scoutid")).trim();
 
     if (!/^\d+$/.test(scoutIdInput)) {
@@ -436,7 +509,8 @@ const link = handler(
 
     await reply(
       token,
-      `<@${targetUserId}>: Länkad till scoutid \`${scoutIdInput}\`. ${parts.join(" ")}`,
+      `<@${targetUserId}>: Länkad till scoutid \`${scoutIdInput}\`. ${parts.join(" ")}` +
+        (await pendingNote(guildId, targetUserId)),
     );
   },
   { admin: true },

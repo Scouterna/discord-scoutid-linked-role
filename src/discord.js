@@ -381,6 +381,12 @@ const ADMIN_ONLY = "8"; // default_member_permissions: ADMINISTRATOR
  * Every command this bot answers. `dryrun` and not `torrkor` throughout: the
  * option name is an interface admins type, and it is the same word in every CLI
  * they have used. Descriptions stay Swedish — those are prose.
+ *
+ * Every command that acts on one person takes `personid` beside `person`.
+ * Discord hides a member who has not accepted the rules gate from every user
+ * picker, and that member can still hold roles, a link and a nickname — so the
+ * picker alone leaves an admin with no way to reach exactly the people most
+ * likely to need fixing.
  */
 export const COMMANDS = [
   {
@@ -391,6 +397,12 @@ export const COMMANDS = [
         name: "person",
         description: "Person att uppdatera (admin krävs för andra)",
         type: USER,
+      },
+      {
+        name: "personid",
+        description:
+          "Discord user-id — för den som inte syns i listan (ej accepterat reglerna)",
+        type: STRING,
       },
       {
         name: "alla",
@@ -410,12 +422,19 @@ export const COMMANDS = [
     default_member_permissions: ADMIN_ONLY,
     options: [
       {
-        // Required, so this command answers only "what about this person".
-        // The server-wide picture is `/audit-scoutid` and `/adoption-scoutid`.
+        // One of `person`/`personid` is required, enforced in the handler
+        // since Discord cannot express "either". This command answers only
+        // "what about this person" — the server-wide picture is
+        // `/audit-scoutid` and `/adoption-scoutid`.
         name: "person",
         description: "Person att visa status för",
         type: USER,
-        required: true,
+      },
+      {
+        name: "personid",
+        description:
+          "Discord user-id — för den som inte syns i listan (ej accepterat reglerna)",
+        type: STRING,
       },
     ],
   },
@@ -460,17 +479,25 @@ export const COMMANDS = [
       "Länka manuellt en Discord-användare till ett ScoutNet member_no (admin)",
     default_member_permissions: ADMIN_ONLY,
     options: [
-      {
-        name: "person",
-        description: "Discord-användare att länka",
-        type: USER,
-        required: true,
-      },
+      // `scoutid` leads because Discord rejects a required option placed after
+      // an optional one, and neither person option can be required now that
+      // either one will do.
       {
         name: "scoutid",
         description: "ScoutNet member_no",
         type: STRING,
         required: true,
+      },
+      {
+        name: "person",
+        description: "Discord-användare att länka",
+        type: USER,
+      },
+      {
+        name: "personid",
+        description:
+          "Discord user-id — för den som inte syns i listan (ej accepterat reglerna)",
+        type: STRING,
       },
     ],
   },

@@ -942,8 +942,8 @@ bygga om tretton kategorier för ett tal.
 
 **Ett kommando per fråga.** De växte ihop, och två av dem svarade på samma sak:
 `/status-scoutid` utan argument körde `runAudit()` och skrev dess sammanfattning —
-samma beräkning över samma data som `/audit-scoutid`, bara kortare. `person` är
-därför obligatoriskt sedan 2026-08-21.
+samma beräkning över samma data som `/audit-scoutid`, bara kortare. En person
+måste därför anges sedan 2026-08-21.
 
 | Kommando | Verb | Frågan det svarar på |
 | --- | --- | --- |
@@ -952,6 +952,38 @@ därför obligatoriskt sedan 2026-08-21.
 | `/adoption-scoutid` | granskar | hur många av de anmälda som har länkat sig, per grupp |
 | `/status-scoutid person:` | granskar | allt boten vet om en person |
 | `/scan-scoutid` | **ändrar** | vad som hänt sedan förra körningen (medlemshändelser) |
+
+#### `personid:` — vägen förbi personväljaren
+
+`/refresh-scoutid`, `/status-scoutid` och `/link-scoutid` tar **`personid:`**
+(ett rått Discord user-id) vid sidan av `person:`. Skälet är att väljaren inte
+når alla: servern har regelgrind (`MEMBER_VERIFICATION_GATE_ENABLED`), och en
+medlem som inte accepterat reglerna står som `pending` — Discord gömmer den ur
+varje personväljare och ur mention-autocomplete. Hen finns i guilden, kan bära
+länk, roller och smeknamn, och är alltså precis den admin oftast behöver laga.
+2026-09-19 var **30 av 139 medlemmar** pending, och en felaktig länkning gick
+inte att rätta eftersom personen inte gick att välja.
+
+Tre egenskaper att hålla:
+
+- **Både `person:` och `personid:` satta är ett fel, inte ett val.** De kan peka
+  på olika personer, och att låta den ena vinna hade ändrat fel användare
+  ungefär varannan gång.
+- **`scoutid:` står först i `/link-scoutid`.** Discord avvisar ett obligatoriskt
+  argument placerat efter ett valfritt, och ingen av de två person-varianterna
+  kan vara obligatorisk när endera duger.
+- **Svaren nämner regelgrinden när den är satt.** En pending medlem tar emot
+  roller och smeknamn precis som alla andra och ser ändå ingen kanal, så en
+  lyckad synk och en verkningslös synk ser likadana ut utifrån. `pendingNote`
+  är vad som skiljer dem, och den kastar aldrig — den kommenterar ett svar som
+  är korrekt utan den.
+
+Definitionerna ligger i [src/discord.js](src/discord.js), så **en ändring här
+kräver att kommandona registreras om** — koden ensam räcker inte:
+
+```bash
+docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
+```
 
 Kvar att röja: auditens rolldrift-kategori återimplementerar dry-run-synken, så två
 kodvägar svarar på "vad skulle ändras" och kan säga olika saker — auditen hoppar
@@ -963,7 +995,8 @@ dry-runen.
 - `/refresh-scoutid` — synka roller. `person:` en användare, `alla:true` hela
   servern (admin), `dryrun:true` visar utan att ändra. Slash-kommandonas flaggor
   heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
-- `/status-scoutid person:` — detaljerad status för en användare. `person` krävs.
+- `/status-scoutid person:` — detaljerad status för en användare. Antingen
+  `person:` eller `personid:` krävs.
 - `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin).
   `saknas:true` listar namnen.
 

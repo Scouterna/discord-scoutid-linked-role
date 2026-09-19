@@ -231,6 +231,46 @@ for (const name of [
   });
 }
 
+/**
+ * The `personid` fallback, over the real dispatch path. These three replies all
+ * land before any storage or Discord call, which is what makes them assertable
+ * here — and they are the ones an admin meets when reaching for a member the
+ * picker will not show.
+ */
+for (const [what, options, expected] of [
+  [
+    "a malformed personid",
+    [
+      { name: "personid", value: "truls" },
+      { name: "scoutid", value: "3198609" },
+    ],
+    /Ogiltigt `personid`/,
+  ],
+  [
+    "both person and personid",
+    [
+      { name: "person", value: "111111111111111111" },
+      { name: "personid", value: "222222222222222222" },
+      { name: "scoutid", value: "3198609" },
+    ],
+    /inte b\u00e5da/,
+  ],
+  [
+    "neither person nor personid",
+    [{ name: "scoutid", value: "3198609" }],
+    /personid/,
+  ],
+]) {
+  test(`/link-scoutid explains ${what}`, async () => {
+    const token = `tok-personid-${what.replace(/\s+/g, "-")}`;
+    await post(command("link-scoutid", { options, token }));
+    const replies = await replyFor(token);
+
+    assert.equal(replies.length, 1);
+    assert.match(replies[0].content, expected);
+  });
+}
+
 test("the interactions route reads the raw body, not a parsed one", async () => {
   // The signature covers the exact bytes Discord sent. If a JSON body parser
   // ever ran first, re-serialising would change them and every request would
