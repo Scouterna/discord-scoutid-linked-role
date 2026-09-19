@@ -28,8 +28,8 @@ const enabled = () => Boolean(config.LOG_CHANNEL_ID);
 const stamp = () => `<t:${Math.floor(Date.now() / 1000)}:T>`;
 
 /**
- * Buffer one line. Returns immediately; callers never await this. Include
- * `<@id>` for the person it is about — clickable, and the ping is suppressed.
+ * Buffer one line. Returns immediately; callers never await this. Name the
+ * person with `who()` rather than a mention — see there for why.
  */
 export function logEvent(line) {
   if (!enabled()) return;
@@ -90,6 +90,20 @@ export async function flushEventLog() {
 
 // --- Formatters ---
 
+/**
+ * How a person is written in a log line: `**Namn**`, or the raw id when no name
+ * is known.
+ *
+ * Deliberately **not** a `<@id>` mention. Suppressing the ping (see discord.js)
+ * also leaves the user objects out of the posted message, so a client that has
+ * not cached that member renders the mention as `@okänd-användare` — in a guild
+ * this size, most people most of the time. Such a mention is not clickable
+ * either, so it cost the line its name and bought nothing back. The id is the
+ * fallback because it at least pastes into `/status-scoutid personid:`, which
+ * the placeholder never could.
+ */
+const who = (id, name) => (name ? `**${name}**` : `\`${id}\``);
+
 /** `{ added, removed, nickname }` from a sync → one readable clause. */
 function describeChanges({ added, removed, nickname } = {}) {
   const parts = [];
@@ -136,31 +150,42 @@ export function logLinked({
     ? ` — **Discord kunde inte uppdateras**, så \`${config.SCOUTNET_SCOUT_ROLE}\` delas inte ut förrän personen gör om det (${RELINK_INSTRUCTION})`
     : "";
   logEvent(
-    `${metadataFailed ? "⚠️" : "✅"} **${name || "okänt namn"}** (<@${discordUserId}>) länkade ScoutID \`${scoutId}\` → ${rolesText}${tail}`,
+    `${metadataFailed ? "⚠️" : "✅"} ${who(discordUserId, name)} länkade ScoutID \`${scoutId}\` → ${rolesText}${tail}`,
   );
 }
 
-/** An admin created a link by hand with `/link-scoutid`. */
+/**
+ * An admin created a link by hand with `/link-scoutid`. The target's name rides
+ * along on `result`, which the sync fills in from the member it already had.
+ */
 export function logManualLink({
   discordUserId,
   scoutId,
   previousScoutId,
   callerId,
+  callerName,
   result,
 }) {
   const replaced = previousScoutId ? ` (ersatte \`${previousScoutId}\`)` : "";
   logEvent(
-    `🔗 <@${callerId}> länkade <@${discordUserId}> till scoutid \`${scoutId}\`${replaced} — ${describeChanges(result)}`,
+    `🔗 ${who(callerId, callerName)} länkade ${who(discordUserId, result?.name)} till scoutid \`${scoutId}\`${replaced} — ${describeChanges(result)}`,
   );
+}
+
+/** An admin ran `/scan-scoutid` instead of waiting for the CronJob. */
+export function logScanRun({ callerId, callerName, what }) {
+  logEvent(`🔎 ${who(callerId, callerName)} körde \`/scan-scoutid\` — ${what}`);
 }
 
 /**
  * One user's roles were resynced. Silent when nothing changed: a feed that
  * records non-events is a feed nobody reads.
  */
-export function logSync({ discordUserId, callerId, result }) {
+export function logSync({ discordUserId, callerId, callerName, result }) {
+  const target = who(discordUserId, result?.name);
+
   if (result?.error) {
-    logEvent(`⚠️ Synk av <@${discordUserId}> misslyckades: ${result.error}`);
+    logEvent(`⚠️ Synk av ${target} misslyckades: ${result.error}`);
     return;
   }
   if (!changedAnything(result)) return;
@@ -170,21 +195,25 @@ export function logSync({ discordUserId, callerId, result }) {
   // removal in the diff, so say so explicitly.
   if (wasStripped(result)) {
     logEvent(
-      `🔒 <@${discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(result)} — roller strippade, ${UNVERIFIED_ROLE} satt (måste ${RELINK_INSTRUCTION})`,
+      `🔒 ${target} saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(result)} — roller strippade, ${UNVERIFIED_ROLE} satt (måste ${RELINK_INSTRUCTION})`,
     );
     return;
   }
 
+  // Trailing rather than the old `<@id> (av <@id>)`, which put one parenthesis
+  // inside another as soon as both mentions became names.
   const by =
-    callerId && callerId !== discordUserId ? ` (av <@${callerId}>)` : "";
-  logEvent(`🔄 <@${discordUserId}>${by} — ${describeChanges(result)}`);
+    callerId && callerId !== discordUserId
+      ? ` — av ${who(callerId, callerName)}`
+      : "";
+  logEvent(`🔄 ${target} — ${describeChanges(result)}${by}`);
 }
 
 /** A whole-guild resync run from Discord. One summary, then the changed users. */
-export function logSyncAll({ callerId, results }) {
+export function logSyncAll({ callerId, callerName, results }) {
   const { changed, errors } = partitionResults(results);
   logEvent(
-    `🔁 <@${callerId}> körde \`/refresh-scoutid alla:true\` — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,
+    `🔁 ${who(callerId, callerName)} körde \`/refresh-scoutid alla:true\` — ${results.length} användare, ${changed.length} ändrade, ${errors.length} fel`,
   );
   logSyncDetail(changed, errors);
 }
@@ -210,14 +239,14 @@ function logSyncDetail(changed, errors) {
   for (const r of changed) {
     if (wasStripped(r)) {
       logEvent(
-        `🔒 <@${r.discordUserId}> saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(r)} — roller strippade, ${UNVERIFIED_ROLE} satt`,
+        `🔒 ${who(r.discordUserId, r.name)} saknar ${config.SCOUTNET_SCOUT_ROLE}-rollen${strippedBecause(r)} — roller strippade, ${UNVERIFIED_ROLE} satt`,
       );
     } else {
-      logEvent(`   ↳ <@${r.discordUserId}> — ${describeChanges(r)}`);
+      logEvent(`   ↳ ${who(r.discordUserId, r.name)} — ${describeChanges(r)}`);
     }
   }
   for (const r of errors) {
-    logEvent(`   ↳ ⚠️ <@${r.discordUserId}> — ${r.error}`);
+    logEvent(`   ↳ ⚠️ ${who(r.discordUserId, r.name)} — ${r.error}`);
   }
 }
 
@@ -252,15 +281,16 @@ export function formatMemberJoined({
   const age = accountCreatedAt
     ? ` — konto skapat för ${humanAge(Date.now() - accountCreatedAt)} sedan`
     : "";
-  return `📥 **${name}** (<@${discordUserId}>)${isBot ? " 🤖 bot" : ""} finns i servern${age}`;
+  return `📥 ${who(discordUserId, name)}${isBot ? " 🤖 bot" : ""} finns i servern${age}`;
 }
 
 /**
  * Someone is gone, and — with View Audit Log on the bot's role — *how*.
  *
- * `removal` is `{ kind: "kick" | "ban", actorId, reason }`, or null. Null covers
- * a voluntary leave and an unreadable audit log alike, so the wording stays "är
- * inte längre medlem" rather than asserting a leave nobody observed.
+ * `removal` is `{ kind: "kick" | "ban", actorId, actorName, reason }`, or null.
+ * Null covers a voluntary leave and an unreadable audit log alike, so the
+ * wording stays "är inte längre medlem" rather than asserting a leave nobody
+ * observed.
  *
  * `stillLinked` names the orphan `/audit-scoutid` would report later.
  */
@@ -274,20 +304,30 @@ export function formatMemberGone({
     ? " — länkningen kvarstår i storage (`/audit-scoutid` listar den som orphan)"
     : "";
   const why = removal?.reason ? ` — anledning: ${removal.reason}` : "";
-  const by = removal?.actorId ? ` av <@${removal.actorId}>` : "";
+  const by = removal?.actorId
+    ? ` av ${who(removal.actorId, removal.actorName)}`
+    : "";
 
+  // "blev" rather than running two bold runs together: `**Erik** **kickad**`
+  // reads as one phrase once the name is no longer separated by a mention.
   if (removal?.kind === "kick") {
-    return `👟 **${name}** (<@${discordUserId}>) **kickad**${by}${why}${link}`;
+    return `👟 ${who(discordUserId, name)} blev **kickad**${by}${why}${link}`;
   }
   if (removal?.kind === "ban") {
-    return `⛔ **${name}** (<@${discordUserId}>) **bannad**${by}${why}${link}`;
+    return `⛔ ${who(discordUserId, name)} blev **bannad**${by}${why}${link}`;
   }
-  return `📤 **${name}** (<@${discordUserId}>) är inte längre medlem${link}`;
+  return `📤 ${who(discordUserId, name)} är inte längre medlem${link}`;
 }
 
-/** A nickname changed between two scans, whoever changed it. */
-export function formatMemberRenamed({ discordUserId, from, to }) {
-  return `✏️ <@${discordUserId}> — smeknamn: \`${from || "—"}\` → \`${to || "—"}\``;
+/**
+ * A nickname changed between two scans, whoever changed it.
+ *
+ * `name` is the *account* name, not the nickname: the nickname is the thing
+ * changing and already appears twice in the line, so repeating it would name the
+ * account not at all. Without it the line is a bare mention — see `who`.
+ */
+export function formatMemberRenamed({ discordUserId, name, from, to }) {
+  return `✏️ ${who(discordUserId, name)} — smeknamn: \`${from || "—"}\` → \`${to || "—"}\``;
 }
 
 /**
@@ -297,12 +337,17 @@ export function formatMemberRenamed({ discordUserId, from, to }) {
  */
 export function formatManualRoleChange({
   discordUserId,
+  name,
   actorId,
+  actorName,
   added,
   removed,
   reason,
 }) {
-  const by = actorId ? ` (av <@${actorId}>)` : "";
   const why = reason ? ` — anledning: ${reason}` : "";
-  return `🏷️ <@${discordUserId}>${by} — ${describeChanges({ added, removed })}${why}`;
+  // Actor first, because "who" is the question this category exists to answer.
+  // It also keeps both names out of each other's parentheses, which the old
+  // `<@id> (av <@id>)` shape could not once each mention became a name.
+  const actor = actorId ? who(actorId, actorName) : "**Okänd**";
+  return `🏷️ ${actor} ändrade roller för ${who(discordUserId, name)}: ${describeChanges({ added, removed })}${why}`;
 }

@@ -275,9 +275,12 @@ export function removeRoleFromUser(guildId, userId, roleId) {
 /**
  * Post a plain message to a channel as the bot.
  *
- * `allowed_mentions: { parse: [] }` is not optional. Log lines carry `<@id>` so
- * a moderator can click through, and without this every entry would ping the
- * person it is about — an audit trail turned into a notification storm.
+ * `allowed_mentions: { parse: [] }` is not optional. Log lines are built from
+ * Discord nicknames and ScoutNet names, which are text other people chose — an
+ * `@everyone` inside one would otherwise address the whole server from the bot.
+ * It is also what made mentions useless in this channel: a suppressed mention
+ * leaves the user objects out of the posted message, so it renders as
+ * `@okänd-användare`. Hence `who()` in eventlog.js writes names, not mentions.
  *
  * The bot's role grants only Manage Roles and Manage Nicknames, so it can write
  * here purely on a channel overwrite granted in wsj27-infra. A 403 therefore

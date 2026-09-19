@@ -610,6 +610,35 @@ alla:true` som en sammanfattningsrad plus en rad per *ändrad* användare.
 `Overifierad` satt får en egen tydligare rad, eftersom det är det enda felet en
 admin inte kan laga för användaren.
 
+**Händelseloggen skriver namn, aldrig mentions.** En `<@id>` renderas som
+`@okänd-användare` för varje klient som inte råkar ha medlemmen cachad — i en
+guild av den här storleken de flesta, för det mesta. Orsaken är tystningen:
+`allowed_mentions: { parse: [] }` lämnar också användarobjekten utanför det
+postade meddelandet, så klienten har bara det nakna id:t. En sådan mention går
+inte att klicka på heller, alltså kostade den raden dess namn och gav inget
+tillbaka. Tystningen står kvar av ett annat skäl: raderna byggs av Discord-nick
+och ScoutNet-namn, text andra har valt, och ett `@everyone` däri hade adresserat
+hela servern från boten.
+
+`who()` i [src/eventlog.js](src/eventlog.js) är formen: `**Namn**`, och **rått id
+i kodstil** när namnet saknas — det går att klistra i `/status-scoutid personid:`,
+vilket placeholdern aldrig gjorde. Därför returnerar medlemsscannerns
+`displayName` numera `null` i stället för `"okänd"`: en platshållare hade både
+namngett ingen och gömt id:t bakom sig.
+
+Namnkällorna: medlemsscannern löser dem ur snapshoten (audit-loggen ger bara
+id:n) och slår i `previous` för den som hunnit lämna. Synk- och refresh-raderna
+får sitt ur resultatet — `syncUserRoles` och `stripUnlinkedMember` returnerar
+`name` från medlemmen de redan hämtat, och `syncAllUserRoles` fyller i det även i
+sina catch-grenar, som aldrig når den returen. Anroparens namn kommer ur
+`interaction.member` i `handler`. Smeknamnsraden använder med flit *konto*namnet:
+nicket är det som ändras och står redan två gånger i raden.
+
+`/audit-scoutid` är **inte** omlagd och skriver fortfarande `<@id> (nick)`, med
+samma platshållare i meddelandeversionen. Dess `affectedUsers` räknar dessutom
+personer genom att plocka `<@id>` ur itemtexten, så en övergång där rör tretton
+kategorier och den räkningen.
+
 **En länkning som inte gav några roller säger varför.** Raden slutade tidigare
 på `→ inga roller`, vilket är samma text för "inte anmäld i eventet", "avbokad
 anmälan" och "rollerna finns inte i servern" — den loggade alltså att något var

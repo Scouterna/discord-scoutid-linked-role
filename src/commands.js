@@ -8,7 +8,7 @@ import * as adoption from "./adoption.js";
 import * as eventlog from "./eventlog.js";
 import { updateMetadata, RELINK_INSTRUCTION } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
-import { guildNick, partitionResults } from "./guild.js";
+import { displayName, guildNick, partitionResults } from "./guild.js";
 
 /**
  * The slash commands, one handler each. `handlers` is what server.js dispatches
@@ -128,6 +128,10 @@ function handler(fn, { admin = false, errorPrefix = "Fel" } = {}) {
         token,
         guildId: interaction.guild_id,
         callerId: interaction.member.user.id,
+        // The interaction carries the invoking member, so a log line that names
+        // the caller costs no lookup. Without it the line is a bare mention,
+        // which most clients render as `@okänd-användare`.
+        callerName: displayName(interaction.member) || null,
       });
     } catch (e) {
       console.error(`Error handling /${interaction.data.name}:`, e);
@@ -163,50 +167,57 @@ const dryRunPrefix = (dryRun) =>
  * Sync one member, or the whole server with `alla:true`. Not admin-gated as a
  * whole — anyone may refresh themselves; someone else or everyone needs admin.
  */
-const refresh = handler(async (interaction, { token, guildId, callerId }) => {
-  const dryRun = flag(interaction, "dryrun");
+const refresh = handler(
+  async (interaction, { token, guildId, callerId, callerName }) => {
+    const dryRun = flag(interaction, "dryrun");
 
-  if (flag(interaction, "alla")) {
-    if (!isAdmin(interaction)) {
-      await reply(token, "Du måste vara admin för att uppdatera alla.");
+    if (flag(interaction, "alla")) {
+      if (!isAdmin(interaction)) {
+        await reply(token, "Du måste vara admin för att uppdatera alla.");
+        return;
+      }
+      await refreshEveryone(token, guildId, callerId, callerName, dryRun);
       return;
     }
-    await refreshEveryone(token, guildId, callerId, dryRun);
-    return;
-  }
 
-  const { id: targetUserId, error } = targetUser(interaction, {
-    fallback: callerId,
-  });
-  if (error) {
-    await reply(token, error);
-    return;
-  }
-  if (targetUserId !== callerId && !isAdmin(interaction)) {
-    await reply(token, "Du måste vara admin för att uppdatera andra.");
-    return;
-  }
+    const { id: targetUserId, error } = targetUser(interaction, {
+      fallback: callerId,
+    });
+    if (error) {
+      await reply(token, error);
+      return;
+    }
+    if (targetUserId !== callerId && !isAdmin(interaction)) {
+      await reply(token, "Du måste vara admin för att uppdatera andra.");
+      return;
+    }
 
-  await storage.clearScoutNetCache();
-  const result = await roles.syncUserRoles(guildId, targetUserId, { dryRun });
-  // A dry run leaves no trace in the event log: that channel records what the
-  // bot *did*, and "would have" lines make it unreliable for that question.
-  if (!dryRun) {
-    eventlog.logSync({ discordUserId: targetUserId, callerId, result });
-  }
+    await storage.clearScoutNetCache();
+    const result = await roles.syncUserRoles(guildId, targetUserId, { dryRun });
+    // A dry run leaves no trace in the event log: that channel records what the
+    // bot *did*, and "would have" lines make it unreliable for that question.
+    if (!dryRun) {
+      eventlog.logSync({
+        discordUserId: targetUserId,
+        callerId,
+        callerName,
+        result,
+      });
+    }
 
-  await reply(
-    token,
-    result.error
-      ? `<@${targetUserId}>: ${result.error}`
-      : `${dryRunPrefix(dryRun)}<@${targetUserId}>: ${formatChanges(result)}${noteFor(result)}` +
-          (await pendingNote(guildId, targetUserId)),
-  );
-});
+    await reply(
+      token,
+      result.error
+        ? `<@${targetUserId}>: ${result.error}`
+        : `${dryRunPrefix(dryRun)}<@${targetUserId}>: ${formatChanges(result)}${noteFor(result)}` +
+            (await pendingNote(guildId, targetUserId)),
+    );
+  },
+);
 
-async function refreshEveryone(token, guildId, callerId, dryRun) {
+async function refreshEveryone(token, guildId, callerId, callerName, dryRun) {
   const results = await roles.syncAllUserRoles(guildId, { dryRun });
-  if (!dryRun) eventlog.logSyncAll({ callerId, results });
+  if (!dryRun) eventlog.logSyncAll({ callerId, callerName, results });
 
   if (results.length === 0) {
     await reply(token, "Inga länkade användare hittades.");
@@ -394,7 +405,7 @@ const adoptionCommand = handler(
  * overlap the CronJob, whose worst case is a change reported twice.
  */
 const scan = handler(
-  async (interaction, { token, callerId }) => {
+  async (interaction, { token, callerId, callerName }) => {
     const dryRun = flag(interaction, "dryrun");
     const result = await runMemberScan({ dryRun });
 
@@ -403,7 +414,7 @@ const scan = handler(
         result.seeded != null
           ? `baslinje för ${result.seeded} medlemmar`
           : `${result.total} ändring(ar)`;
-      eventlog.logEvent(`🔎 <@${callerId}> körde \`/scan-scoutid\` — ${what}`);
+      eventlog.logScanRun({ callerId, callerName, what });
     }
 
     // A dry run posts nothing, so its lines have to come back in the reply or
@@ -429,7 +440,7 @@ const scan = handler(
  * re-pushes the metadata so Discord re-evaluates the Scout requirement.
  */
 const link = handler(
-  async (interaction, { token, guildId, callerId }) => {
+  async (interaction, { token, guildId, callerId, callerName }) => {
     const { id: targetUserId, error } = targetUser(interaction, {
       missing:
         "Ange `person`, eller `personid` för den som inte syns i listan (den som inte accepterat serverns regler göms av Discord i personväljaren).",
@@ -486,6 +497,7 @@ const link = handler(
       scoutId: scoutIdInput,
       previousScoutId: existing && existing !== scoutIdInput ? existing : null,
       callerId,
+      callerName,
       result,
     });
 

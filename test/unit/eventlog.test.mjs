@@ -72,10 +72,11 @@ test("every line carries a Discord timestamp", async () => {
 });
 
 test("mentions are suppressed so an audit trail is not a notification storm", async () => {
-  eventlog.logEvent("<@123456789> fick en roll");
+  eventlog.logEvent("@everyone fick en roll");
   const { posts: sent } = await drain();
-  // Lines carry `<@id>` on purpose, to be clickable. Without this every entry
-  // would ping the person it is about.
+  // Lines are built from Discord nicknames and ScoutNet names — text other
+  // people chose. Without this, an `@everyone` inside one addresses the whole
+  // server from the bot.
   assert.deepEqual(sent[0].allowed_mentions, { parse: [] });
 });
 
@@ -210,18 +211,88 @@ test("a manual link records who linked whom", async () => {
     scoutId: "999",
     previousScoutId: "111",
     callerId: "42",
-    result: { added: ["CMT"], removed: [] },
+    callerName: "Petter",
+    result: { name: "Erik Svensson", added: ["CMT"], removed: [] },
   });
   const { posts: sent } = await drain();
   // A manual link is an admin vouching for an identity the OAuth flow never
-  // confirmed, so both parties belong in the line.
-  assert.match(sent[0].content, /<@42>/);
-  assert.match(sent[0].content, /<@1>/);
+  // confirmed, so both parties belong in the line — by name, since a suppressed
+  // mention renders as `@okänd-användare` for anyone who has not cached them.
+  assert.match(sent[0].content, /\*\*Petter\*\*/);
+  assert.match(sent[0].content, /\*\*Erik Svensson\*\*/);
+  assert.doesNotMatch(
+    sent[0].content,
+    /<@/,
+    "a mention reads @okänd-användare",
+  );
   assert.match(
     sent[0].content,
     /111/,
     "replacing an existing link should be visible",
   );
+});
+
+test("the sync lines name the person, not just the id", async () => {
+  // A `<@id>` renders as `@okänd-användare` for any client that has not cached
+  // that member: mentions are suppressed, which also leaves the user objects out
+  // of the posted message. The nightly refresh writes these lines in bulk, so an
+  // unnamed one was the common case rather than the rare one.
+  eventlog.logSyncAll({
+    callerId: "42",
+    callerName: "Petter",
+    results: [
+      {
+        discordUserId: "1",
+        name: "Erik Svensson",
+        added: ["CMT"],
+        removed: [],
+      },
+      {
+        discordUserId: "2",
+        name: "Anna",
+        added: ["Overifierad"],
+        removed: ["CMT"],
+      },
+      { discordUserId: "3", name: "Kim", error: "Inte länkad till ScoutID" },
+    ],
+  });
+  const { posts: sent } = await drain();
+  const all = sent.map((p) => p.content).join("\n");
+  assert.match(all, /\*\*Petter\*\*/, "summary did not name the caller");
+  assert.match(all, /\*\*Erik Svensson\*\*/, "detail line");
+  assert.match(all, /\*\*Anna\*\*/, "strip line");
+  assert.match(all, /\*\*Kim\*\*/, "error line");
+  assert.doesNotMatch(all, /<@/, "no line may fall back to a mention");
+});
+
+test("a sync names the admin who triggered it without nesting parentheses", async () => {
+  // The caller used to sit in `<@id> (av <@id>)`, which became a parenthesis
+  // inside a parenthesis the moment both mentions turned into names.
+  eventlog.logSync({
+    discordUserId: "1",
+    callerId: "42",
+    callerName: "Petter",
+    result: { name: "Erik", added: ["CMT"], removed: [] },
+  });
+  const { posts: sent } = await drain();
+  assert.match(sent[0].content, /\*\*Erik\*\*/);
+  assert.match(sent[0].content, /av \*\*Petter\*\*/);
+  assert.doesNotMatch(sent[0].content, /\(\(/);
+});
+
+test("a result with no name falls back to the id, not to a mention", async () => {
+  // `syncUserRoles` returns before it has a member when there is no link at all,
+  // so the name is genuinely unknown there. The raw id pastes into
+  // `/status-scoutid personid:`; `@okänd-användare` never could.
+  eventlog.logSync({
+    discordUserId: "1",
+    callerId: "1",
+    result: { error: "Inte länkad till ScoutID" },
+  });
+  const { posts: sent } = await drain();
+  assert.match(sent[0].content, /`1`/);
+  assert.doesNotMatch(sent[0].content, /<@/);
+  assert.doesNotMatch(sent[0].content, /\*\*\*\*/);
 });
 
 test("a sync that changed nothing is not logged", async () => {
@@ -275,9 +346,7 @@ test("a strip line carries the probe's answer when there is one", async () => {
   });
   const { posts: sent } = await drain();
   assert.match(sent[0].content, /kopplingsproben sa nej \(HTTP 401\)/);
-  const secondLine = sent[0].content
-    .split("\n")
-    .find((l) => l.includes("<@2>"));
+  const secondLine = sent[0].content.split("\n").find((l) => l.includes("`2`"));
   assert.ok(!secondLine.includes("kopplingsproben"));
 });
 
@@ -294,10 +363,10 @@ test("a whole-guild resync is one summary plus only the changed users", async ()
   assert.match(all, /4 användare/);
   assert.match(all, /1 ändrade/);
   assert.match(all, /1 fel/);
-  assert.match(all, /<@1>/);
+  assert.match(all, /`1`/);
   // A run over 150 unchanged users must not produce 150 entries.
-  assert.doesNotMatch(all, /<@2>/);
-  assert.doesNotMatch(all, /<@3>/);
+  assert.doesNotMatch(all, /`2`/);
+  assert.doesNotMatch(all, /`3`/);
 });
 
 test("a rename alone counts as a change", async () => {
@@ -314,7 +383,7 @@ test("a rename alone counts as a change", async () => {
   const { posts: sent } = await drain();
   const all = sent.map((p) => p.content).join("\n");
   assert.match(all, /1 ändrade/);
-  assert.match(all, /<@1>/);
+  assert.match(all, /`1`/);
   assert.match(all, /Anna A \(AL12\)/);
 });
 
@@ -347,7 +416,7 @@ test("the scheduled sync still reports when something moved", async () => {
   const all = sent.map((p) => p.content).join("\n");
   assert.match(all, /Nattlig rollsynk/);
   assert.match(all, /2 användare, 1 ändrade, 0 fel/);
-  assert.match(all, /<@1>/);
-  assert.doesNotMatch(all, /<@2>/, "unchanged users stay out of it");
+  assert.match(all, /`1`/);
+  assert.doesNotMatch(all, /`2`/, "unchanged users stay out of it");
   assert.doesNotMatch(all, /undefined/, "no caller to name in a scheduled run");
 });

@@ -56,7 +56,19 @@ function toSnapshot(members) {
   return snap;
 }
 
-const displayName = ([nick, username]) => nick || username || "okänd";
+/**
+ * Null and not a placeholder when the snapshot holds neither name: the log's
+ * `who()` then falls back to the raw id, which identifies the person. A literal
+ * "okänd" would identify nobody and hide the id behind it.
+ */
+const displayName = ([nick, username]) => nick || username || null;
+
+/**
+ * The account name, which a nickname change does not touch. `displayName` would
+ * hand a rename line the *new* nickname, which that line already prints twice —
+ * the one thing it would then not say is whose account this is.
+ */
+const accountName = ([nick, username]) => username || nick || null;
 
 /**
  * Emit one category of lines, collapsing to a summary when there are too many.
@@ -235,7 +247,7 @@ export async function runMemberScan({ dryRun = false } = {}) {
     const before = previous[id];
     if (!before) joined.push({ id, entry });
     else if (wanted.has("nickname") && before[0] !== entry[0]) {
-      renamed.push({ id, from: before[0], to: entry[0] });
+      renamed.push({ id, entry, from: before[0], to: entry[0] });
     }
   }
   for (const [id, entry] of Object.entries(previous)) {
@@ -246,6 +258,17 @@ export async function runMemberScan({ dryRun = false } = {}) {
     audit.byType.get(discord.AUDIT_MEMBER_ROLE_UPDATE) ?? [],
     audit.botUserId,
   );
+
+  // A name for an id the audit log handed us. Every log line suppresses its
+  // mentions, so a reader whose client has not cached that member sees
+  // `@okänd-användare` and the line names nobody — see `who` in eventlog.js.
+  // The snapshots are a name source that costs no request: whoever just changed
+  // roles or kicked someone is in the guild by virtue of having done it, and
+  // `previous` covers the one who has since left.
+  const nameOf = (id) => {
+    const entry = id != null ? (current[id] ?? previous[id]) : null;
+    return entry ? displayName(entry) : null;
+  };
 
   // Only looked up for members who left, so an unchanged guild costs no storage
   // reads beyond the snapshot itself.
@@ -276,20 +299,30 @@ export async function runMemberScan({ dryRun = false } = {}) {
     );
   }
   if (wanted.has("leave")) {
-    emit(sink, "📤 Borta ur servern", gone, ({ id, entry }) =>
-      eventlog.formatMemberGone({
+    emit(sink, "📤 Borta ur servern", gone, ({ id, entry }) => {
+      const removal = removals.get(id) ?? null;
+      return eventlog.formatMemberGone({
         discordUserId: id,
         name: displayName(entry),
         stillLinked: linkedIds.has(id),
-        removal: removals.get(id) ?? null,
-      }),
-    );
+        removal: removal && { ...removal, actorName: nameOf(removal.actorId) },
+      });
+    });
   }
-  emit(sink, "✏️ Ändrade smeknamn", renamed, ({ id, from, to }) =>
-    eventlog.formatMemberRenamed({ discordUserId: id, from, to }),
+  emit(sink, "✏️ Ändrade smeknamn", renamed, ({ id, entry, from, to }) =>
+    eventlog.formatMemberRenamed({
+      discordUserId: id,
+      name: accountName(entry),
+      from,
+      to,
+    }),
   );
   emit(sink, "🏷️ Rolländringar gjorda för hand", roleChanges, (change) =>
-    eventlog.formatManualRoleChange(change),
+    eventlog.formatManualRoleChange({
+      ...change,
+      name: nameOf(change.discordUserId),
+      actorName: nameOf(change.actorId),
+    }),
   );
   if (audit.truncated) {
     sink(

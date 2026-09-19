@@ -242,6 +242,9 @@ test("roles outside the bot's configuration are left alone", async () => {
   assert.deepEqual(calls.added, []);
   assert.deepEqual(calls.removed, []);
   assert.deepEqual(result, {
+    // `name` rides along on every result so the event log can write it beside
+    // the mention — a lone `<@id>` renders as `@okänd-användare`.
+    name: "Erik Svensson (07)",
     added: [],
     removed: [],
     nickname: null,
@@ -507,7 +510,12 @@ test("stripUnlinkedMember leaves an already-stripped member untouched", async ()
   // syncAllUserRoles only reports members it changed; a no-op must stay silent.
   // `nickname` is reported the same way syncUserRoles reports it — null here,
   // which is exactly what keeps this member out of the report.
-  assert.deepEqual(result, { added: [], removed: [], nickname: null });
+  assert.deepEqual(result, {
+    name: "Redan Strippad",
+    added: [],
+    removed: [],
+    nickname: null,
+  });
   assert.deepEqual(calls.nicks, []);
 });
 

@@ -7,6 +7,7 @@ import {
   UNVERIFIED_ROLE,
   NICK_MAX,
   roleMapOf,
+  displayName,
   guildNick,
   stripNickSuffix,
   divisionRoleName,
@@ -292,8 +293,13 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
     options.member ?? (await discord.getGuildMember(guildId, discordUserId));
   const currentRoleIds = new Set(member.roles);
 
+  // Carried through every return below so the event log can write a name beside
+  // the mention. The caller has the member; the log has only an id, and a lone
+  // mention renders as `@okänd-användare` — see `who` in eventlog.js.
+  const name = displayName(member) || null;
+
   const verified = await checkVerified(discordUserId, roleMap, currentRoleIds);
-  if (verified.error) return { error: verified.error };
+  if (verified.error) return { name, error: verified.error };
 
   // The gate above needs no ScoutNet, deliberately: stripping someone who lost
   // the Scout role is the security boundary and has to keep working during an
@@ -307,6 +313,7 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
       suffix = await getNicknameSuffix(scoutId);
     } catch (e) {
       return {
+        name,
         error: `Kunde inte hämta ScoutNet-data, inget ändrades: ${e.message}`,
       };
     }
@@ -358,6 +365,7 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
       : null;
 
   return {
+    name,
     added,
     removed,
     nickname,
@@ -399,7 +407,7 @@ export async function stripUnlinkedMember(
     console.error(`Error resetting nickname for ${discordUserId}:`, e.message);
   }
 
-  return { added, removed, nickname };
+  return { name: displayName(member) || null, added, removed, nickname };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -452,7 +460,13 @@ export async function syncAllUserRoles(guildId, { dryRun = false } = {}) {
       results.push({ discordUserId, ...result });
       if (changedAnything(result)) await sleep(WRITE_DELAY_MS);
     } catch (e) {
-      results.push({ discordUserId, error: e.message });
+      // A throw skips the name syncUserRoles would have carried, and memberMap
+      // is the same source it would have used.
+      results.push({
+        discordUserId,
+        name: displayName(memberMap.get(discordUserId)) || null,
+        error: e.message,
+      });
     }
   }
 
@@ -475,7 +489,11 @@ export async function syncAllUserRoles(guildId, { dryRun = false } = {}) {
             await sleep(WRITE_DELAY_MS);
           }
         } catch (e) {
-          results.push({ discordUserId: member.user.id, error: e.message });
+          results.push({
+            discordUserId: member.user.id,
+            name: displayName(member) || null,
+            error: e.message,
+          });
         }
       }
     }

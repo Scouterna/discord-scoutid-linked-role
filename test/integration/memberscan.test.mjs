@@ -171,24 +171,31 @@ test("a diff reports joins, departures, renames and other people's role changes"
   await storage.setLinkedScoutIDUserId(ERIK, "12345");
 
   const { out } = await runScan();
-  assert.match(out, new RegExp(`<@${NY}>`), "join not reported");
-  assert.match(out, new RegExp(`<@${ERIK}>`), "departure not reported");
-  assert.match(out, /Erik Svensson/, "departure lost the display name");
+  assert.match(out, /nyling/, "join not reported");
+  assert.match(
+    out,
+    /Erik Svensson/,
+    "departure not reported, or lost its name",
+  );
   assert.match(out, /länkningen kvarstår/, "orphaned link not flagged");
   assert.match(out, /Kim Nilsson/, "rename not reported");
   assert.match(out, /Ledare-12/, "manual role change not reported");
+  // The target's name comes from the snapshot; the audit entry carries ids only.
   assert.match(
     out,
-    new RegExp(`\\(av <@${MOD_ID}>\\)`),
-    "role change did not name the actor",
+    /\*\*Kim Nilsson\*\*/,
+    "role change did not name the member it was done to",
   );
+  // This moderator is in neither snapshot, so there is no name to give and the
+  // raw id is the fallback — it pastes into `/status-scoutid personid:`.
+  assert.match(out, new RegExp(`\`${MOD_ID}\``), "role change lost the actor");
+  // Nobody is written as a mention: suppressed, it renders `@okänd-användare`
+  // for any client that has not cached the member, and is not clickable either.
+  assert.doesNotMatch(out, /<@/, "wrote a mention instead of a name");
+  assert.doesNotMatch(out, /\*\*\*\*/, "rendered an empty bold name");
   assert.doesNotMatch(out, /WSJ-event/, "reported the bot's OWN role change");
   assert.doesNotMatch(out, /CMT/, "replayed an entry older than the cursor");
-  assert.doesNotMatch(
-    out,
-    new RegExp(`<@${ANNA}>`),
-    "reported an unchanged member",
-  );
+  assert.doesNotMatch(out, /Anna Andersson/, "reported an unchanged member");
 
   const stored = await storage.getMemberSnapshot();
   assert.equal(stored.auditCursors[ROLE_UPDATE], "700");
@@ -212,8 +219,8 @@ test("a kick is reported as a kick, not as a departure", async () => {
   assert.match(out, /kickad/, "a kick must not read as a plain departure");
   assert.match(
     out,
-    new RegExp(`<@${MOD_ID}>`),
-    "kick did not name the moderator",
+    new RegExp(`\`${MOD_ID}\``),
+    "kick did not identify the moderator",
   );
   assert.match(out, /anledning: regelbrott/);
   assert.equal(result.counts.removedByMod, 1);

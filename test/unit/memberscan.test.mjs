@@ -33,7 +33,6 @@ test("formatMemberJoined flags bots and shows account age", () => {
     isBot: false,
   });
   assert.match(line, /Anna/);
-  assert.match(line, /<@1>/);
   // A throwaway account is invisible in the member list; the age is why this is here.
   assert.match(line, /konto skapat för 8 min sedan/);
   assert.doesNotMatch(line, /🤖/);
@@ -65,7 +64,6 @@ test("formatMemberGone distinguishes leave, kick and ban", () => {
     removal: { kind: "kick", actorId: "99", reason: "spam" },
   });
   assert.match(kicked, /kickad/);
-  assert.match(kicked, /<@99>/);
   assert.match(kicked, /anledning: spam/);
 
   const banned = eventlog.formatMemberGone({
@@ -90,16 +88,64 @@ test("formatMemberGone flags a link left behind", () => {
 test("formatManualRoleChange names the actor", () => {
   const line = eventlog.formatManualRoleChange({
     discordUserId: "1",
+    name: "Erik Svensson",
     actorId: "99",
+    actorName: "Petter",
     added: ["Ledare-12"],
     removed: ["Overifierad"],
     reason: null,
   });
   // The actor is the entire reason this category exists: the bot's own changes
   // are logged as they happen, so only someone else's are news.
-  assert.match(line, /\(av <@99>\)/);
+  assert.match(line, /\*\*Petter\*\*/);
+  assert.match(line, /\*\*Erik Svensson\*\*/);
   assert.match(line, /Ledare-12/);
   assert.match(line, /Overifierad/);
+});
+
+test("a person is written as a name, never as a mention", () => {
+  // Regression: lines used to be a bare `<@id>`. Mentions are suppressed, which
+  // also leaves the user objects out of the posted message, so a client that has
+  // not cached the member renders `@okänd-användare` — an audit trail naming
+  // nobody, and not clickable either, so the mention bought nothing back.
+  const renamed = eventlog.formatMemberRenamed({
+    discordUserId: "1",
+    name: "kogkarin",
+    from: "",
+    to: "Erik Neuman (AL24)",
+  });
+  assert.match(renamed, /\*\*kogkarin\*\*/);
+  assert.doesNotMatch(renamed, /<@/);
+  // The account name, not the nickname: the nickname is the thing changing and
+  // is already in the line twice.
+  assert.match(renamed, /Erik Neuman \(AL24\)/);
+
+  const kicked = eventlog.formatMemberGone({
+    discordUserId: "1",
+    name: "Erik",
+    removal: { kind: "kick", actorId: "99", actorName: "Petter", reason: null },
+  });
+  assert.match(kicked, /av \*\*Petter\*\*/);
+  assert.doesNotMatch(kicked, /<@/);
+});
+
+test("an unknown name degrades to the id, never to an empty name", () => {
+  // An actor who is no longer in either snapshot has no name to give. The raw id
+  // pastes into `/status-scoutid personid:`; `****` and `@okänd-användare` are
+  // both worse than that.
+  const line = eventlog.formatManualRoleChange({
+    discordUserId: "1",
+    name: null,
+    actorId: "99",
+    actorName: null,
+    added: ["CMT"],
+    removed: [],
+    reason: null,
+  });
+  assert.match(line, /`99`/);
+  assert.match(line, /`1`/);
+  assert.doesNotMatch(line, /<@/);
+  assert.doesNotMatch(line, /\*\*\*\*/);
 });
 
 test("the member formatters return strings and never write", () => {
@@ -117,6 +163,7 @@ test("the member formatters return strings and never write", () => {
   assert.equal(
     typeof eventlog.formatMemberRenamed({
       discordUserId: "1",
+      name: "anna",
       from: "a",
       to: "b",
     }),
