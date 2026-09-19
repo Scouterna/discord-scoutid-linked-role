@@ -1043,6 +1043,23 @@ dry-runen.
   så `25697:cmt` ger "cmt" och `25697:CMT` ger "CMT". Rolluppslagningen är
   skiftlägesokänslig, så det är fritt att välja.
 
+  **Den som inte hamnar i någon grupp räknas under "Utanför grupperna", med skäl.**
+  Grupperna ensamma svarar på "hur många har länkat sig" och utelämnar tyst var och
+  en som grupperingen inte kunde placera — alltså precis dem något är fel för. Fyra
+  skäl, med fyra olika ägare, och de hålls isär därför:
+
+  | Skäl | Vad det betyder |
+  | --- | --- |
+  | Avbokade i ScoutNet | Utanför `total` också — de är inte någon vi väntar på, så att räkna dem hade tryckt ned täckningssiffran med folk som inte saknas. Listas bara om de ändå är länkade: de behåller sina roller tills synken körs |
+  | Utan `fee_id` | Obekräftad och obetald anmälan. ScoutNets sida, och kan lösa sig själv |
+  | `fee_id` utan mappning | Vår sida: raden saknas i `SCOUTNET_FEE_ROLES`. De två ser likadana ut i datan, och skiljs åt här eller ingenstans |
+  | Länkade utan anmälan | Har en länk men finns inte i deltagarlistan. Bär sitt discord-id, eftersom det är vad `/status-scoutid personid:` tar |
+
+  Två saker att hålla om filen ändras: **en tom kategori skriver inga rader**
+  (fyra tomma rubriker lär folk skumma förbi den dagen en av dem inte är tom), och
+  **ingen markup i bilagan** — Discord renderar ingenting i en fil, så en backtick
+  kommer fram som en backtick. Samma sak som `formatAuditText` finns för.
+
 ## Krav på Discord-servern
 
 Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`) (Terraform). Boten letar upp roller efter namn (case-insensitive) — om en roll inte finns hoppas tilldelningen tyst över. Roller som måste finnas:
