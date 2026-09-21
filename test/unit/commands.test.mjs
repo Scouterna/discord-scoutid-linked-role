@@ -19,9 +19,10 @@ process.env.DISCORD_CLIENT_ID = "app-1";
 process.env.DISCORD_GUILD_ID = "G1";
 process.env.LOG_CHANNEL_ID = "";
 
-const { targetUser, formatChanges, dryRunPlain } =
+const { targetUser, formatChanges, dryRunPlain, formatRefreshEveryone } =
   await import("../../src/commands.js");
-const { changedAnything } = await import("../../src/guild.js");
+const { changedAnything, reportName, reportNamePlain } =
+  await import("../../src/guild.js");
 
 const interaction = (options) => ({ data: { name: "t", options } });
 const PICKED = "111111111111111111";
@@ -128,4 +129,85 @@ test("the attachment's dry-run marker carries no markup", () => {
   assert.match(marker, /DRY RUN/);
   assert.doesNotMatch(marker, /[*`_]/);
   assert.equal(dryRunPlain(false), "");
+});
+
+/**
+ * How a member is named in a report. The refresh report printed raw ids in the
+ * attachment and `<@id>` in the message, which renders as @okänd-användare for
+ * any client that has not cached the member — the same defect fixed in the
+ * event log, still present here until 2026-09-21.
+ */
+test("a report never names a member with a mention", () => {
+  for (const rendered of [
+    reportName("123", "Alexandra Johansson"),
+    reportName("123", null),
+    reportNamePlain("123", "Alexandra Johansson"),
+    reportNamePlain("123", null),
+  ]) {
+    assert.doesNotMatch(rendered, /<@/, rendered);
+  }
+});
+
+test("a known name is shown, in bold for a message", () => {
+  assert.equal(
+    reportName("123", "Alexandra Johansson"),
+    "**Alexandra Johansson**",
+  );
+});
+
+test("an unknown name falls back to an id that can be pasted", () => {
+  // `/status-scoutid personid:` takes exactly this, which a placeholder never did.
+  assert.equal(reportName("123", null), "`123`");
+  assert.equal(reportNamePlain("123", null), "123");
+});
+
+test("the attachment carries no markup and keeps the id beside the name", () => {
+  // Discord renders nothing inside a file, and the file is where an admin goes
+  // looking for an id to paste.
+  const rendered = reportNamePlain("123", "Alexandra Johansson");
+  assert.equal(rendered, "Alexandra Johansson (123)");
+  assert.doesNotMatch(rendered, /[*`_]/);
+});
+
+/** The whole-server report, end to end over the shape a real run produces. */
+const REPORT = formatRefreshEveryone({
+  dryRun: true,
+  results: [
+    { discordUserId: "300", name: "Örjan Ek", nickname: "Örjan Ek (05-Räven)" },
+    {
+      discordUserId: "100",
+      name: "Alexandra Johansson",
+      nickname: "Alexandra J (AL47-Trollsländan)",
+    },
+    { discordUserId: "400", name: null, nickname: "Namnlös (07-Vildsvinet)" },
+    { discordUserId: "500", name: null, error: "[404] Not Found" },
+    { discordUserId: "200", name: "Bo Berg" },
+  ],
+});
+
+test("a nickname-only change is listed with what it would become", () => {
+  // The whole point of the dry run, and what "Inga ändringar" swallowed.
+  assert.match(
+    REPORT.full,
+    /Alexandra Johansson \(100\): Smeknamn: Alexandra J \(AL47-Trollsländan\)/,
+  );
+  assert.match(REPORT.message, /\*\*Alexandra Johansson\*\*: Smeknamn:/);
+});
+
+test("the report is sorted by name, with the unnamed last", () => {
+  // The unnamed row has no " (id)" to strip, so match up to the label instead.
+  const order = [...REPORT.full.matchAll(/^(.+?): Smeknamn/gm)].map((m) =>
+    m[1].replace(/ \(\d+\)$/, ""),
+  );
+  assert.deepEqual(order, ["Alexandra Johansson", "Örjan Ek", "400"]);
+});
+
+test("neither half of the report uses a mention", () => {
+  assert.doesNotMatch(REPORT.message, /<@/);
+  assert.doesNotMatch(REPORT.full, /<@/);
+});
+
+test("the unchanged are named too, and the attachment says it was a dry run", () => {
+  assert.match(REPORT.full, /=== Oförändrade ===\nBo Berg \(200\)/);
+  assert.match(REPORT.full, /^DRY RUN/);
 });

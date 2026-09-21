@@ -1,7 +1,12 @@
 import config from "./config.js";
 import * as discord from "./discord.js";
 import { RELINK_INSTRUCTION } from "./metadata.js";
-import { UNVERIFIED_ROLE, changedAnything, partitionResults } from "./guild.js";
+import {
+  UNVERIFIED_ROLE,
+  changedAnything,
+  partitionResults,
+  reportName,
+} from "./guild.js";
 
 /**
  * What the bot did, as it happens, written to a moderator-only Discord channel —
@@ -102,7 +107,7 @@ export async function flushEventLog() {
  * fallback because it at least pastes into `/status-scoutid personid:`, which
  * the placeholder never could.
  */
-const who = (id, name) => (name ? `**${name}**` : `\`${id}\``);
+const who = reportName;
 
 /** `{ added, removed, nickname }` from a sync → one readable clause. */
 function describeChanges({ added, removed, nickname } = {}) {

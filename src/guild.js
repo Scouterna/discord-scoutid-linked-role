@@ -26,6 +26,29 @@ export function roleMapOf(guildRoles) {
 export const displayName = (member) =>
   member?.nick || member?.user?.global_name || member?.user?.username || "";
 
+/**
+ * How a member is named in a report, for a Discord message.
+ *
+ * **Never a mention.** `<@id>` renders as @okänd-användare for any client that
+ * has not cached the member — in a guild this size, most of them, most of the
+ * time — because silencing mentions (`allowed_mentions: { parse: [] }`) also
+ * leaves the user objects out of the posted message, so the client has only the
+ * bare id. The mention costs the line its name and gives nothing back.
+ *
+ * A missing name falls back to the raw id in code style rather than a
+ * placeholder: it can be pasted into `/status-scoutid personid:`, which is
+ * exactly what an admin wants from a line about someone they cannot identify.
+ */
+export const reportName = (id, name) => (name ? `**${name}**` : `\`${id}\``);
+
+/**
+ * The same for an attachment. No markup — Discord renders nothing inside a
+ * file, so a backtick arrives as a backtick — and the id is kept beside the
+ * name, because the file is the long list an admin reads through and the place
+ * they go looking for an id to paste.
+ */
+export const reportNamePlain = (id, name) => (name ? `${name} (${id})` : id);
+
 /** The name the bot renames *from* — no username fallback, that is not a nickname. */
 export const guildNick = (member) =>
   member?.nick || member?.user?.global_name || "";

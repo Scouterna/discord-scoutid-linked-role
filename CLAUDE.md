@@ -674,6 +674,15 @@ sina catch-grenar, som aldrig når den returen. Anroparens namn kommer ur
 `interaction.member` i `handler`. Smeknamnsraden använder med flit *konto*namnet:
 nicket är det som ändras och står redan två gånger i raden.
 
+Formen delas numera av `/refresh-scoutid alla:true`, och `reportName` /
+`reportNamePlain` i [src/guild.js](src/guild.js) är enda hemmet för den — den låg
+tidigare bara i eventlog.js, och rapporten skrev råa id:n i bilagan och `<@id>` i
+meddelandet. Bilagans variant bär **inget markup men behåller id:t bredvid
+namnet**: en fil renderar ingenting, och filen är den långa listan en admin läser
+igenom och går till när hen behöver ett id att klistra i `personid:`. Rapporten
+sorteras dessutom på namn — 240 rader i lagringsordning är inte läsbara ens med
+namn.
+
 `/audit-scoutid` är **inte** omlagd och skriver fortfarande `<@id> (nick)`, med
 samma platshållare i meddelandeversionen. Dess `affectedUsers` räknar dessutom
 personer genom att plocka `<@id>` ur itemtexten, så en övergång där rör tretton
@@ -911,7 +920,7 @@ den finns.
 | Fil | Täcker |
 | --- | --- |
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
-| `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus att renderingen av ett synkresultat *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar". Och att bilagans dry run-markering bär ingen markup |
+| `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus hela `/refresh-scoutid alla:true`-rapporten som ren funktion: att renderingen *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar" — att ingen halva använder mentions, att listan sorteras på namn med den namnlösa sist, och att bilagans dry run-markering bär ingen markup |
 | `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
 | `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, och att `explainMissingRoles` håller ett avbrott skilt från en frånvaro |
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas |

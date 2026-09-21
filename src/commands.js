@@ -8,7 +8,13 @@ import * as adoption from "./adoption.js";
 import * as eventlog from "./eventlog.js";
 import { updateMetadata, RELINK_INSTRUCTION } from "./metadata.js";
 import { runMemberScan, formatScanSummary } from "./memberscan.js";
-import { displayName, guildNick, partitionResults } from "./guild.js";
+import {
+  displayName,
+  guildNick,
+  partitionResults,
+  reportName,
+  reportNamePlain,
+} from "./guild.js";
 
 /**
  * The slash commands, one handler each. `handlers` is what server.js dispatches
@@ -238,15 +244,24 @@ const refresh = handler(
   },
 );
 
-async function refreshEveryone(token, guildId, callerId, callerName, dryRun) {
-  const results = await roles.syncAllUserRoles(guildId, { dryRun });
-  if (!dryRun) eventlog.logSyncAll({ callerId, callerName, results });
+/**
+ * Sort a sync report by name so it can be read. The order results arrive in is
+ * storage order, which means nothing to the person reading 240 lines; the one
+ * without a name sorts last, where an unidentified row belongs.
+ */
+const byName = (a, b) =>
+  (a.name ? 0 : 1) - (b.name ? 0 : 1) ||
+  (a.name ?? "").localeCompare(b.name ?? "", "sv") ||
+  a.discordUserId.localeCompare(b.discordUserId);
 
-  if (results.length === 0) {
-    await reply(token, "Inga länkade användare hittades.");
-    return;
-  }
-
+/**
+ * The whole-server report, as a pure function of the results.
+ *
+ * Separated from the sending so the report can be tested and previewed without
+ * a guild, a token or a network — the same reason the member scan's formatters
+ * return strings instead of logging.
+ */
+export function formatRefreshEveryone({ results, dryRun }) {
   const { changed, errors } = partitionResults(results);
   const unchanged = results.length - errors.length - changed.length;
   const tally = `${changed.length} med ändringar, ${errors.length} fel, ${unchanged} oförändrade.`;
@@ -256,34 +271,61 @@ async function refreshEveryone(token, guildId, callerId, callerName, dryRun) {
   ];
   if (changed.length > 0) {
     lines.push("", "**Ändringar:**");
-    for (const r of changed) {
-      lines.push(`- <@${r.discordUserId}>: ${formatChanges(r)}`);
+    for (const r of [...changed].sort(byName)) {
+      lines.push(
+        `- ${reportName(r.discordUserId, r.name)}: ${formatChanges(r)}`,
+      );
     }
   }
   if (errors.length > 0) {
     lines.push("", "**Fel:**");
-    for (const r of errors) {
-      lines.push(`- <@${r.discordUserId}>: ${r.error}`);
+    for (const r of [...errors].sort(byName)) {
+      lines.push(`- ${reportName(r.discordUserId, r.name)}: ${r.error}`);
     }
   }
 
-  await replyOrAttach(token, lines.join("\n"), {
-    filename: "refresh-scoutid.txt",
+  return {
+    message: lines.join("\n"),
     summary: `${dryRunPrefix(dryRun)}Synkade ${results.length} användare: ${changed.length} ändringar, ${errors.length} fel. Full lista i bifogad fil.`,
     full: [
       `${dryRunPlain(dryRun)}Synkade ${results.length} användare: ${tally}`,
       "",
       "=== Ändringar ===",
-      ...changed.map((r) => `${r.discordUserId}: ${formatChanges(r)}`),
+      ...[...changed]
+        .sort(byName)
+        .map(
+          (r) =>
+            `${reportNamePlain(r.discordUserId, r.name)}: ${formatChanges(r)}`,
+        ),
       "",
       "=== Fel ===",
-      ...errors.map((r) => `${r.discordUserId}: ${r.error}`),
+      ...[...errors]
+        .sort(byName)
+        .map((r) => `${reportNamePlain(r.discordUserId, r.name)}: ${r.error}`),
       "",
       "=== Oförändrade ===",
       ...results
         .filter((r) => !r.error && !changed.includes(r))
-        .map((r) => r.discordUserId),
+        .sort(byName)
+        .map((r) => reportNamePlain(r.discordUserId, r.name)),
     ].join("\n"),
+  };
+}
+
+async function refreshEveryone(token, guildId, callerId, callerName, dryRun) {
+  const results = await roles.syncAllUserRoles(guildId, { dryRun });
+  if (!dryRun) eventlog.logSyncAll({ callerId, callerName, results });
+
+  if (results.length === 0) {
+    await reply(token, "Inga länkade användare hittades.");
+    return;
+  }
+
+  const { message, summary, full } = formatRefreshEveryone({ results, dryRun });
+  await replyOrAttach(token, message, {
+    filename: "refresh-scoutid.txt",
+    summary,
+    full,
   });
 }
 
