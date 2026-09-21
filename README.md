@@ -67,11 +67,12 @@ The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 | -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------- | --------------- |
 | 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | —         | `(12)`          |
 | 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `IST`     | `(IST05)`       |
-| 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Ledare`  | `(AL12)`        |
+| 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Avdelningsledare` | `(AL12)` |
 | 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | —         | `(CMT)`         |
 
 The flat role column is `SCOUTNET_CATEGORY_ROLES`, granted *in addition to* the
-division role: a leader in troop 12 carries both `Ledare-12` and `Ledare`. It
+division role: a leader in troop 12 carries both `Ledare-12` and
+`Avdelningsledare`. It
 exists because Discord's AutoMod can only *exempt* roles, never target them, and
 caps the exempt list at 20 — far below the 151 per-division roles that "everyone
 except participants" would otherwise need. `deltagare` has no entry on purpose:
@@ -80,7 +81,12 @@ participants and nobody else. `cmt` needs none either, since a category without 
 division config already yields a flat role named after itself.
 
 The flat roles are managed like every other assigned role, so an ex-leader loses
-`Ledare` — and with it the exemption — on the next sync.
+`Avdelningsledare` — and with it the exemption — on the next sync.
+
+`Avdelningsledare` is also the one flat marker that is hoisted, so it is the
+heading leaders appear under in the member list. That makes the name
+member-facing, which is why it is spelled out here while the per-troop roles
+stay `Ledare-{nr}`.
 
 IST is split across two travel groups — the contingent tour and travelling on
 your own — and both have patrols. They share one patrol numbering, so patrol 07
@@ -133,7 +139,7 @@ With `LOG_CHANNEL_ID` set, the bot writes what it did — and when — to
 off and everything else is unchanged.
 
 ```
-09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → WSJ-event, Ledare-12, Ledare
+09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → WSJ-event, Ledare-12, Avdelningsledare
 09:20 🔗 @moderator länkade @erik till scoutid `777` (ersatte `666`) — + Deltagare-05
 09:31 🔒 @kim saknar Scout-rollen — roller strippade, Overifierad satt
       (måste länka om Scout-rollen i Discord: Kanaler och roller → Scout → Länka)

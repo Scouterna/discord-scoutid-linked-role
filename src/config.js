@@ -97,7 +97,8 @@ export function parseDivisionRoles(str) {
  * `"category:roleName,..."` → `{ category: roleName }`.
  *
  * Granted *in addition to* the category's division role, so a leader in troop 12
- * ends up with both `Ledare-12` and `Ledare`. A category with no division config
+ * ends up with both `Ledare-12` and `Avdelningsledare`. A category with no
+ * division config
  * already gets a flat role (`cmt` → `CMT`) and needs no entry.
  *
  * This exists for Discord AutoMod, which can only *exempt* roles and never

@@ -58,12 +58,20 @@ data:
   SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
   SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
   # Platta kategorimarkörer, utöver divisionsrollen: en ledare i avdelning 12 får
-  # både `Ledare-12` och `Ledare`. De finns för AutoMod i wsj27-infra, som bara
-  # kan *undanta* roller och max 20 av dem — "alla utom deltagare" hade krävt 158
-  # per-avdelning roller, men blir sex med de här. `deltagare` har med flit ingen
-  # rad: den saknade markören *är* det som gör att länkfiltret träffar dem.
-  # `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
-  SCOUTNET_CATEGORY_ROLES: ledare:Ledare,ist:IST
+  # både `Ledare-12` och `Avdelningsledare`. De finns för AutoMod i wsj27-infra,
+  # som bara kan *undanta* roller och max 20 av dem — "alla utom deltagare" hade
+  # krävt 158 per-avdelning roller, men blir sex med de här. `deltagare` har med
+  # flit ingen rad: den saknade markören *är* det som gör att länkfiltret träffar
+  # dem. `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
+  #
+  # `Avdelningsledare` hette `Ledare` fram till 2026-09-21. Rollen är sedan dess
+  # `hoist = true` i infra-repot, alltså en egen rubrik ovanför Online i
+  # medlemslistan — och därmed **läst av medlemmar**, av samma skäl som
+  # SCOUTNET_SCOUT_ROLE ovan. Därför det utskrivna namnet här, medan
+  # per-avdelningsrollerna står kvar som `Ledare-{nr}`. Namnbytet i Discord är en
+  # in-place-uppdatering: roll-id:t består, så ingen tappade rollen och AutoMods
+  # undantag (som pekar på id) bet hela vägen.
+  SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare,ist:IST
   # `{divnamn}` slår upp avdelningsnamnet i SCOUTNET_DIVISION_NAMES nedan.
   # Smeknamnet blir "Alexandra Johansson (12-Musen)" respektive "(AL12-Musen)".
   # IST och CMT står med flit kvar utan namn: IST-patrullerna har inga.

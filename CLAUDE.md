@@ -306,15 +306,34 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 - Fee-to-role mapping is fully configurable via env vars, not hardcoded
 - **Platta kategorimarkörer (`SCOUTNET_CATEGORY_ROLES`) delas ut utöver
-  divisionsrollen** — en ledare i avdelning 12 får både `Ledare-12` och `Ledare`.
-  De finns för AutoMod i wsj27-infra, som bara kan *undanta* roller och max 20 av
-  dem: "alla utom deltagare" hade krävt 158 per-avdelning roller, men blir sex med
-  markörerna. `deltagare` har med flit ingen markör — frånvaron *är* det som gör
-  att länkfiltret träffar dem. Ändras utdelningen måste ordningen hållas: bot
-  först, `/refresh-scoutid alla:true`, sedan `terraform apply` i infra-repot.
-  Omvänd ordning länkblockerar alla ledare och IST i mellantiden. Vänta *inte* in
-  den nattliga synken för mellansteget — den kommer, men "i mellantiden" är då upp
-  till ett dygn långt
+  divisionsrollen** — en ledare i avdelning 12 får både `Ledare-12` och
+  `Avdelningsledare`. De finns för AutoMod i wsj27-infra, som bara kan *undanta*
+  roller och max 20 av dem: "alla utom deltagare" hade krävt 158 per-avdelning
+  roller, men blir sex med markörerna. `deltagare` har med flit ingen markör —
+  frånvaron *är* det som gör att länkfiltret träffar dem. Ändras utdelningen
+  måste ordningen hållas: bot först, `/refresh-scoutid alla:true`, sedan
+  `terraform apply` i infra-repot. Omvänd ordning länkblockerar alla ledare och
+  IST i mellantiden. Vänta *inte* in den nattliga synken för mellansteget — den
+  kommer, men "i mellantiden" är då upp till ett dygn långt
+
+  **Att döpa om en markör är inte en sådan ändring**, och ordningen är fri där.
+  `discord_role` uppdaterar namnet in-place, så roll-id:t består — AutoMods
+  undantagslista pekar på id och märker ingenting, och ingen medlem tappar
+  rollen. Det enda mellanrummet är att den halva som ännu har det gamla namnet i
+  configen inte hittar rollen och tyst hoppar över *nya* utdelningar; nästa synk
+  efter att båda sidor landat lagar det. `Ledare` → `Avdelningsledare`
+  2026-09-21 gick den vägen, verifierad med en offline `terraform plan` mot en
+  påhittad state innan den applyades
+
+- **`Avdelningsledare` är hoistad, och därför läst av medlemmar.** Markören är
+  den enda av dem som visas som egen rubrik ovanför Online i medlemslistan
+  (`hoist = true` i infra-repots `roles.tf`), så namnet i configmappen är
+  medlemsvänd text på samma sätt som `SCOUTNET_SCOUT_ROLE`. Det är skälet till
+  att just den markören stavas ut medan per-avdelningsrollerna står kvar som
+  `Ledare-{nr}`: de senare syns bara i rollinställningarna. Hoisting visar en
+  medlems *högsta* hoistade roll, så en ledare som också är CMT eller Moderator
+  hamnar under dem — och `Ledare-Väntande`-ledare hamnar under rubriken precis
+  som alla andra, eftersom markören delas ut oavsett avdelning
 - Each fee category can have its own ScoutNet question ID for division assignment
 - Division numbers are zero-padded to minimum 2 digits
 - **Smeknamnet kortas i namnet, aldrig i suffixet** (`fitNickname` i
@@ -1146,7 +1165,7 @@ Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/ws
 | `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
 | `IST-Patrull-{nr}` / `IST-Väntande` | `discord_role.ist_patrol[*]` / `discord_role.ist_pending` |
 | `CMT` | `discord_role.cmt` |
-| `Ledare` / `IST` (platta markörer) | `discord_role.leader_flat` / `discord_role.ist_flat` |
+| `Avdelningsledare` / `IST` (platta markörer) | `discord_role.leader_flat` / `discord_role.ist_flat` |
 
 Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i
 infra-repot måste täcka alla värden ScoutNet kan returnera för

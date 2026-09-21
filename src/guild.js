@@ -163,8 +163,8 @@ export function managedRoleNames({ includeUnverified = false } = {}) {
     for (const category of new Set(
       Object.values(config.SCOUTNET_FEE_ROLES ?? {}),
     )) {
-      // The flat marker is managed too, so an ex-leader does not keep `Ledare`
-      // and the AutoMod exemption that comes with it.
+      // The flat marker is managed too, so an ex-leader does not keep
+      // `Avdelningsledare` and the AutoMod exemption that comes with it.
       const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[category];
       if (flatRole) names.add(flatRole);
 
