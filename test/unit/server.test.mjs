@@ -66,8 +66,21 @@ globalThis.fetch = async (url, opts = {}) => {
   return { ok: true, status: 200, json: async () => ({}) };
 };
 
-/** Wait for the deferred handler behind `token` to reply, or time out. */
-async function replyFor(token, timeoutMs = 4000) {
+/**
+ * Wait for the deferred handler behind `token` to reply, or time out.
+ *
+ * The budget is deliberately far wider than a healthy reply needs. Handlers ACK
+ * at once and answer about a second later, but the background work of *earlier*
+ * tests is still in flight while a later one waits — the six commands above run
+ * their real handlers, and those were still replying seven seconds in when this
+ * was measured. At four seconds the outcome depended on test order and machine
+ * load rather than on the handler, and a different case failed on each run.
+ *
+ * Nothing is weakened by the wait: how fast Discord is acknowledged is asserted
+ * separately, against Discord's own 3-second deadline, and this loop returns the
+ * moment the reply lands, so a generous ceiling costs nothing when things work.
+ */
+async function replyFor(token, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const got = edits.get(token);
