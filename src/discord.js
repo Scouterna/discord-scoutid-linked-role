@@ -179,6 +179,33 @@ export async function getRoleConnection(
 
 // --- Guild member management ---
 
+/**
+ * What a refused write to a guild member means, for the pod log.
+ *
+ * The status *is* the distinction, and guessing it wrong sends the reader
+ * somewhere else entirely. A 404 on a member write means the **member** — this
+ * user is not in this guild — while the role hierarchy and a missing Manage
+ * Roles both answer 403. The text used to blame the hierarchy for every
+ * failure, so three 404s on 2026-09-21 read as "the bot's role is too low" and
+ * pointed at Server Settings, while the real cause was a linking done from a
+ * second account that had never joined the server.
+ *
+ * `null` for anything else: a wrong guess is worse than no guess.
+ */
+export function memberWriteHint(status) {
+  if (status === 404) return "user is not a member of this guild";
+  if (status === 403) {
+    return "refused — bot role too low, or Manage Roles missing";
+  }
+  return null;
+}
+
+/** `: (hint)` when the status carries one, so call sites can interpolate. */
+export const hintSuffix = (status) => {
+  const hint = memberWriteHint(status);
+  return hint ? ` (${hint})` : "";
+};
+
 /** Returns false instead of throwing: a rename is never worth failing a sync over. */
 export async function updateGuildMemberNickname(guildId, userId, nickname) {
   try {
@@ -193,7 +220,13 @@ export async function updateGuildMemberNickname(guildId, userId, nickname) {
       `Updated nickname for ${userId} in guild ${guildId} to "${nickname}"`,
     );
     return true;
-  } catch {
+  } catch (e) {
+    // Logged here rather than left to the caller: both callers treat `false` as
+    // "nothing to report", so a silent catch meant a failed rename left no line
+    // at all — the only trace was the *absence* of the success line above.
+    console.error(
+      `Failed to set nickname for user ${userId}: ${e.message}${hintSuffix(e.status)}`,
+    );
     return false;
   }
 }

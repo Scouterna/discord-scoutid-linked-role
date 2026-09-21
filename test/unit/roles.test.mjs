@@ -32,6 +32,10 @@ process.env.SCOUTNET_DIVISION_ROLES =
 process.env.SCOUTNET_CATEGORY_ROLES = "ledare:Ledare,ist:IST";
 process.env.SCOUTNET_NICKNAME_SUFFIXES =
   "deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT";
+// `grantRoles` returns early without a configured guild, so the cases below
+// would all pass vacuously.
+process.env.DISCORD_GUILD_ID = "G1";
+process.env.DISCORD_TOKEN = "test-token";
 
 const storage = await import("../../src/storage.js");
 const roles = await import("../../src/roles.js");
@@ -353,4 +357,88 @@ test("explaining never throws, whatever ScoutNet does", async () => {
   };
   // It explains a linking; it must not be able to fail one.
   assert.match(await roles.explainMissingRoles("1"), /kunde inte nå ScoutNet/);
+});
+
+// --- `grantRoles`: why an empty result is empty ---
+
+const GUILD_ROLES = [
+  { id: "r-scout", name: "scout", managed: true },
+  { id: "r-event", name: "wsj-event", managed: false },
+  { id: "r-led47", name: "Ledare-47", managed: false },
+];
+
+/**
+ * Drive `grantRoles` over a stubbed Discord: the guild's role list, then one
+ * `PUT` per role, answered by `putStatus`.
+ */
+function withGuild({ guildRoles = GUILD_ROLES, putStatus = 200 } = {}) {
+  const attempted = [];
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    if (href.endsWith("/roles") && (init?.method ?? "GET") === "GET") {
+      return { ok: true, status: 200, json: async () => guildRoles };
+    }
+    if (init?.method === "PUT") {
+      attempted.push(href.split("/roles/")[1]);
+      if (putStatus === 200) return { ok: true, status: 200 };
+      return {
+        ok: false,
+        status: putStatus,
+        json: async () => ({}),
+        text: async () => "{}",
+      };
+    }
+    throw new Error(`unexpected request: ${init?.method ?? "GET"} ${href}`);
+  };
+  return attempted;
+}
+
+test("a linking from an account that never joined the server says so", async () => {
+  const attempted = withGuild({ putStatus: 404 });
+  const { granted, problem } = await roles.grantRoles("u1", [
+    "scout",
+    "wsj-event",
+    "Ledare-47",
+  ]);
+
+  // The incident of 2026-09-21: every role existed, the member did not. The old
+  // line asked "finns de i servern?" — about the roles — fifteen times, which is
+  // the one question that was already answered yes.
+  assert.deepEqual(granted, []);
+  assert.match(problem, /inte med i servern/);
+  assert.match(problem, /annat konto/);
+  // The managed role is never attempted, so it cannot be the source of the 404.
+  assert.deepEqual(attempted, ["r-event", "r-led47"]);
+});
+
+test("a refusal is reported as a refusal, not as an absent member", async () => {
+  withGuild({ putStatus: 403 });
+  const { problem } = await roles.grantRoles("u1", ["wsj-event"]);
+  // 403 is the hierarchy answer — the reading the old text applied to every
+  // failure. It is kept, but only where Discord actually gave it.
+  assert.match(problem, /nekade/);
+  assert.doesNotMatch(problem, /inte med i servern/);
+});
+
+test("a role missing from the guild is named, not guessed at", async () => {
+  withGuild({ guildRoles: [{ id: "r-scout", name: "scout", managed: true }] });
+  const { granted, problem } = await roles.grantRoles("u1", [
+    "scout",
+    "Ledare-47",
+  ]);
+  assert.deepEqual(granted, []);
+  assert.match(problem, /Ledare-47/);
+});
+
+test("the skipped scout role is not a problem", async () => {
+  withGuild();
+  const { granted, problem } = await roles.grantRoles("u1", [
+    "scout",
+    "wsj-event",
+    "Ledare-47",
+  ]);
+  // `scout` is managed and absent from `granted` by design — Discord grants it.
+  // Reporting that as a fault would put a warning on every healthy linking.
+  assert.deepEqual(granted, ["wsj-event", "Ledare-47"]);
+  assert.equal(problem, null);
 });

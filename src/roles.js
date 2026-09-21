@@ -185,7 +185,7 @@ async function applyRoles(
       into.push(name);
     } catch (e) {
       console.error(
-        `Failed to ${verb} role "${name}" (${role.id}) for user ${userId}: ${e.message}`,
+        `Failed to ${verb} role "${name}" (${role.id}) for user ${userId}: ${e.message}${discord.hintSuffix(e.status)}`,
       );
     }
   };
@@ -505,17 +505,45 @@ export async function syncAllUserRoles(guildId, { dryRun = false } = {}) {
 }
 
 /**
- * Grant roles on the linking path; returns the names actually granted.
+ * Why the linking path granted nothing, in the words the event log needs.
  *
- * Only ever *adds*: it runs before Discord has finished its half of the flow, so
- * it takes nothing away and cannot apply the verification gate. Managed roles are
- * skipped and reported as not granted — the absence of `scout` from the result is
- * the signal that Discord's half has not completed.
+ * Read off the statuses the writes just returned, never asked again afterwards:
+ * the answer is only knowable while they are happening, and a second pass over
+ * Discord's API would be a second source of truth for one question.
+ *
+ * The refusal beats the missing role when both happened, because a member the
+ * bot cannot write to at all explains every empty result on its own.
+ */
+function explainNothingGranted({ status, missing }) {
+  if (status === 404) {
+    return "kontot är inte med i servern — gjordes länkningen från ett annat konto?";
+  }
+  if (status === 403) {
+    return "Discord nekade skrivningen — står botens roll för lågt?";
+  }
+  if (status != null) return "rollerna kunde inte skrivas";
+  if (missing.length > 0) {
+    return `saknas i servern: ${missing.join(", ")}`;
+  }
+  return null;
+}
+
+/**
+ * Grant roles on the linking path.
+ *
+ * Returns `{ granted, problem }`: the names actually granted, and why an empty
+ * result is empty. Only ever *adds* — it runs before Discord has finished its
+ * half of the flow, so it takes nothing away and cannot apply the verification
+ * gate. Managed roles are skipped and reported as not granted: the absence of
+ * `scout` from `granted` is the signal that Discord's half has not completed,
+ * and it is not a `problem`.
  */
 export async function grantRoles(userId, roleNames) {
   const granted = [];
+  const missing = [];
+  let status = null;
   const guildId = config.DISCORD_GUILD_ID;
-  if (!guildId) return granted;
+  if (!guildId) return { granted, problem: null };
 
   try {
     const roleMap = roleMapOf(await discord.getGuildRoles(guildId));
@@ -524,6 +552,7 @@ export async function grantRoles(userId, roleNames) {
     for (const roleName of roleNames) {
       const role = roleMap.get(roleName.toLowerCase());
       if (!role) {
+        missing.push(roleName);
         console.warn(
           `Role "${roleName}" not found in guild — create it in Discord`,
         );
@@ -536,16 +565,18 @@ export async function grantRoles(userId, roleNames) {
           await discord.addRoleToUser(guildId, userId, role.id);
           granted.push(roleName);
         } catch (e) {
+          status ??= e.status;
           console.error(
-            `Failed to add role "${roleName}" (${role.id}) to user ${userId}: ${e.message} (bot role may be too low in hierarchy)`,
+            `Failed to add role "${roleName}" (${role.id}) to user ${userId}: ${e.message}${discord.hintSuffix(e.status)}`,
           );
         }
       }
     }
   } catch (e) {
+    status ??= e.status;
     console.error(`Error adding roles for ${userId}:`, e.message);
   }
-  return granted;
+  return { granted, problem: explainNothingGranted({ status, missing }) };
 }
 
 /**

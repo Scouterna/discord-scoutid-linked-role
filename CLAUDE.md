@@ -527,9 +527,34 @@ brist som går att laga: Discord delar ut Linked Role-rollen efter att användar
 avslutat på *sin* sida, alltså efter att vår callback kört och success-sidan
 renderats. En kontroll där hade fallit för varje förstagångslänkning. Vad som
 däremot är lagat är att rapporten inte längre påstår motsatsen —
-`roles.grantRoles` hoppar över managed roller och returnerar vad som *faktiskt*
-delades ut, så händelseloggens rad visar `WSJ-event, cmt` utan att hävda `scout`.
-Saknas `scout` i raden gick Discords halva av flödet inte i mål.
+`roles.grantRoles` hoppar över managed roller och returnerar `{ granted,
+problem }`, alltså vad som *faktiskt* delades ut, så händelseloggens rad visar
+`WSJ-event, cmt` utan att hävda `scout`. Saknas `scout` i raden gick Discords
+halva av flödet inte i mål. Den skipade `scout` är med flit **inget `problem`**:
+att flagga den hade lagt en varning på varje frisk länkning.
+
+##### Ett tomt rollresultat säger vilken sida som saknas
+
+`problem` läses av **statuskoderna skrivningarna just fick**, aldrig genom att
+fråga Discord igen efteråt — svaret går bara att veta medan de sker, och ett
+andra varv hade varit en andra sanning om samma fråga. En 404 betyder att
+*kontot* inte är med i servern, en 403 att skrivningen nekades, och en roll som
+inte fanns i guilden namnges.
+
+Fallbacken frågade tidigare `finns de i servern?` om varje sådant fall. Den
+frågan besvarades 15 gånger 2026-09-21 av en ledare vars fyra roller alla fanns:
+hon hade länkat från ett andra Discord-konto, skapat sju minuter före första
+försöket, som aldrig gått med i servern — medan hon själv satt i servern på sitt
+vanliga konto utan en enda roll. Vilket konto som länkat var precis det raden
+inte kunde ställa. Samma dag blandade podloggen ihop det åt andra hållet:
+`(bot role may be too low in hierarchy)` satt på *varje* misslyckad
+rollskrivning, så tre 404:or lästes som ett hierarkiproblem och pekade på Server
+Settings. `discord.memberWriteHint` äger numera den tolkningen, och hierarkin
+nämns bara på den 403 som faktiskt betyder det.
+
+Smeknamnsskrivningen svalde dessutom sitt fel helt (`catch { return false }`),
+och båda anroparna läser `false` som "inget att rapportera" — så ett
+misslyckat namnbyte lämnade *ingen* rad alls, bara frånvaron av den lyckade.
 
 #### En misslyckad metadata-push river inte längre hela länkningen
 
@@ -964,8 +989,8 @@ den finns.
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
 | `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus hela `/refresh-scoutid alla:true`-rapporten som ren funktion: att renderingen *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar" — att ingen halva använder mentions, att listan sorteras på namn med den namnlösa sist, och att bilagans dry run-markering bär ingen markup |
 | `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
-| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, och att `explainMissingRoles` håller ett avbrott skilt från en frånvaro |
-| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas |
+| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, att `explainMissingRoles` håller ett avbrott skilt från en frånvaro, och att `grantRoles` skiljer ett konto utanför servern (404) från en nekad skrivning (403) från en roll som inte finns |
+| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas, och att `memberWriteHint` läser 404 som medlemmen och 403 som behörigheten — och gissar inte på något annat |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
@@ -975,7 +1000,7 @@ den finns.
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
-| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500` |
+| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Plus att en länkning från ett konto som inte är med i servern säger *det* i loggen, och inte att rollerna skulle saknas |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
 
 **`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad

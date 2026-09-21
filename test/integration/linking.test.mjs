@@ -47,6 +47,8 @@ const GUILD_ROLES = [
 
 /** What the role-connection PUT answers. 429 stands in for the real incident. */
 let pushStatus = 200;
+/** What a write to the member answers. 404 = this user is not in the guild. */
+let memberWriteStatus = 200;
 let participants = {};
 const calls = { rolesAdded: [], nicks: [], logs: [] };
 
@@ -66,6 +68,12 @@ globalThis.fetch = async (url, opts = {}) => {
   // The test's own requests, or the route would answer itself.
   if (u.startsWith(BASE)) return realFetch(url, opts);
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+  const refused = (status) => ({
+    ok: false,
+    status,
+    json: async () => ({}),
+    text: async () => "{}",
+  });
 
   if (u.includes("access_token.php")) {
     return ok({ access_token: "sid-at", expires_in: 3600 });
@@ -106,11 +114,13 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   const roleChange = u.match(/\/members\/[^/]+\/roles\/([^/?]+)$/);
   if (roleChange) {
+    if (memberWriteStatus !== 200) return refused(memberWriteStatus);
     calls.rolesAdded.push(roleChange[1]);
     return ok({});
   }
   if (u.match(/\/members\/[^/?]+$/)) {
     if (opts.method === "PATCH") {
+      if (memberWriteStatus !== 200) return refused(memberWriteStatus);
       calls.nicks.push(JSON.parse(opts.body).nick);
       return ok({});
     }
@@ -218,4 +228,66 @@ test("a member who is not in the event is told why in the log", async () => {
   // says why rather than stopping at "inga roller".
   assert.deepEqual(calls.rolesAdded, []);
   assert.match(calls.logs.join("\n"), /inga roller — inte anmäld i eventet/);
+});
+
+test("a linking from an account that never joined the server says so", async () => {
+  // 2026-09-21: a leader linked fifteen times from a second Discord account,
+  // created seven minutes before the first attempt, that had never joined the
+  // server. Every write 404'd, and the line said "rollerna kunde inte delas ut
+  // — finns de i servern?" — pointing at the four roles, all of which existed.
+  // She was in the server the whole time, on her everyday account, with no
+  // roles; the question the line could not raise was which account had linked.
+  pushStatus = 200;
+  memberWriteStatus = 404;
+  participants = {
+    3259703: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Sandra",
+      last_name: "Gauffin",
+      questions: {},
+    },
+  };
+
+  try {
+    const { status } = await completeLinking({ userId: "u4", state: "s4" });
+    assert.equal(status, 200);
+    // The link is stored either way: it is the half that worked.
+    assert.equal(await storage.getLinkedScoutIDUserId("u4"), "3259703");
+    assert.deepEqual(calls.rolesAdded, []);
+    assert.deepEqual(calls.nicks, []);
+
+    const line = calls.logs.join("\n");
+    assert.match(line, /inga roller/);
+    assert.match(line, /inte med i servern/);
+    // The old text, which sent an admin to look for roles that were never gone.
+    assert.doesNotMatch(line, /finns de i servern/);
+  } finally {
+    memberWriteStatus = 200;
+  }
+});
+
+test("a live, mapped participant with a real refusal is not called absent", async () => {
+  // 403 is the hierarchy answer. Keeping the two apart is the point of the
+  // change: one is fixed in Server Settings, the other by the member.
+  pushStatus = 200;
+  memberWriteStatus = 403;
+  participants = {
+    3259703: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Sandra",
+      last_name: "Gauffin",
+      questions: {},
+    },
+  };
+
+  try {
+    await completeLinking({ userId: "u5", state: "s5" });
+    const line = calls.logs.join("\n");
+    assert.match(line, /nekade/);
+    assert.doesNotMatch(line, /inte med i servern/);
+  } finally {
+    memberWriteStatus = 200;
+  }
 });

@@ -192,3 +192,23 @@ test("verifyInteraction rejects a request that is not properly signed", () => {
   );
   assert.equal(result, false);
 });
+
+// --- `memberWriteHint`: reading Discord's refusal correctly ---
+
+test("a 404 on a member write blames the member, a 403 the permissions", () => {
+  // The whole fix rests on this distinction. The role-grant log used to append
+  // "(bot role may be too low in hierarchy)" to every failure, so three 404s on
+  // 2026-09-21 read as a hierarchy problem and sent the reader to Server
+  // Settings — while the roles were fine and the account simply was not in the
+  // guild, because the member had linked from a second account by mistake.
+  assert.match(discord.memberWriteHint(404), /not a member/);
+  assert.match(discord.memberWriteHint(403), /bot role too low|Manage Roles/);
+});
+
+test("an unfamiliar status gets no hint at all", () => {
+  // A wrong guess is worse than no guess: it is read as the answer.
+  assert.equal(discord.memberWriteHint(500), null);
+  assert.equal(discord.memberWriteHint(undefined), null);
+  assert.equal(discord.hintSuffix(500), "");
+  assert.match(discord.hintSuffix(404), /^ \(.*\)$/);
+});

@@ -190,12 +190,14 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     // not fail a verification that otherwise succeeded. The member gets the
     // Scout marker now and the rest at the next sync.
     let assignedRoles = [];
+    let grantProblem = null;
     try {
       const desiredRoles = await roles.getDesiredRoles(scoutIDUser.scoutid, {
         allowIncomplete: true,
       });
       if (desiredRoles.length > 0) {
-        assignedRoles = await roles.grantRoles(discordUserId, desiredRoles);
+        ({ granted: assignedRoles, problem: grantProblem } =
+          await roles.grantRoles(discordUserId, desiredRoles));
       }
     } catch (e) {
       console.error(`Error assigning roles for ${discordUserId}:`, e.message);
@@ -209,13 +211,19 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     }
 
     // Nothing granted — say why, in the line someone reads two hours later.
-    // `explainMissingRoles` returns null for a live, mapped participant, and
-    // then an empty result means something else: the roles are missing from the
-    // guild, or the writes were refused.
+    // Two sources, in this order: ScoutNet explains a member there was nothing
+    // to give, and `explainMissingRoles` returns null for a live, mapped one —
+    // then the writes themselves explain it, from the statuses they saw.
+    //
+    // The old fallback asked "finns de i servern?" for every such case. On
+    // 2026-09-21 that was answered fifteen times by someone whose roles all
+    // existed and who was not herself in the server, on an account she had
+    // linked from by mistake — the one question the line could not raise.
     const reason =
       assignedRoles.length === 0
         ? ((await roles.explainMissingRoles(scoutIDUser.scoutid)) ??
-          "rollerna kunde inte delas ut — finns de i servern?")
+          grantProblem ??
+          "rollerna kunde inte delas ut")
         : null;
 
     eventlog.logLinked({
