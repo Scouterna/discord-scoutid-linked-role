@@ -44,6 +44,33 @@ export function parseNicknameSuffixes(str) {
 }
 
 /**
+ * `"01:Björnen,02:Bävern,..."` → `{ "01": "Björnen" }`.
+ *
+ * What `{divnamn}` in a nickname suffix resolves to. Numbers are zero-padded on
+ * read, so `"1:Björnen"` and `"01:Björnen"` are the same row.
+ *
+ * **This is a second copy.** The names live in `discord/terraform.tfvars` in
+ * Scouterna/wsj27-infra, which is where the channel topics read them from; a
+ * division renamed there has to be renamed here too. Nothing detects the drift
+ * — the suffix would simply keep the old name.
+ *
+ * The map is keyed by number alone, which holds only as long as one number means
+ * one thing. `deltagare` and `ledare` both answer with an avdelning, so they
+ * share these names correctly, but `ist` reads the same ScoutNet question for a
+ * *patrol* number. IST patrols have no names today, so nothing collides; give
+ * them names and this has to become per-category first.
+ */
+export function parseDivisionNames(str) {
+  if (!str) return null;
+  const map = {};
+  for (const entry of str.split(",")) {
+    const [num, name] = entry.split(":").map((s) => s.trim());
+    if (num && name) map[num.padStart(2, "0")] = name;
+  }
+  return Object.keys(map).length > 0 ? map : null;
+}
+
+/**
  * `"category:questionId:withDiv:withoutDiv,..."` →
  * `{ category: { questionId, withDiv, withoutDiv } }`.
  * Example: `"deltagare:88168:Deltagare-{div}:Deltagare-Väntande"`.
@@ -150,6 +177,9 @@ const config = {
   ),
   SCOUTNET_NICKNAME_SUFFIXES: parseNicknameSuffixes(
     process.env.SCOUTNET_NICKNAME_SUFFIXES,
+  ),
+  SCOUTNET_DIVISION_NAMES: parseDivisionNames(
+    process.env.SCOUTNET_DIVISION_NAMES,
   ),
 
   // General

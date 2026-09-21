@@ -205,7 +205,7 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       const suffix = await roles.getNicknameSuffix(scoutIDUser.scoutid, {
         allowIncomplete: true,
       });
-      await roles.setNickname(discordUserId, scoutIDUser.name + suffix);
+      await roles.setNickname(discordUserId, scoutIDUser.name, suffix);
     }
 
     // Nothing granted — say why, in the line someone reads two hours later.

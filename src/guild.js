@@ -37,9 +37,86 @@ export const stripNickSuffix = (name) =>
 /** Division numbers are zero-padded to two digits, or the role names would not match. */
 export const padDiv = (division) => String(division).padStart(2, "0");
 
-/** Fill `{div}` in a configured pattern — "Deltagare-{div}", "AL{div}". */
-export const withDivision = (pattern, division) =>
-  pattern.replace("{div}", padDiv(division));
+/**
+ * Fill `{div}` and `{divnamn}` in a configured pattern — "Deltagare-{div}",
+ * "AL{div}-{divnamn}".
+ *
+ * A division with no name in `SCOUTNET_DIVISION_NAMES` drops the placeholder
+ * *and* the separator in front of it, so "AL{div}-{divnamn}" degrades to "AL12"
+ * — what the suffix looked like before names existed — rather than leaving a
+ * dangling dash or printing "{divnamn}" at people.
+ */
+export const withDivision = (pattern, division) => {
+  const div = padDiv(division);
+  const name = config.SCOUTNET_DIVISION_NAMES?.[div];
+  const named = name
+    ? pattern.replace("{divnamn}", name)
+    : pattern.replace(/[\s-]*\{divnamn\}/, "");
+  return named.replace("{div}", div);
+};
+
+/**
+ * A word reduced to its initial — unless it is three characters or fewer, which
+ * is left whole. Shortening "af", "van", "der", "Gao" or "Dos" buys one or two
+ * characters and spends a whole element of someone's name to do it. Among the
+ * event's people that is nine names, and in one of them "Gao" is the surname
+ * entire.
+ */
+const shortenWord = (word) => ([...word].length > 3 ? [...word][0] : word);
+
+/**
+ * The ways to shorten a name, longest first: the last word to an initial, then
+ * the one before it, and so on. The first word is never abbreviated — a person
+ * shortening their own name gives up the surname, not the name they are called.
+ *
+ * Forms that shorten nothing are dropped, so a name built of short words yields
+ * fewer steps than it has words rather than the same string several times over.
+ *
+ * Shared with the audit so the two agree on what the sync's own work looks like.
+ */
+export function abbreviatedNames(base) {
+  const words = (base || "").trim().split(/\s+/).filter(Boolean);
+  const full = words.join(" ");
+  const forms = [];
+  for (let keep = words.length - 1; keep >= 1; keep--) {
+    const form = [
+      ...words.slice(0, keep),
+      ...words.slice(keep).map(shortenWord),
+    ].join(" ");
+    if (form !== full && !forms.includes(form)) forms.push(form);
+  }
+  return forms;
+}
+
+/**
+ * `base` and `suffix` joined inside Discord's 32 characters.
+ *
+ * **The suffix never gives way.** It carries the division, which is the one part
+ * of the nickname a reader cannot look up anywhere else, and a clipped suffix is
+ * worse than no suffix: `stripNickSuffix` needs the closing paren to find it
+ * again, so a truncated one can never be replaced. Someone who changed troop
+ * would keep the old number forever while every later sync compared the mangled
+ * string against itself and reported no change.
+ *
+ * The name gives way instead, the way a person gives it way: the surname to an
+ * initial, then the name before it, and only when nothing else is left does the
+ * remainder get cut.
+ */
+export function fitNickname(base, suffix = "") {
+  const full = (base || "").trim();
+  if (!full) return "";
+
+  const budget = NICK_MAX - suffix.length;
+  if (full.length <= budget) return full + suffix;
+
+  for (const form of abbreviatedNames(full)) {
+    if (form.length <= budget) return form + suffix;
+  }
+  return (full.slice(0, Math.max(budget, 0)).trim() + suffix).slice(
+    0,
+    NICK_MAX,
+  );
+}
 
 /** The division role for an answer, or the pending role when there is no answer. */
 export const divisionRoleName = (divConfig, division) =>

@@ -292,6 +292,25 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   till ett dygn långt
 - Each fee category can have its own ScoutNet question ID for division assignment
 - Division numbers are zero-padded to minimum 2 digits
+- **Smeknamnet kortas i namnet, aldrig i suffixet** (`fitNickname` i
+  [src/guild.js](src/guild.js)). Discord tar 32 tecken, och med avdelningsnamnet i
+  suffixet räcker de inte åt alla: mätt mot eventet behöver 228 av 2 117 med
+  avdelning kortas. Tidigare gjorde koden `(base + suffix).substring(0, 32)`,
+  alltså högg den av *suffixet* — och ett avhugget suffix saknar sin
+  avslutande parentes, som `stripNickSuffix` behöver för att hitta det igen.
+  Följden var permanent: varje senare synk byggde samma sträng, jämförde den
+  med sig själv och rapporterade ingen ändring, så den som bytte avdelning
+  visade den gamla för alltid. Namnet viker i stället, i den ordning en
+  människa viker sitt: efternamnet till en bokstav, sedan ledet före, och
+  först när inget återstår huggs resten. Förnamnet förkortas aldrig, och
+  **inte heller ett led på högst tre tecken** — `af`, `van der`, `Dos`, `Lé`
+  och `Gao` sparar en eller två tecken på att krympas och kostar ett helt
+  namnled; i ett av de nio fallen är `Gao` hela efternamnet.
+
+  Två följder: **auditens kategori 6 måste känna till regeln** — den jämför
+  smeknamn mot ScoutNet-namn och hade annars rapporterat alla 228 som
+  namnskillnad — och länkningsvägens `setNickname` tar namn och suffix *isär*,
+  så den inte återinför samma bugg genom att slå ihop dem själv.
 - The bot cannot modify users above it in Discord's role hierarchy (403 is expected for admins)
 - `register.js` only needs Discord API, but imports storage.js which connects to Table Storage — storage errors during registration are harmless
 - Interaction responses use a 1-second delay before processing to avoid race conditions with Discord's deferred response handling
@@ -537,6 +556,11 @@ SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT
+
+# num:namn — vad {divnamn} i ett suffix slår upp. Andra kopian av namnen;
+# första står i discord/terraform.tfvars i wsj27-infra. Tomt = {divnamn} och
+# separatorn framför den faller bort, alltså suffixet som det såg ut förut.
+SCOUTNET_DIVISION_NAMES=
 ```
 
 ## Nattlig rollsynk — [src/refresh.js](src/refresh.js)
@@ -871,6 +895,7 @@ den finns.
 | Fil | Täcker |
 | --- | --- |
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
+| `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
 | `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, och att `explainMissingRoles` håller ett avbrott skilt från en frånvaro |
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |

@@ -5,7 +5,7 @@ import * as storage from "./storage.js";
 import * as metadata from "./metadata.js";
 import {
   UNVERIFIED_ROLE,
-  NICK_MAX,
+  fitNickname,
   roleMapOf,
   displayName,
   guildNick,
@@ -242,7 +242,7 @@ async function applyNickname(
   const base = baseName || stripNickSuffix(currentNick);
   if (!base) return null;
 
-  const newNick = (base + suffix).substring(0, NICK_MAX);
+  const newNick = fitNickname(base, suffix);
   if (newNick === currentNick) return null;
   if (!dryRun) {
     await discord.updateGuildMemberNickname(guildId, userId, newNick);
@@ -552,10 +552,14 @@ export async function grantRoles(userId, roleNames) {
  * Set a nickname on the linking path. Swallows its own errors — a rename must not
  * turn a completed linking into a failure. With no configured guild it falls back
  * to every guild the user's own token can see.
+ *
+ * Takes the name and the suffix apart rather than joined, so this path fits them
+ * to Discord's limit the same way the sync does. Joined, the caller would be the
+ * one deciding what gets cut — and it cut the suffix.
  */
-export async function setNickname(userId, nickname) {
+export async function setNickname(userId, baseName, suffix = "") {
   try {
-    const nick = nickname.substring(0, NICK_MAX);
+    const nick = fitNickname(baseName, suffix);
     const guildId = config.DISCORD_GUILD_ID;
     if (guildId) {
       await discord.updateGuildMemberNickname(guildId, userId, nick);

@@ -8,6 +8,7 @@ import {
   roleMapOf,
   displayName,
   stripNickSuffix,
+  abbreviatedNames,
   withDivision,
   managedRoleNames,
   divisionPrefixes,
@@ -247,6 +248,18 @@ const CHECKS = [
         if (
           (!first || display.includes(first)) &&
           (!last || display.includes(last))
+        ) {
+          continue;
+        }
+        // "Alexandra J" is the sync's own work, not a member who renamed
+        // themselves: `fitNickname` shortens the surname when the full name plus
+        // its suffix would not fit Discord's 32 characters. Without this the
+        // audit reports every one of them, and a category that shouts about
+        // nothing is one nobody reads.
+        if (
+          abbreviatedNames(scoutnet.fullName(p)).some(
+            (form) => display === normalizeName(form),
+          )
         ) {
           continue;
         }
