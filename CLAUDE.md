@@ -1,5 +1,30 @@
 # Discord ScoutID Linked Role Bot
 
+## Dokumentationen är en del av ändringen
+
+**Ändrar du beteende, ändra dokumentationen i samma commit.** CLAUDE.md, README
+och `docs/` beskriver *varför* koden ser ut som den gör, och en beskrivning som
+slutat stämma är sämre än ingen alls: den läses som sann och leder fel.
+
+Det här är inte hypotetiskt. `discord/CLAUDE.md` i wsj27-infra bar regeln
+"Avdelningsnamn inkluderas INTE i kanalnamn" medan kanalerna hette tvärtom, och
+det här repots configavsnitt stod rubricerat "aktuell prod-config" med fyra av
+fem stickprovade nycklar fel.
+
+Tre vanor som håller det sant:
+
+- **Duplicera aldrig ett värde som kan ändras.** Beskriv formen och peka på
+  källan. Varje kopia är en andra sanning, och den förlorar — det var precis så
+  configavsnittet gick sönder. Går en kopia inte att undvika (som
+  `SCOUTNET_DIVISION_NAMES`, som måste finnas i två repon), skriv ut på båda
+  ställena att den andra finns.
+- **Sök efter det du just gjorde falskt.** Har du bytt ett namn, en flagga, ett
+  suffix eller en regel — `grep -rn "<det gamla>" --include=*.md .` innan du
+  committar. Det tar sekunder och är det enda som fångar en mening tre filer bort.
+- **Låt orsaken stå kvar, inte bara resultatet.** Raderna här är skrivna för att
+  beskriva vilket fel de finns för att förhindra. Byter du ut en, byt ut den mot
+  något som förklarar lika mycket.
+
 ## Build & Deploy
 
 **The bot runs on Kubernetes**, in namespace `wsj27` on Scouterna's shared AKS
@@ -528,39 +553,37 @@ rollout).
 
 ## Config format reference
 
-Aktuell prod-config — [k8s/configmap.yaml](k8s/configmap.yaml) är enda källan.
-Roll-konfigurationen låg tidigare i `terraform.tfvars`, men de variablerna togs
-bort när Container App avvecklades: Terraform hanterar inte längre något som
-boten läser.
+**Värdena står i [k8s/configmap.yaml](k8s/configmap.yaml), och bara där.** Det
+här avsnittet beskriver *formen*; filen bär värdena och motiveringen bakom varje
+enskilt val.
 
-```
-# Kanal för händelseloggen (#server-logg). Tomt = loggning av.
-LOG_CHANNEL_ID=
-# Vad medlemsscannern rapporterar. join,leave,nickname,roles — "off" = av.
-# roles kräver View Audit Log på botens roll och rapporterar bara andras ändringar.
-LOG_MEMBER_EVENTS=join,leave,nickname
+Listan var tidigare en kopia av prod-configen, rubricerad "aktuell". Den höll
+inte: kontrollerat 2026-09-21 hade fyra av fem stickprovade nycklar driftat — ett
+dubblerat `46628:cmt`, `wsj-event` mot guildens `WSJ-event`, och två som aldrig
+uppdaterades när avdelningsnamnen rullades ut samma dag. En kopia av ett värde
+som ändras är en andra sanning, och den förlorar alltid.
 
-# Marker-roller (alla länkade / alla event-anmälda)
-# Läses av medlemmar, inte bara av rolluppslagningen: därför guildens skiftläge.
-SCOUTNET_SCOUT_ROLE=Scout
-SCOUTNET_EVENT_ROLE=wsj-event
+| Nyckel | Form |
+| --- | --- |
+| `LOG_CHANNEL_ID` | kanal-id; tomt = händelseloggen av, allt annat oförändrat |
+| `LOG_MEMBER_EVENTS` | `join,leave,nickname,roles` — `off` eller tomt stänger scannern |
+| `SCOUTNET_SCOUT_ROLE` | rollnamn. **Läses av medlemmar**, så guildens skiftläge |
+| `SCOUTNET_EVENT_ROLE` | rollnamn |
+| `SCOUTNET_FEE_ROLES` | `feeId:kategori,…` |
+| `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…` |
+| `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
+| `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
+| `SCOUTNET_DIVISION_NAMES` | `nummer:namn,…` — vad `{divnamn}` slår upp. **Andra kopian**: namnen ägs av `discord/terraform.tfvars` i wsj27-infra, och inget upptäcker driften |
 
-# fee_id:category
-SCOUTNET_FEE_ROLES=25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt,46628:cmt
+Parsrarna ligger i [src/config.js](src/config.js) och pinnas av `unit/config`,
+inklusive vad som händer med trasig indata. Roll-konfigurationen låg tidigare i
+`terraform.tfvars`, men de variablerna togs bort när Container App avvecklades:
+Terraform hanterar inte längre något som boten läser.
 
-# category:questionId:roleWithDiv:roleWithoutDiv
-SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
+Läs ett värde ur prod när du behöver det exakta:
 
-# category:roleName — platt markör *utöver* divisionsrollen (Ledare-12 + Ledare)
-SCOUTNET_CATEGORY_ROLES=ledare:Ledare,ist:IST
-
-# category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
-SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT
-
-# num:namn — vad {divnamn} i ett suffix slår upp. Andra kopian av namnen;
-# första står i discord/terraform.tfvars i wsj27-infra. Tomt = {divnamn} och
-# separatorn framför den faller bort, alltså suffixet som det såg ut förut.
-SCOUTNET_DIVISION_NAMES=
+```bash
+kubectl get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_NICKNAME_SUFFIXES}'
 ```
 
 ## Nattlig rollsynk — [src/refresh.js](src/refresh.js)
