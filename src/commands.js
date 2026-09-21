@@ -143,10 +143,17 @@ function handler(fn, { admin = false, errorPrefix = "Fel" } = {}) {
 // --- Shared rendering ---
 
 /** `{ added, removed }` from a sync → a clause an admin reads in the reply. */
-function formatChanges({ added, removed }) {
+export function formatChanges({ added, removed, nickname }) {
   const parts = [];
   if (added?.length > 0) parts.push(`Lade till: ${added.join(", ")}`);
   if (removed?.length > 0) parts.push(`Tog bort: ${removed.join(", ")}`);
+  // The nickname has to be here because `changedAnything` counts it: a member
+  // whose only change is the rename lands in the "changed" list, and without
+  // this line the report says "240 med ändringar" and then prints "Inga
+  // ändringar" 240 times. That is what a suffix change looks like — every
+  // member moves, no role does — so the dry run meant to preview it showed
+  // nothing at all.
+  if (nickname) parts.push(`Smeknamn: ${nickname}`);
   return parts.length > 0 ? parts.join(". ") : "Inga ändringar";
 }
 
@@ -160,6 +167,22 @@ const noteFor = ({ note } = {}) => (note ? ` — ${note}` : "");
 /** Marks a reply that describes what *would* happen rather than what did. */
 const dryRunPrefix = (dryRun) =>
   dryRun ? "**Dry run — inget ändrades.** " : "";
+
+/**
+ * The same marker for an attachment, without markup — Discord renders nothing
+ * inside a file, so the bold form arrives as literal asterisks.
+ *
+ * The file needs its own copy because it is the half that outlives the
+ * exchange: over 2000 characters the report becomes an attachment, and the
+ * attachment is what gets saved, pasted and forwarded. Without this line a
+ * dry run's file is indistinguishable from a real run's, and the question it
+ * leaves open — were 240 people just renamed? — cannot be answered from the
+ * report at all.
+ */
+export const dryRunPlain = (dryRun) =>
+  dryRun
+    ? "DRY RUN — inget ändrades. Listan visar vad som skulle hända.\n\n"
+    : "";
 
 // --- /refresh-scoutid ---
 
@@ -246,9 +269,9 @@ async function refreshEveryone(token, guildId, callerId, callerName, dryRun) {
 
   await replyOrAttach(token, lines.join("\n"), {
     filename: "refresh-scoutid.txt",
-    summary: `Synkade ${results.length} användare: ${changed.length} ändringar, ${errors.length} fel. Full lista i bifogad fil.`,
+    summary: `${dryRunPrefix(dryRun)}Synkade ${results.length} användare: ${changed.length} ändringar, ${errors.length} fel. Full lista i bifogad fil.`,
     full: [
-      `Synkade ${results.length} användare: ${tally}`,
+      `${dryRunPlain(dryRun)}Synkade ${results.length} användare: ${tally}`,
       "",
       "=== Ändringar ===",
       ...changed.map((r) => `${r.discordUserId}: ${formatChanges(r)}`),

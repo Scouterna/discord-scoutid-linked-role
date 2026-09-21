@@ -19,7 +19,9 @@ process.env.DISCORD_CLIENT_ID = "app-1";
 process.env.DISCORD_GUILD_ID = "G1";
 process.env.LOG_CHANNEL_ID = "";
 
-const { targetUser } = await import("../../src/commands.js");
+const { targetUser, formatChanges, dryRunPlain } =
+  await import("../../src/commands.js");
+const { changedAnything } = await import("../../src/guild.js");
 
 const interaction = (options) => ({ data: { name: "t", options } });
 const PICKED = "111111111111111111";
@@ -78,4 +80,52 @@ test("neither option falls back to the caller when one is offered", () => {
 test("neither option and no fallback returns the caller's own wording", () => {
   const got = targetUser(interaction(undefined), { missing: "Ange `person`." });
   assert.deepEqual(got, { error: "Ange `person`." });
+});
+
+/**
+ * What a sync result is rendered as, and the invariant that was broken on
+ * 2026-09-21: `changedAnything` counts the nickname, `formatChanges` did not.
+ * A suffix change moves every member and no role, so a whole-server dry run
+ * reported "240 med ändringar" and then printed "Inga ändringar" 240 times —
+ * the one run whose entire purpose was to show what would happen.
+ */
+const CASES = [
+  {
+    label: "nickname only",
+    r: { nickname: "Alexandra J (AL47-Trollsländan)" },
+  },
+  {
+    label: "roles only",
+    r: { added: ["Ledare-12"], removed: ["Ledare-Väntande"] },
+  },
+  { label: "both", r: { added: ["CMT"], nickname: "Sam Ek (CMT)" } },
+  { label: "neither", r: {} },
+];
+
+for (const { label, r } of CASES) {
+  test(`rendering agrees with the change count — ${label}`, () => {
+    const rendered = formatChanges(r);
+    assert.equal(
+      rendered !== "Inga ändringar",
+      changedAnything(r),
+      `"${rendered}" contradicts changedAnything`,
+    );
+  });
+}
+
+test("the nickname is printed, not merely counted", () => {
+  assert.match(
+    formatChanges({ nickname: "Alexandra J (AL47-Trollsländan)" }),
+    /Smeknamn: Alexandra J \(AL47-Trollsländan\)/,
+  );
+});
+
+test("the attachment's dry-run marker carries no markup", () => {
+  // Discord renders nothing inside a file, so the bold form arrives as literal
+  // asterisks. The marker has to be there: the attachment is the half that gets
+  // saved and forwarded, and without it a dry run reads as a real one.
+  const marker = dryRunPlain(true);
+  assert.match(marker, /DRY RUN/);
+  assert.doesNotMatch(marker, /[*`_]/);
+  assert.equal(dryRunPlain(false), "");
 });

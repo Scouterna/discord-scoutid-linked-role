@@ -606,6 +606,22 @@ Tre egenskaper som måste hålla om det här ändras:
   Räcker inte det återställer en *veckopuls* signalen till en hundradel av bruset,
   och den behöver inget tillstånd — bara en veckodagskontroll.
 
+**Tre formatterare beskriver ett synkresultat, och de måste säga samma sak.**
+`describeChanges` i eventlog.js, `formatRefreshSummary` i refresh.js och
+`formatChanges` i commands.js. Den sista glömde smeknamnet medan `changedAnything`
+räknade det — och en suffixändring flyttar *varje* medlem utan att röra en enda
+roll, så dry-runen inför avdelningsnamnen 2026-09-21 rapporterade "240 med
+ändringar" och skrev sedan "Inga ändringar" 240 gånger. Enda körningen vars hela
+syfte var att visa vad som skulle hända visade alltså ingenting. `unit/commands`
+pinnar numera att rendering och räkning följs åt.
+
+**Bilagan bär sin egen dry run-markering.** Över 2 000 tecken blir rapporten en
+fil, och filen är hälften som sparas och vidarebefordras — men `dryRunPrefix` satt
+bara på meddelandet. En dry-run-fil gick därför inte att skilja från en skarp, och
+frågan den lämnade öppen — döptes 240 personer om nyss? — gick inte att besvara ur
+rapporten alls. `dryRunPlain` är samma markering utan markup, av samma skäl som
+`formatAuditText` finns.
+
 `/refresh-scoutid dryrun:true` kör samma sak från Discord utan att skriva.
 `dryRun` är en **parameter, aldrig en modulflagga**: servern hanterar
 förfrågningar samtidigt, så en processglobal flagga hade tystat en riktig
@@ -895,6 +911,7 @@ den finns.
 | Fil | Täcker |
 | --- | --- |
 | `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
+| `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus att renderingen av ett synkresultat *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar". Och att bilagans dry run-markering bär ingen markup |
 | `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
 | `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, och att `explainMissingRoles` håller ett avbrott skilt från en frånvaro |
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas |
