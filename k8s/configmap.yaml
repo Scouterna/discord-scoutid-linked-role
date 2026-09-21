@@ -64,4 +64,24 @@ data:
   # rad: den saknade markören *är* det som gör att länkfiltret träffar dem.
   # `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
   SCOUTNET_CATEGORY_ROLES: ledare:Ledare,ist:IST
-  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT
+  # `{divnamn}` slår upp avdelningsnamnet i SCOUTNET_DIVISION_NAMES nedan.
+  # Smeknamnet blir "Alexandra Johansson (12-Musen)" respektive "(AL12-Musen)".
+  # IST och CMT står med flit kvar utan namn: IST-patrullerna har inga.
+  #
+  # Discord tar 32 tecken, och med namnet i suffixet räcker de inte åt alla —
+  # 228 av de 2 117 med avdelning behöver kortas. Det är `fitNickname` som
+  # gör det, och den kortar *namnet*, aldrig suffixet. Längre suffix här
+  # betyder alltså fler förkortade efternamn, inte avhuggna avdelningar.
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}-{divnamn}:,ledare:AL{div}-{divnamn}:AL,ist:IST{div}:IST,cmt::CMT
+
+  # nummer:namn för `{divnamn}`. **Andra kopian** — första står i
+  # discord/terraform.tfvars i Scouterna/wsj27-infra, där kanalernas topics
+  # läser dem. Döps en avdelning om där måste den döpas om här också;
+  # ingenting upptäcker driften, suffixet skulle bara bära det gamla namnet.
+  #
+  # Nyckeln är numret ensamt. Det håller så länge ett nummer betyder en sak:
+  # deltagare och ledare svarar båda med en avdelning och delar därför de här
+  # namnen rätt, medan `ist` läser samma ScoutNet-fråga för ett *patrull*nummer.
+  # IST-patrullerna har inga namn idag, så ingenting krockar — ger man dem namn
+  # måste kartan först bli per kategori.
+  SCOUTNET_DIVISION_NAMES: 01:Björnen,02:Bävern,03:Ekorren,04:Fladdermusen,05:Räven,06:Geten,07:Vildsvinet,08:Haren,09:Igelkotten,10:Lodjuret,11:Kräftan,12:Musen,13:Renen,14:Rådjuret,15:Fåret,16:Kråkan,17:Uttern,18:Vargen,19:Ormen,20:Ankan,21:Gräshoppan,22:Gåsen,23:Hönan,24:Sälen,25:Svanen,26:Hästen,27:Getingen,28:Myran,29:Ugglan,30:Abborren,31:Laxen,32:Maneten,33:Vesslan,34:Räkan,35:Hajen,36:Sparven,37:Ödlan,38:Grodan,39:Humlan,40:Fjärilen,41:Tranan,42:Nyckelpigan,43:Örnen,44:Krabban,45:Mullvaden,46:Kon,47:Trollsländan,48:Spindeln,49:Myskoxen,50:Hjorten,51:Strömmingen,52:Korpen,53:Staren
