@@ -124,6 +124,13 @@ export async function getNicknameSuffix(
 }
 
 /**
+ * The outage answer from `explainMissingRoles`, exported so the linking page can
+ * tell it apart from an absence without matching on the wording.
+ */
+export const SCOUTNET_UNREACHABLE =
+  "kunde inte nå ScoutNet — rollerna kommer vid nästa synk";
+
+/**
  * Why is there nothing to give this member? A short clause, or **null** when
  * there is nothing to explain. **Never throws** — it explains a linking and must
  * not be able to fail one — and an outage is reported *as an outage*: the
@@ -143,7 +150,7 @@ export async function explainMissingRoles(scoutnetMemberId) {
     );
     // Without `e.message`: this string goes to a Discord channel, and ScoutNet's
     // API key travels in the query string of the call that just failed.
-    return "kunde inte nå ScoutNet — rollerna kommer vid nästa synk";
+    return SCOUTNET_UNREACHABLE;
   }
 
   if (!participant) return "inte anmäld i eventet";
@@ -531,8 +538,9 @@ function explainNothingGranted({ status, missing }) {
 /**
  * Grant roles on the linking path.
  *
- * Returns `{ granted, problem }`: the names actually granted, and why an empty
- * result is empty. Only ever *adds* — it runs before Discord has finished its
+ * Returns `{ granted, problem, status }`: the names actually granted, why an
+ * empty result is empty, and the first HTTP status a write failed with — the
+ * linking page needs the 404 itself, not the sentence written for the log. Only ever *adds* — it runs before Discord has finished its
  * half of the flow, so it takes nothing away and cannot apply the verification
  * gate. Managed roles are skipped and reported as not granted: the absence of
  * `scout` from `granted` is the signal that Discord's half has not completed,
@@ -543,7 +551,7 @@ export async function grantRoles(userId, roleNames) {
   const missing = [];
   let status = null;
   const guildId = config.DISCORD_GUILD_ID;
-  if (!guildId) return { granted, problem: null };
+  if (!guildId) return { granted, problem: null, status };
 
   try {
     const roleMap = roleMapOf(await discord.getGuildRoles(guildId));
@@ -576,7 +584,11 @@ export async function grantRoles(userId, roleNames) {
     status ??= e.status;
     console.error(`Error adding roles for ${userId}:`, e.message);
   }
-  return { granted, problem: explainNothingGranted({ status, missing }) };
+  return {
+    granted,
+    problem: explainNothingGranted({ status, missing }),
+    status,
+  };
 }
 
 /**

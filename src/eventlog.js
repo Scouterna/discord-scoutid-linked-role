@@ -135,9 +135,9 @@ const strippedBecause = (result) =>
 
 /**
  * A user completed the full `/linked-role` OAuth flow. `reason` says *why* when
- * there were no roles to grant — see `roles.explainMissingRoles`. `metadataFailed`
- * earns `⚠️` over `✅`: the link is stored and roles handed out, but the Scout
- * requirement has nothing to evaluate, so the member must come back.
+ * there were no roles to grant — see `roles.explainMissingRoles`. Both an empty
+ * role set and `metadataFailed` earn `⚠️` over `✅`, matching the page the member
+ * was shown (`outcomeOf` in server.js).
  */
 export function logLinked({
   discordUserId,
@@ -154,8 +154,12 @@ export function logLinked({
   const tail = metadataFailed
     ? ` — **Discord kunde inte uppdateras**, så \`${config.SCOUTNET_SCOUT_ROLE}\` delas inte ut förrän personen gör om det (${RELINK_INSTRUCTION})`
     : "";
+  // ✅ only for what the member got a success page for: roles *and* metadata.
+  // An empty role set was ✅ too, so the line said "inga roller — kontot är inte
+  // med i servern" under a tick, and nothing in the channel stood out.
+  const ok = roles?.length > 0 && !metadataFailed;
   logEvent(
-    `${metadataFailed ? "⚠️" : "✅"} ${who(discordUserId, name)} länkade ScoutID \`${scoutId}\` → ${rolesText}${tail}`,
+    `${ok ? "✅" : "⚠️"} ${who(discordUserId, name)} länkade ScoutID \`${scoutId}\` → ${rolesText}${tail}`,
   );
 }
 

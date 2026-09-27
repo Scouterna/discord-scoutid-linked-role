@@ -50,6 +50,8 @@ let pushStatus = 200;
 /** What a write to the member answers. 404 = this user is not in the guild. */
 let memberWriteStatus = 200;
 let participants = {};
+/** ScoutNet answering 503 — the outage `allowIncomplete` exists for. */
+let scoutnetDown = false;
 const calls = { rolesAdded: [], nicks: [], logs: [] };
 
 const storage = await import("../../src/storage.js");
@@ -93,7 +95,9 @@ globalThis.fetch = async (url, opts = {}) => {
         }),
     };
   }
-  if (u.includes("scoutnet.se")) return ok({ participants });
+  if (u.includes("scoutnet.se")) {
+    return scoutnetDown ? refused(503) : ok({ participants });
+  }
   if (u.includes("/role-connection")) {
     if (pushStatus === 200) return ok({});
     return {
@@ -130,14 +134,23 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 
 /** Walk the callback the way a returning browser does: state row + cookie. */
-async function completeLinking({ userId, state }) {
+async function completeLinking({
+  userId,
+  state,
+  discordUsername = "sandra",
+  storeState = true,
+  cookieState = state,
+}) {
   calls.rolesAdded.length = 0;
   calls.nicks.length = 0;
   calls.logs.length = 0;
-  await storage.storeStateData(state, {
-    discordUserId: userId,
-    codeVerifier: "pkce",
-  });
+  if (storeState) {
+    await storage.storeStateData(state, {
+      discordUserId: userId,
+      discordUsername,
+      codeVerifier: "pkce",
+    });
+  }
   await storage.storeDiscordTokens(userId, {
     access_token: "at",
     refresh_token: "rt",
@@ -145,7 +158,7 @@ async function completeLinking({ userId, state }) {
   });
   await storage.clearScoutNetCache();
 
-  const signed = "s:" + signature.sign(state, process.env.COOKIE_SECRET);
+  const signed = "s:" + signature.sign(cookieState, process.env.COOKIE_SECRET);
   const res = await fetch(
     `${BASE}/scoutid-oauth-callback?state=${state}&code=abc`,
     { headers: { Cookie: `clientState=${encodeURIComponent(signed)}` } },
@@ -217,17 +230,41 @@ test("a failed metadata push still links, still assigns, and says what is missin
   );
 });
 
-test("a member who is not in the event is told why in the log", async () => {
+test("a member who is not in the event is told so, on the page and in the log", async () => {
+  // This test used to assert the success page — the bug written down as the
+  // specification. A member with no roles was told it worked.
   pushStatus = 200;
   participants = {};
 
   const { status, body } = await completeLinking({ userId: "u3", state: "s3" });
   assert.equal(status, 200);
-  assert.match(body, /Successfully Linked/);
+  assert.match(body, /Inga roller/);
+  assert.match(body, /aktiv anmälan/);
+  assert.doesNotMatch(body, /Successfully Linked/);
   // Nothing to grant — `scout` is managed, Discord's to give — and the line
   // says why rather than stopping at "inga roller".
   assert.deepEqual(calls.rolesAdded, []);
-  assert.match(calls.logs.join("\n"), /inga roller — inte anmäld i eventet/);
+  const line = calls.logs.join("\n");
+  assert.match(line, /inga roller — inte anmäld i eventet/);
+  assert.match(line, /⚠️/);
+  assert.doesNotMatch(line, /✅/);
+});
+
+test("a ScoutNet outage says the roles are coming, not that none exist", async () => {
+  pushStatus = 200;
+  scoutnetDown = true;
+  try {
+    const { status, body } = await completeLinking({
+      userId: "u6",
+      state: "s6",
+    });
+    assert.equal(status, 200);
+    assert.match(body, /Rollerna kommer senare/);
+    assert.doesNotMatch(body, /aktiv anmälan/);
+    assert.equal(await storage.getLinkedScoutIDUserId("u6"), "3259703");
+  } finally {
+    scoutnetDown = false;
+  }
 });
 
 test("a linking from an account that never joined the server says so", async () => {
@@ -250,14 +287,29 @@ test("a linking from an account that never joined the server says so", async () 
   };
 
   try {
-    const { status } = await completeLinking({ userId: "u4", state: "s4" });
+    // 2026-09-26: a participant, five times, each answered with the success
+    // page while the log said the account was not in the server. The name is
+    // the one fact that tells a member which account they used — and it is
+    // text someone else chose, so it must arrive escaped.
+    const { status, body } = await completeLinking({
+      userId: "u4",
+      state: "s4",
+      discordUsername: "<b>hugo</b>",
+    });
     assert.equal(status, 200);
+    assert.match(body, /Fel Discord-konto/);
+    assert.ok(body.includes("&lt;b&gt;hugo&lt;/b&gt;"), "username escaped");
+    assert.ok(!body.includes("<b>hugo</b>"));
+    assert.ok(body.includes(RELINK_PATH), "names the path back");
+    assert.doesNotMatch(body, /Successfully Linked/);
+    assert.doesNotMatch(body, /\{\{/, "no placeholder left unreplaced");
     // The link is stored either way: it is the half that worked.
     assert.equal(await storage.getLinkedScoutIDUserId("u4"), "3259703");
     assert.deepEqual(calls.rolesAdded, []);
     assert.deepEqual(calls.nicks, []);
 
     const line = calls.logs.join("\n");
+    assert.match(line, /⚠️/);
     assert.match(line, /inga roller/);
     assert.match(line, /inte med i servern/);
     // The old text, which sent an admin to look for roles that were never gone.
@@ -283,11 +335,38 @@ test("a live, mapped participant with a real refusal is not called absent", asyn
   };
 
   try {
-    await completeLinking({ userId: "u5", state: "s5" });
+    const { body } = await completeLinking({ userId: "u5", state: "s5" });
+    assert.match(body, /Inga roller/);
+    assert.doesNotMatch(body, /Fel Discord-konto/);
     const line = calls.logs.join("\n");
     assert.match(line, /nekade/);
     assert.doesNotMatch(line, /inte med i servern/);
   } finally {
     memberWriteStatus = 200;
   }
+});
+
+test("an expired state answers with a page, not a bare 500", async () => {
+  // Six times in four days before this: `getStateData` returns null once the
+  // ten-minute state is gone, and destructuring it threw.
+  const { status, body } = await completeLinking({
+    userId: "u7",
+    state: "never-stored",
+    storeState: false,
+  });
+  assert.equal(status, 400);
+  assert.match(body, /Länkningen gick inte igenom/);
+  assert.match(body, /gått ut/);
+  assert.equal(await storage.getLinkedScoutIDUserId("u7"), null);
+});
+
+test("a cookie from another flow answers with a page, not a bare 403", async () => {
+  const { status, body } = await completeLinking({
+    userId: "u8",
+    state: "s8",
+    cookieState: "someone-elses",
+  });
+  assert.equal(status, 403);
+  assert.match(body, /Länkningen gick inte igenom/);
+  assert.equal(await storage.getLinkedScoutIDUserId("u8"), null);
 });

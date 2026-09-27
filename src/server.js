@@ -9,7 +9,13 @@ import * as roles from "./roles.js";
 import * as eventlog from "./eventlog.js";
 import { handlers } from "./commands.js";
 import { updateMetadata, RELINK_PATH } from "./metadata.js";
-import { getSuccessPageHTML, getIncompletePageHTML } from "./templates.js";
+import {
+  getSuccessPageHTML,
+  getIncompletePageHTML,
+  getNotInServerPageHTML,
+  getNoRolesPageHTML,
+  getLinkFailedPageHTML,
+} from "./templates.js";
 
 /**
  * The HTTP surface: three health routes, the three-legged OAuth flow, and
@@ -119,11 +125,16 @@ app.get("/discord-oauth-callback", async (req, res) => {
     const { clientState } = req.signedCookies;
     if (clientState !== req.query["state"]) {
       console.error("State verification failed.");
-      return res.sendStatus(403);
+      return res
+        .status(403)
+        .send(
+          getLinkFailedPageHTML({ relinkPath: RELINK_PATH, expired: true }),
+        );
     }
 
     const tokens = await discord.getOAuthTokens(req.query["code"]);
-    const userId = (await discord.getUserData(tokens)).user.id;
+    const { user } = await discord.getUserData(tokens);
+    const userId = user.id;
 
     await storage.storeDiscordTokens(userId, {
       access_token: tokens.access_token,
@@ -133,28 +144,66 @@ app.get("/discord-oauth-callback", async (req, res) => {
 
     const { state, codeVerifier, url } = scoutid.getOidcAuthorizationUrl();
     res.cookie("clientState", state, { maxAge: 1000 * 60 * 5, signed: true });
+    // The username rides along so a linking from the wrong account can name
+    // the account on the page — see getNotInServerPageHTML.
     await storage.storeStateData(state, {
       discordUserId: userId,
+      discordUsername: user.global_name ?? user.username,
       codeVerifier,
     });
     res.redirect(url);
   } catch (e) {
     console.error(e);
-    res.sendStatus(500);
+    res
+      .status(500)
+      .send(getLinkFailedPageHTML({ relinkPath: RELINK_PATH, expired: false }));
   }
 });
 
 // --- OAuth flow, step 3: ScoutID callback → link, roles, nickname ---
 
+/**
+ * Which page a completed callback lands on. The same facts decide the event-log
+ * line, and that is the point: the page used to look at `metadataFailed` alone,
+ * so a linking the log reported as "inga roller — kontot är inte med i servern"
+ * showed the member a success page. A participant linked five times on
+ * 2026-09-26 from an account outside the server and was told it worked each time.
+ *
+ * In order, because the first that applies is the one worth telling:
+ *
+ *   not-in-server  every write 404'd — nothing else matters until the right
+ *                  account links, so this outranks a failed metadata push
+ *   no-roles       nothing granted, for any other reason
+ *   incomplete     roles granted, but Discord holds no `verified`
+ *   linked         everything the member came for
+ */
+export function outcomeOf({ granted, grantStatus, metadataFailed }) {
+  if (grantStatus === 404) return "not-in-server";
+  if (granted.length === 0) return "no-roles";
+  if (metadataFailed) return "incomplete";
+  return "linked";
+}
+
 app.get("/scoutid-oauth-callback", async (req, res) => {
+  const failed = (status, expired) =>
+    res
+      .status(status)
+      .send(getLinkFailedPageHTML({ relinkPath: RELINK_PATH, expired }));
   try {
     const state = req.query["state"];
-    const { discordUserId, codeVerifier } = await storage.getStateData(state);
+    // Null once the ten-minute state has expired, or for a state never issued.
+    // Destructuring it unchecked answered a bare 500, six times in four days.
+    const stateData = await storage.getStateData(state);
+    if (!stateData) {
+      console.error("OAuth state missing or expired.");
+      return failed(400, true);
+    }
+    const { discordUserId, discordUsername, codeVerifier } = stateData;
 
     const { clientState } = req.signedCookies;
     if (clientState !== state) {
       console.error("State verification failed.");
-      return res.sendStatus(403);
+      return failed(403, true);
     }
 
     // ScoutID's tokens are deliberately not stored: the access token expires
@@ -191,13 +240,17 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     // Scout marker now and the rest at the next sync.
     let assignedRoles = [];
     let grantProblem = null;
+    let grantStatus = null;
     try {
       const desiredRoles = await roles.getDesiredRoles(scoutIDUser.scoutid, {
         allowIncomplete: true,
       });
       if (desiredRoles.length > 0) {
-        ({ granted: assignedRoles, problem: grantProblem } =
-          await roles.grantRoles(discordUserId, desiredRoles));
+        ({
+          granted: assignedRoles,
+          problem: grantProblem,
+          status: grantStatus,
+        } = await roles.grantRoles(discordUserId, desiredRoles));
       }
     } catch (e) {
       console.error(`Error assigning roles for ${discordUserId}:`, e.message);
@@ -235,17 +288,29 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       metadataFailed,
     });
 
-    res.send(
-      metadataFailed
-        ? getIncompletePageHTML({
-            relinkPath: RELINK_PATH,
-            scoutRole: config.SCOUTNET_SCOUT_ROLE,
-          })
-        : getSuccessPageHTML(),
-    );
+    const outcome = outcomeOf({
+      granted: assignedRoles,
+      grantStatus,
+      metadataFailed,
+    });
+    const page = {
+      "not-in-server": () =>
+        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+      "no-roles": () =>
+        getNoRolesPageHTML({
+          scoutnetUnreachable: reason === roles.SCOUTNET_UNREACHABLE,
+        }),
+      incomplete: () =>
+        getIncompletePageHTML({
+          relinkPath: RELINK_PATH,
+          scoutRole: config.SCOUTNET_SCOUT_ROLE,
+        }),
+      linked: () => getSuccessPageHTML(),
+    }[outcome];
+    res.send(page());
   } catch (e) {
     console.error(e);
-    res.sendStatus(500);
+    failed(500, false);
   }
 });
 

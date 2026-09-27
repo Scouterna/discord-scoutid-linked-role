@@ -572,6 +572,43 @@ måste tillbaka. Därför en egen sida
 ([src/templates/linked-incomplete.html](src/templates/linked-incomplete.html))
 som säger just det, och en `⚠️`-rad i händelseloggen i stället för `✅`.
 
+#### Sidan och loggraden väljs av samma utfall
+
+Sidan valdes tidigare av `metadataFailed` ensam, så varje länkning där pushen
+gick igenom fick lyckad-sidan — också när rollerna aldrig delades ut. Loggraden
+skrev `inga roller — kontot är inte med i servern`, under en `✅`, medan
+medlemmen fick höra att allt gått bra. En deltagare länkade fem gånger
+2026-09-26 från ett konto som inte var med i servern och fick samma besked
+varje gång. Testet för "inte anmäld i eventet" krävde dessutom lyckad-sidan,
+alltså var felet inskrivet som specifikation.
+
+`outcomeOf` i [src/server.js](src/server.js) väljer nu sidan, och loggradens
+ikon följer samma fakta: `✅` bara för det medlemmen fick lyckad-sidan för.
+Utfallen, i den ordning det första som stämmer vinner:
+
+| Utfall | När | Sida |
+| --- | --- | --- |
+| `not-in-server` | skrivningarna fick 404 | *Fel Discord-konto*, med kontots namn |
+| `no-roles` | inget delades ut, av annat skäl | *Inga roller*, eller *Rollerna kommer senare* vid ScoutNet-avbrott |
+| `incomplete` | roller ja, men `verified` saknas | *Nästan klart* |
+| `linked` | allt | lyckad-sidan |
+
+`not-in-server` går före `incomplete` eftersom ingenting annat spelar roll
+förrän rätt konto länkar. **Kontonamnet är vad som gör sidan användbar**: båda
+gångerna det hänt satt personen i servern på ett annat konto, och frågan
+"vilket konto använde jag?" var den enda ingen sida besvarade. Namnet hämtas i
+Discord-callbacken och följer med i OAuth-state; det är text någon annan valt,
+så det escapas. Avbrottsvarianten känns igen på `roles.SCOUTNET_UNREACHABLE`
+och inte på formuleringen.
+
+Samma genomgång tog bort två nakna svar till: ett utgånget state gav `500`
+(`getStateData` returnerar `null` efter tio minuter, och destruktureringen
+kastade — sex gånger på fyra dygn), och en cookie från ett annat flöde gav
+`403`. Båda, liksom de yttre catcharna och Discord-callbackens
+state-kontroll, svarar nu med *Länkningen gick inte igenom*
+och vägen tillbaka. Alla problemsidor delar
+[src/templates/linked-problem.html](src/templates/linked-problem.html).
+
 **Rollnamnet i medlemsvänd text kommer ur configen.** Sidan och varje mening om
 rollen läser `SCOUTNET_SCOUT_ROLE` i stället för att stava "Scout" själva — en
 HTML-fil är det lättaste stället för en sådan kopia att gömma sig, eftersom
@@ -1000,7 +1037,7 @@ den finns.
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
-| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Plus att en länkning från ett konto som inte är med i servern säger *det* i loggen, och inte att rollerna skulle saknas |
+| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Att sidan och loggraden följs åt: ett konto utanför servern får *Fel Discord-konto* med sitt namn escapat, en länkning utan roller får aldrig lyckad-sidan eller `✅`, och ett ScoutNet-avbrott säger att rollerna kommer i stället för att de saknas. Plus att ett utgånget state och en främmande cookie svarar med en sida och inte ett naket `400`/`403` |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
 
 **`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad
