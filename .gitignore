@@ -34,3 +34,9 @@ scoutid-metadata.json
 # published: this repository is public, and the plan quotes resource names,
 # hostnames and operational detail that do not need to be.
 docs/
+
+# Working scratch for the agent flow, in campfire's shape: requirements, design
+# and plan documents for one piece of work. The durable record is the code, the
+# documentation and the commit message — a plan that outlives its branch is a
+# second description of the system that nothing keeps true.
+.agents/specs/

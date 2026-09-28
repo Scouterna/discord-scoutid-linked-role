@@ -17,14 +17,14 @@
     // it is installed by post-create.sh instead. See the comment there.
   },
 
-  // The two sibling repos of the multi-root workspace. They are bound
+  // The sibling repos of the multi-root workspace. They are bound
   // individually rather than by mounting the parent `code/` directory, so
   // unrelated repositories stay out of the container.
   //
-  // Both the host directory and the mount target match the GitHub repository
-  // name (`Scouterna/wsj27-infra`, `Scouterna/wsj27-discord-bot`). They used to
-  // be `discord-wsj27-*` locally, which read as if those were the repo names —
-  // note that the bot's is wsj27-discord-bot, not discord-wsj27-bot.
+  // Every host directory and mount target matches the GitHub repository name
+  // under `Scouterna/`. They used to be `discord-wsj27-*` locally, which read
+  // as if those were the repo names — note that the bot's is
+  // wsj27-discord-bot, not discord-wsj27-bot.
   "mounts": [
     "source=${localWorkspaceFolder}/../wsj27-infra,target=/workspaces/wsj27-infra,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/../wsj27-discord-bot,target=/workspaces/wsj27-discord-bot,type=bind,consistency=cached",
@@ -32,6 +32,19 @@
     // rebuilding — a missing mount source fails the container start outright
     // (measured 2026-08-31; it does not auto-create or mount empty).
     "source=${localWorkspaceFolder}/../wsj27-cms,target=/workspaces/wsj27-cms,type=bind,consistency=cached",
+
+    // The campfire platform: the app itself plus the two APIs it runs on
+    // (`/api/auth` and `/project` on campfire.wsj27.scouterna.net). Same rule
+    // as wsj27-cms above — clone all three on the host before rebuilding.
+    //
+    // wsj27-campfire is a pnpm *workspace* monorepo, so the EACCES that
+    // wsj27-cms needs a named volume for can hit its nested node_modules too,
+    // where a single root volume would not shadow them. Left unmounted until
+    // it actually bites: the answer then is one volume per package, or moving
+    // the checkout off the 9p mount entirely.
+    "source=${localWorkspaceFolder}/../wsj27-campfire,target=/workspaces/wsj27-campfire,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/../wsj27-auth-api,target=/workspaces/wsj27-auth-api,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/../wsj27-project-api,target=/workspaces/wsj27-project-api,type=bind,consistency=cached",
 
     // The multi-root workspace file lives in the host `code/` directory —
     // machine-local, not version-controlled with any one repo — and is bound

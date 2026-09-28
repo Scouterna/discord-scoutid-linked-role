@@ -1,12 +1,13 @@
 # Devcontainer
 
-Covers all three repos of the WSJ27 workspace: this one, `wsj27-infra`
-and `wsj27-discord-bot`.
+Covers every repo of the WSJ27 workspace: this one, `wsj27-infra`,
+`wsj27-discord-bot`, `wsj27-cms`, and the three of the campfire platform
+(`wsj27-campfire`, `wsj27-auth-api`, `wsj27-project-api`).
 
 ## Opening it
 
-The two sibling repos are bind-mounted from `../`, so they must be cloned next
-to this one. **Each directory has to be named exactly like its GitHub
+The sibling repos are bind-mounted from `../`, so they must be cloned next to
+this one. **Each directory has to be named exactly like its GitHub
 repository** — the bind mounts resolve by name, and a mismatch silently gives
 you an empty directory instead of the repo:
 
@@ -15,6 +16,10 @@ code/
   discord-scoutid-linked-role/   ← open this one
   wsj27-infra/                   ← Scouterna/wsj27-infra
   wsj27-discord-bot/             ← Scouterna/wsj27-discord-bot
+  wsj27-cms/                     ← Scouterna/wsj27-cms
+  wsj27-campfire/                ← Scouterna/wsj27-campfire
+  wsj27-auth-api/                ← Scouterna/wsj27-auth-api
+  wsj27-project-api/             ← Scouterna/wsj27-project-api
 ```
 
 Note the bot's repository is `wsj27-discord-bot`, not `discord-wsj27-bot`; the
@@ -33,8 +38,13 @@ mount error (measured 2026-08-31); Docker does not create empty stand-ins.
 
 ## Tooling
 
-`node` 20 · `npm` · `az` · `kubectl` · `kustomize` · `terraform` · `gh` ·
-`docker` · `dig` · `jq`
+`node` 24 · `npm` · `az` · `kubectl` · `kustomize` · `terraform` ·
+`gh` · `docker` · `dig` · `jq` · `actionlint` · `yq`
+
+The two Python repos (`wsj27-auth-api`, `wsj27-project-api`) build on `uv` and
+pin Python 3.14; the image carries neither, and `python3` here is 3.11 with no
+`pip`. Install `uv` yourself — it fetches its own interpreter — and note that
+it lands in `~/.local`, which is not mounted and so does not survive a rebuild.
 
 `docker` is the **host's** daemon (docker-outside-of-docker), so `docker build`
 and the repo's `docker-compose.yml` (app + Azurite + ngrok) work from inside.
