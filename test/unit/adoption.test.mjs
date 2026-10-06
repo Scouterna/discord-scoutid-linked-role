@@ -37,7 +37,7 @@ const CFG = {
       withoutDiv: "Ledare-Väntande",
     },
   },
-  SCOUTNET_CATEGORY_ROLES: { ledare: "Ledare" },
+  SCOUTNET_CATEGORY_ROLES: { ledare: ["Ledare"] },
 };
 
 const P = (fee, answers = {}, extra = {}) => ({

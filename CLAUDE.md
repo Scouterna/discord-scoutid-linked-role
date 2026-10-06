@@ -1225,7 +1225,8 @@ Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/ws
 | `wsj-event` | `discord_role.wsj_event` |
 | `Deltagare-{nr}` / `Deltagare-Väntande` | `discord_role.participant[*]` / `discord_role.participant_pending` |
 | `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
-| `IST-Patrull-{nr}` / `IST-Väntande` | `discord_role.ist_patrol[*]` / `discord_role.ist_pending` |
+| `IST-Patrull-{nr}` | `discord_role.ist_patrol[*]` |
+| `IST-Rundresa` / `IST-Egenresa` | `discord_role.ist_travel[*]` |
 | `CMT` | `discord_role.cmt` |
 | `Avdelningsledare` / `IST` (platta markörer) | `discord_role.leader_flat` / `discord_role.ist_flat` |
 
@@ -1233,9 +1234,24 @@ Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i
 infra-repot måste täcka alla värden ScoutNet kan returnera för
 division-frågorna 88168 (deltagare/IST) och 107592 (ledare).
 
-**IST är delat på två resegrupper som båda har patruller** — rundresa och egen
-resa — men patrullerna delar en numrering, så patrull 07 hör till exakt en av
-grupperna. Därför ser boten ingen skillnad på dem: både `fee_id` 25696 och
-25702 mappas till kategorin `ist` och ger `IST-Patrull-{div}` från fråga 88168.
-Resegruppen finns bara i infra-repot, som avgör vilken kategori patrullens
-kanal ligger i och vilka gruppkanaler den når.
+**IST är delat på två resegrupper, och de är två kategorier** — `fee_id` 25696
+är `ist-rundresa`, 25702 `ist-egenresa`. Var och en får `IST` plus sin
+resegruppsroll som platta markörer (`+` i `SCOUTNET_CATEGORY_ROLES`), och
+resegruppsrollen är dessutom kategorins väntande-roll. Den delas alltså ut
+direkt och ligger kvar när `IST-Patrull-{div}` kommer ur fråga 88168.
+
+Skälet är att patrullen kom sist. Hösten 2026 hade ingen av de 435 IST:arna
+patrull i ScoutNet, så alla stod på `IST-Väntande` — som öppnade `#alla-ist`
+och `#ist-fragor` men ingen av resegruppens kanaler, eftersom de byggdes av
+patrullrollerna. Resegruppsrollen bär nu den åtkomsten.
+
+Två saker följer av att båda kategorierna delar mönstret `IST-Patrull-{div}`:
+`divisionPrefixes` returnerar varje prefix en gång, annars togs en gammal
+patrullroll bort två gånger; och `getDesiredRoles` deduplicerar, eftersom
+resegruppsrollen efterfrågas både som markör och som väntande-roll. Båda
+pinnas i `integration/roles`.
+
+`IST-Väntande` är inte längre bot-hanterad, så boten tar inte bort den. Den
+försvinner från alla när infra-repot raderar rollen — vilket måste ske
+**efter** att boten delat ut resegrupperna, annars tappar IST sin åtkomst i
+mellantiden.

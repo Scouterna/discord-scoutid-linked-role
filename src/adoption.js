@@ -12,7 +12,7 @@ import { divisionRoleName } from "./guild.js";
  *
  *   SCOUTNET_FEE_ROLES      fee_id → category
  *   SCOUTNET_DIVISION_ROLES category → question + role patterns
- *   SCOUTNET_CATEGORY_ROLES category → flat role name, used here as the label
+ *   SCOUTNET_CATEGORY_ROLES category → flat role names, used here as the label
  *
  * A category with a division config splits by the answer to its question; one
  * without is a single group. Give a category a division config and the split
@@ -22,9 +22,9 @@ import { divisionRoleName } from "./guild.js";
  * vocabulary as Discord rather than inventing a second one.
  */
 
-/** A category's heading: its flat role if it has one, else its config key. */
+/** A category's heading: its flat roles if it has any, else its config key. */
 const categoryLabel = (cfg, category) =>
-  cfg.SCOUTNET_CATEGORY_ROLES?.[category] ?? category;
+  cfg.SCOUTNET_CATEGORY_ROLES?.[category]?.join(" + ") ?? category;
 
 /** Which group this participant falls in — the label only; the caller counts. */
 function groupLabel(cfg, category, participant) {

@@ -50,19 +50,25 @@ data:
   # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
   # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till
   # 2026-08-16 efter att en länkad CMT:are blivit utan CMT-roll.
-  # 25702 var tidigare `ist-direktresa` och gav en platt IST-Direktresa-roll.
-  # Egen resa har numera patruller precis som rundresan, och patrullerna delar
-  # numrering över båda grupperna — patrull 07 finns i exakt en av dem. Därför
-  # räcker en enda IST-kategori: resegruppen syns inte i rollen alls utan i
-  # vilken kategori patrullens kanal ligger, vilket wsj27-infra äger.
-  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist,25702:ist,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
-  SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist:88168:IST-Patrull-{div}:IST-Väntande,ledare:107592:Ledare-{div}:Ledare-Väntande
+  #
+  # IST är två kategorier, en per resegrupp: 25696 är rundresa och 25702 egen
+  # resa. Båda läser patrullen ur samma fråga och delar `IST-Patrull-{div}`,
+  # eftersom patrullerna har gemensam numrering — patrull 07 finns i exakt en
+  # grupp. Det som skiljer dem är resegruppsrollen, som är kategorins väntande-
+  # roll *och* en platt markör (se SCOUTNET_CATEGORY_ROLES): den delas ut direkt
+  # och ligger kvar när patrullen kommer. Den ersätter IST-Väntande, som inte
+  # gav någon tillgång till resegruppens kanaler.
+  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist-rundresa,25702:ist-egenresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
+  SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist-rundresa:88168:IST-Patrull-{div}:IST-Rundresa,ist-egenresa:88168:IST-Patrull-{div}:IST-Egenresa,ledare:107592:Ledare-{div}:Ledare-Väntande
   # Platta kategorimarkörer, utöver divisionsrollen: en ledare i avdelning 12 får
   # både `Ledare-12` och `Avdelningsledare`. De finns för AutoMod i wsj27-infra,
   # som bara kan *undanta* roller och max 20 av dem — "alla utom deltagare" hade
   # krävt 158 per-avdelning roller, men blir sex med de här. `deltagare` har med
   # flit ingen rad: den saknade markören *är* det som gör att länkfiltret träffar
   # dem. `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
+  #
+  # `+` ger en kategori flera markörer. Varje IST:are får `IST`, som AutoMod och
+  # de gemensamma IST-kanalerna läser, plus sin resegrupp.
   #
   # `Avdelningsledare` hette `Ledare` fram till 2026-09-21. Rollen är sedan dess
   # `hoist = true` i infra-repot, alltså en egen rubrik ovanför Online i
@@ -71,7 +77,7 @@ data:
   # per-avdelningsrollerna står kvar som `Ledare-{nr}`. Namnbytet i Discord är en
   # in-place-uppdatering: roll-id:t består, så ingen tappade rollen och AutoMods
   # undantag (som pekar på id) bet hela vägen.
-  SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare,ist:IST
+  SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare,ist-rundresa:IST+IST-Rundresa,ist-egenresa:IST+IST-Egenresa
   # `{divnamn}` slår upp avdelningsnamnet i SCOUTNET_DIVISION_NAMES nedan.
   # Smeknamnet blir "Alexandra Johansson (12-Musen)" respektive "(AL12-Musen)".
   # IST och CMT står med flit kvar utan namn: IST-patrullerna har inga.
@@ -80,7 +86,7 @@ data:
   # 228 av de 2 117 med avdelning behöver kortas. Det är `fitNickname` som
   # gör det, och den kortar *namnet*, aldrig suffixet. Längre suffix här
   # betyder alltså fler förkortade efternamn, inte avhuggna avdelningar.
-  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}-{divnamn}:,ledare:AL{div}-{divnamn}:AL,ist:IST{div}:IST,cmt::CMT
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}-{divnamn}:,ledare:AL{div}-{divnamn}:AL,ist-rundresa:IST{div}:IST,ist-egenresa:IST{div}:IST,cmt::CMT
 
   # nummer:namn för `{divnamn}`. **Andra kopian** — första står i
   # discord/terraform.tfvars i Scouterna/wsj27-infra, där kanalernas topics
@@ -89,7 +95,7 @@ data:
   #
   # Nyckeln är numret ensamt. Det håller så länge ett nummer betyder en sak:
   # deltagare och ledare svarar båda med en avdelning och delar därför de här
-  # namnen rätt, medan `ist` läser samma ScoutNet-fråga för ett *patrull*nummer.
+  # namnen rätt, medan IST läser samma ScoutNet-fråga för ett *patrull*nummer.
   # IST-patrullerna har inga namn idag, så ingenting krockar — ger man dem namn
   # måste kartan först bli per kategori.
   SCOUTNET_DIVISION_NAMES: 01:Björnen,02:Bävern,03:Ekorren,04:Fladdermusen,05:Räven,06:Geten,07:Vildsvinet,08:Haren,09:Igelkotten,10:Lodjuret,11:Kräftan,12:Musen,13:Renen,14:Rådjuret,15:Fåret,16:Kråkan,17:Uttern,18:Vargen,19:Ormen,20:Ankan,21:Gräshoppan,22:Gåsen,23:Hönan,24:Sälen,25:Svanen,26:Hästen,27:Getingen,28:Myran,29:Ugglan,30:Abborren,31:Laxen,32:Maneten,33:Vesslan,34:Räkan,35:Hajen,36:Sparven,37:Ödlan,38:Grodan,39:Humlan,40:Fjärilen,41:Tranan,42:Nyckelpigan,43:Örnen,44:Krabban,45:Mullvaden,46:Kon,47:Trollsländan,48:Spindeln,49:Myskoxen,50:Hjorten,51:Strömmingen,52:Korpen,53:Staren

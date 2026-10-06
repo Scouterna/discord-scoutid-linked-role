@@ -103,11 +103,29 @@ test("nickname suffixes allow an empty half", () => {
   assert.deepEqual(m.ledare, { withDiv: "AL{div}", withoutDiv: "AL" });
 });
 
-test("flat category roles are a plain category-to-role map", () => {
+test("flat category roles map each category to its roles", () => {
   assert.deepEqual(parseCategoryRoles("ledare:Ledare,ist:IST"), {
-    ledare: "Ledare",
-    ist: "IST",
+    ledare: ["Ledare"],
+    ist: ["IST"],
   });
+});
+
+test("a category can carry several flat roles, joined with +", () => {
+  // IST is split by travel group, and every member of either still needs the
+  // shared IST marker — AutoMod and #alla-ist key on it.
+  assert.deepEqual(
+    parseCategoryRoles(
+      "ist-rundresa:IST+IST-Rundresa, ist-egenresa: IST + IST-Egenresa",
+    ),
+    {
+      "ist-rundresa": ["IST", "IST-Rundresa"],
+      "ist-egenresa": ["IST", "IST-Egenresa"],
+    },
+  );
+});
+
+test("a category with only empty roles is dropped, not mapped to nothing", () => {
+  assert.equal(parseCategoryRoles("ist:+"), null);
 });
 
 test("deltagare deliberately has no flat marker", () => {

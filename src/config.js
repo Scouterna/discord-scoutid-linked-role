@@ -56,7 +56,7 @@ export function parseNicknameSuffixes(str) {
  *
  * The map is keyed by number alone, which holds only as long as one number means
  * one thing. `deltagare` and `ledare` both answer with an avdelning, so they
- * share these names correctly, but `ist` reads the same ScoutNet question for a
+ * share these names correctly, but IST reads the same ScoutNet question for a
  * *patrol* number. IST patrols have no names today, so nothing collides; give
  * them names and this has to become per-category first.
  */
@@ -94,12 +94,15 @@ export function parseDivisionRoles(str) {
 }
 
 /**
- * `"category:roleName,..."` → `{ category: roleName }`.
+ * `"category:roleName+roleName,..."` → `{ category: [roleName, ...] }`.
  *
  * Granted *in addition to* the category's division role, so a leader in troop 12
  * ends up with both `Ledare-12` and `Avdelningsledare`. A category with no
  * division config
  * already gets a flat role (`cmt` → `CMT`) and needs no entry.
+ *
+ * `+` gives a category several: IST is split by travel group, and someone on the
+ * round trip carries both `IST`, which every IST holds, and `IST-Rundresa`.
  *
  * This exists for Discord AutoMod, which can only *exempt* roles and never
  * target them, with a hard cap of 20 exempt roles: "everyone except
@@ -109,8 +112,12 @@ export function parseCategoryRoles(str) {
   if (!str) return null;
   const map = {};
   for (const entry of str.split(",")) {
-    const [category, role] = entry.split(":").map((s) => s.trim());
-    if (category && role) map[category] = role;
+    const [category, roles] = entry.split(":").map((s) => s.trim());
+    const names = (roles ?? "")
+      .split("+")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (category && names.length > 0) map[category] = names;
   }
   return Object.keys(map).length > 0 ? map : null;
 }

@@ -66,7 +66,8 @@ The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
 | Fee ID                     | Category         | Division question | With division       | Without division     | Flat role | Nickname suffix |
 | -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------- | --------------- |
 | 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | —         | `(12)`          |
-| 25696, 25702               | `ist`            | 88168             | `IST-Patrull-{div}` | `IST-Väntande`       | `IST`     | `(IST05)`       |
+| 25696                      | `ist-rundresa`   | 88168             | `IST-Patrull-{div}` | `IST-Rundresa`       | `IST` + `IST-Rundresa` | `(IST05)` |
+| 25702                      | `ist-egenresa`   | 88168             | `IST-Patrull-{div}` | `IST-Egenresa`       | `IST` + `IST-Egenresa` | `(IST05)` |
 | 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Avdelningsledare` | `(AL12)` |
 | 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | —         | `(CMT)`         |
 
@@ -89,11 +90,13 @@ member-facing, which is why it is spelled out here while the per-troop roles
 stay `Ledare-{nr}`.
 
 IST is split across two travel groups — the contingent tour and travelling on
-your own — and both have patrols. They share one patrol numbering, so patrol 07
-belongs to exactly one group and the role name carries no group. That is why
-both fee ids map to the same `ist` category: the bot cannot tell the groups
-apart and does not need to. The travel group decides only which category a
-patrol's channel sits in, which is Terraform's business, not the bot's.
+your own — with one category each. A category can carry several flat roles,
+joined with `+`: every IST member gets `IST`, which AutoMod and the shared IST
+channels key on, plus `IST-Rundresa` or `IST-Egenresa`. The travel group role is
+also the category's role *without* a patrol, so it is granted at once and kept
+once the patrol arrives — the patrols share one numbering, so the patrol role
+itself carries no group. It replaced `IST-Väntande`, which opened none of the
+travel group's channels while no IST member had a patrol yet.
 
 The roles themselves are owned by a separate Terraform repo,
 [Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`). Its troop
@@ -286,10 +289,13 @@ delimited strings:
 
 ```bash
 # fee_id:category
-SCOUTNET_FEE_ROLES=25694:deltagare,25696:ist,25697:cmt
+SCOUTNET_FEE_ROLES=25694:deltagare,25696:ist-rundresa,25697:cmt
 
 # category:questionId:roleWithDiv:roleWithoutDiv
 SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande
+
+# category:role+role — flat roles granted besides the division role
+SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-rundresa:IST+IST-Rundresa
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,cmt::CMT

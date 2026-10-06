@@ -69,8 +69,7 @@ export async function getDesiredRoles(
 
     roles.push(config.SCOUTNET_EVENT_ROLE);
     if (info.category) {
-      const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[info.category];
-      if (flatRole) roles.push(flatRole);
+      roles.push(...(config.SCOUTNET_CATEGORY_ROLES?.[info.category] ?? []));
 
       const divConfig = config.SCOUTNET_DIVISION_ROLES?.[info.category];
       roles.push(
@@ -88,7 +87,9 @@ export async function getDesiredRoles(
     return [config.SCOUTNET_SCOUT_ROLE];
   }
 
-  return roles;
+  // A travel group role is both the IST marker's companion and the pending role
+  // of the same category, so it can be asked for twice. The sync adds per entry.
+  return [...new Set(roles)];
 }
 
 /**

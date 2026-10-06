@@ -27,13 +27,18 @@ process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
 process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
-process.env.SCOUTNET_FEE_ROLES = "25694:deltagare,33293:ledare,25697:cmt";
+process.env.SCOUTNET_FEE_ROLES =
+  "25694:deltagare,33293:ledare,25697:cmt,25696:ist-rundresa,25702:ist-egenresa";
 process.env.SCOUTNET_DIVISION_ROLES =
   "deltagare:88168:Deltagare-{div}:Deltagare-Väntande," +
-  "ledare:107592:Ledare-{div}:Ledare-Väntande";
-process.env.SCOUTNET_CATEGORY_ROLES = "ledare:Ledare";
+  "ledare:107592:Ledare-{div}:Ledare-Väntande," +
+  "ist-rundresa:88168:IST-Patrull-{div}:IST-Rundresa," +
+  "ist-egenresa:88168:IST-Patrull-{div}:IST-Egenresa";
+process.env.SCOUTNET_CATEGORY_ROLES =
+  "ledare:Ledare,ist-rundresa:IST+IST-Rundresa,ist-egenresa:IST+IST-Egenresa";
 process.env.SCOUTNET_NICKNAME_SUFFIXES =
-  "deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT";
+  "deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT," +
+  "ist-rundresa:IST{div}:IST,ist-egenresa:IST{div}:IST";
 process.env.LOG_CHANNEL_ID = "";
 
 const GUILD = "G1";
@@ -51,6 +56,11 @@ const GUILD_ROLES = [
   { id: "r-d07", name: "Deltagare-07", managed: false },
   { id: "r-dpend", name: "Deltagare-Väntande", managed: false },
   { id: "r-other", name: "Något-Annat", managed: false },
+  { id: "r-ist", name: "IST", managed: false },
+  { id: "r-istrund", name: "IST-Rundresa", managed: false },
+  { id: "r-istegen", name: "IST-Egenresa", managed: false },
+  { id: "r-ip03", name: "IST-Patrull-03", managed: false },
+  { id: "r-ip07", name: "IST-Patrull-07", managed: false },
 ];
 
 let member = null;
@@ -221,6 +231,51 @@ test("a stale division role is removed when the division changes", async () => {
     !result.removed.includes("Något-Annat"),
     "touched a role it does not manage",
   );
+});
+
+test("IST without a patrol is given its travel group exactly once", async () => {
+  // The travel group is both a flat marker and the pending role of the same
+  // category. Asked for twice, it must still be written once.
+  await setup({
+    userId: "u20",
+    roleIds: ["r-scout", "r-event"],
+    nick: "Ida Berg",
+    scoutId: "2020",
+    participant: {
+      fee_id: 25702,
+      cancelled_date: null,
+      first_name: "Ida",
+      last_name: "Berg",
+      questions: {},
+    },
+  });
+
+  await roles.syncUserRoles(GUILD, "u20");
+  assert.deepEqual(namesOf(calls.added).sort(), ["IST", "IST-Egenresa"]);
+  assert.deepEqual(calls.removed, []);
+});
+
+test("a patrol change keeps the travel group and removes the old patrol once", async () => {
+  // Both travel groups share the `IST-Patrull-{div}` pattern, so the stale patrol
+  // matches two categories' prefixes — and must still be removed only once.
+  await setup({
+    userId: "u21",
+    roleIds: ["r-scout", "r-event", "r-ist", "r-istrund", "r-ip03"],
+    nick: "Olle Ek (IST03)",
+    scoutId: "2121",
+    participant: {
+      fee_id: 25696,
+      cancelled_date: null,
+      first_name: "Olle",
+      last_name: "Ek",
+      questions: { 88168: "7" },
+    },
+  });
+
+  await roles.syncUserRoles(GUILD, "u21");
+  assert.deepEqual(namesOf(calls.added), ["IST-Patrull-07"]);
+  assert.deepEqual(namesOf(calls.removed), ["IST-Patrull-03"]);
+  assert.deepEqual(calls.nicks, ["Olle Ek (IST07)"]);
 });
 
 test("roles outside the bot's configuration are left alone", async () => {

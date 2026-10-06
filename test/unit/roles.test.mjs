@@ -24,14 +24,17 @@ process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
 process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
 process.env.SCOUTNET_FEE_ROLES =
-  "25694:deltagare,25696:ist,25702:ist,33293:ledare,25697:cmt";
+  "25694:deltagare,25696:ist-rundresa,25702:ist-egenresa,33293:ledare,25697:cmt";
 process.env.SCOUTNET_DIVISION_ROLES =
   "deltagare:88168:Deltagare-{div}:Deltagare-Väntande," +
-  "ist:88168:IST-Patrull-{div}:IST-Väntande," +
+  "ist-rundresa:88168:IST-Patrull-{div}:IST-Rundresa," +
+  "ist-egenresa:88168:IST-Patrull-{div}:IST-Egenresa," +
   "ledare:107592:Ledare-{div}:Ledare-Väntande";
-process.env.SCOUTNET_CATEGORY_ROLES = "ledare:Ledare,ist:IST";
+process.env.SCOUTNET_CATEGORY_ROLES =
+  "ledare:Ledare,ist-rundresa:IST+IST-Rundresa,ist-egenresa:IST+IST-Egenresa";
 process.env.SCOUTNET_NICKNAME_SUFFIXES =
-  "deltagare:{div}:,ledare:AL{div}:AL,ist:IST{div}:IST,cmt::CMT";
+  "deltagare:{div}:,ledare:AL{div}:AL,ist-rundresa:IST{div}:IST," +
+  "ist-egenresa:IST{div}:IST,cmt::CMT";
 // `grantRoles` returns early without a configured guild, so the cases below
 // would all pass vacuously.
 process.env.DISCORD_GUILD_ID = "G1";
@@ -152,22 +155,52 @@ test("a missing division answer falls back to the pending role", async () => {
   ]);
 });
 
-test("both IST travel groups produce the same patrol role", async () => {
-  // The patrols share one numbering across rundresa and egenresa, so patrol 07
-  // belongs to exactly one of them and the bot need not tell them apart.
+test("IST without a patrol gets the marker and its travel group, once each", async () => {
+  // The travel group role is both a flat marker and the category's pending role,
+  // so it is asked for twice. A duplicate would make the sync add it twice.
+  await withParticipants({
+    5: { fee_id: FEE.ist, cancelled_date: null, questions: {} },
+    6: { fee_id: FEE.istOther, cancelled_date: null, questions: {} },
+  });
+  assert.deepEqual(await roles.getDesiredRoles("5"), [
+    "scout",
+    "wsj-event",
+    "IST",
+    "IST-Rundresa",
+  ]);
+  assert.deepEqual(await roles.getDesiredRoles("6"), [
+    "scout",
+    "wsj-event",
+    "IST",
+    "IST-Egenresa",
+  ]);
+});
+
+test("IST with a patrol keeps its travel group beside the patrol role", async () => {
+  // The patrols share one numbering across both groups, so the patrol role is
+  // the same pattern for both; the travel group role is what tells them apart.
   await withParticipants({
     5: { fee_id: FEE.ist, cancelled_date: null, questions: { 88168: "7" } },
     6: {
       fee_id: FEE.istOther,
       cancelled_date: null,
-      questions: { 88168: "7" },
+      questions: { 88168: "21" },
     },
   });
-  const a = await roles.getDesiredRoles("5");
-  const b = await roles.getDesiredRoles("6");
-  assert.deepEqual(a, b);
-  assert.ok(a.includes("IST-Patrull-07"));
-  assert.ok(a.includes("IST"), "IST should also get its flat marker");
+  assert.deepEqual(await roles.getDesiredRoles("5"), [
+    "scout",
+    "wsj-event",
+    "IST",
+    "IST-Rundresa",
+    "IST-Patrull-07",
+  ]);
+  assert.deepEqual(await roles.getDesiredRoles("6"), [
+    "scout",
+    "wsj-event",
+    "IST",
+    "IST-Egenresa",
+    "IST-Patrull-21",
+  ]);
 });
 
 test("a category with no division config uses the category name as the role", async () => {

@@ -165,8 +165,9 @@ export function managedRoleNames({ includeUnverified = false } = {}) {
     )) {
       // The flat marker is managed too, so an ex-leader does not keep
       // `Avdelningsledare` and the AutoMod exemption that comes with it.
-      const flatRole = config.SCOUTNET_CATEGORY_ROLES?.[category];
-      if (flatRole) names.add(flatRole);
+      for (const flatRole of config.SCOUTNET_CATEGORY_ROLES?.[category] ?? []) {
+        names.add(flatRole);
+      }
 
       const divConfig = config.SCOUTNET_DIVISION_ROLES?.[category];
       names.add(divConfig ? divConfig.withoutDiv : category);
@@ -178,6 +179,9 @@ export function managedRoleNames({ includeUnverified = false } = {}) {
 /**
  * `[{ category, prefix }]` for pattern-based removal of division roles:
  * "Deltagare-{div}" yields the prefix "deltagare-".
+ *
+ * One entry per prefix: both IST travel groups share `IST-Patrull-{div}`, and a
+ * second entry would make the sync remove each stale patrol role twice.
  */
 export function divisionPrefixes() {
   const prefixes = [];
@@ -185,7 +189,8 @@ export function divisionPrefixes() {
     config.SCOUTNET_DIVISION_ROLES ?? {},
   )) {
     const idx = withDiv.indexOf("{div}");
-    if (idx >= 0) {
+    const prefix = withDiv.substring(0, idx).toLowerCase();
+    if (idx >= 0 && !prefixes.some((p) => p.prefix === prefix)) {
       prefixes.push({
         category,
         prefix: withDiv.substring(0, idx).toLowerCase(),
