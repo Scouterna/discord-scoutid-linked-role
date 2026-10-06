@@ -61,17 +61,25 @@ the question is unanswered; a category without one gets a role named after the
 category itself. Division numbers are zero-padded to at least 2 digits
 (`3` → `03`, `100` → `100`).
 
-The current production mapping (now [k8s/configmap.yaml](k8s/configmap.yaml)):
+**The values live in [k8s/configmap.yaml](k8s/configmap.yaml), and only
+there.** This section used to carry a copy of the mapping, and every change to
+the configmap had to be repeated here by hand or the copy went quietly wrong. Read one category across the four variables to see how they combine; a
+leader, for instance:
 
-| Fee ID                     | Category         | Division question | With division       | Without division     | Flat role | Nickname suffix |
-| -------------------------- | ---------------- | ----------------- | ------------------- | -------------------- | --------- | --------------- |
-| 25694, 27561               | `deltagare`      | 88168             | `Deltagare-{div}`   | `Deltagare-Väntande` | —         | `(12)`          |
-| 25696                      | `ist-rundresa`   | 88168             | `IST-Patrull-{div}` | `IST-Rundresa`       | `IST` + `IST-Rundresa` | `(IST05)` |
-| 25702                      | `ist-egenresa`   | 88168             | `IST-Patrull-{div}` | `IST-Egenresa`       | `IST` + `IST-Egenresa` | `(IST05)` |
-| 33293, 34850, 27560, 25695 | `ledare`         | 107592            | `Ledare-{div}`      | `Ledare-Väntande`    | `Avdelningsledare` | `(AL12)` |
-| 25697, 25693, 46628        | `cmt`            | —                 | `CMT`               | —                    | —         | `(CMT)`         |
+| Variable | Entry | Gives |
+| --- | --- | --- |
+| `SCOUTNET_FEE_ROLES` | `33293:ledare` | fee 33293 → category `ledare` |
+| `SCOUTNET_DIVISION_ROLES` | `ledare:107592:Ledare-{div}:Ledare-Väntande` | `Ledare-12` from question 107592, or `Ledare-Väntande` |
+| `SCOUTNET_CATEGORY_ROLES` | `ledare:Avdelningsledare` | `Avdelningsledare` as well |
+| `SCOUTNET_NICKNAME_SUFFIXES` | `ledare:AL{div}-{divnamn}:AL` | `(AL12-Musen)`, or `(AL)` |
 
-The flat role column is `SCOUTNET_CATEGORY_ROLES`, granted *in addition to* the
+To read a live value:
+
+```bash
+kubectl get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_FEE_ROLES}'
+```
+
+The flat role, `SCOUTNET_CATEGORY_ROLES`, is granted *in addition to* the
 division role: a leader in troop 12 carries both `Ledare-12` and
 `Avdelningsledare`. It
 exists because Discord's AutoMod can only *exempt* roles, never target them, and
