@@ -266,6 +266,25 @@ export function getGuildMember(guildId, userId) {
   });
 }
 
+/**
+ * Is this account a member of the guild? `false` only on Discord's 404; any other
+ * failure is `null`, an unknown. The linking flow refuses on `false` and goes on
+ * on `null`, since a Discord error must not stop a member from linking.
+ */
+export async function isGuildMember(guildId, userId) {
+  // Without a guild the request would go to `guilds/undefined`, whose 404 would
+  // turn every linking away.
+  if (!guildId) return null;
+  try {
+    await getGuildMember(guildId, userId);
+    return true;
+  } catch (e) {
+    if (e.status === 404) return false;
+    console.error(`Could not check membership of ${userId}:`, e.message);
+    return null;
+  }
+}
+
 let cachedBotUserId = null;
 
 export async function getCurrentBotUserId() {

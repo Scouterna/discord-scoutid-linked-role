@@ -164,6 +164,32 @@ export function logLinked({
 }
 
 /**
+ * A linking stopped because the account is not in the server, before anything
+ * was stored. `scoutId` is absent when it stopped at the Discord step, before the
+ * member reached ScoutID.
+ */
+export function logLinkRefused({ discordUserId, name, scoutId }) {
+  const what = scoutId ? `länka ScoutID \`${scoutId}\`` : "länka ScoutID";
+  logEvent(
+    `⛔ ${who(discordUserId, name)} försökte ${what} från ett konto som inte är med i servern — ingenting sparat`,
+  );
+}
+
+/**
+ * Links removed by `src/prune.js` for accounts outside the server. One line per
+ * account, with the scoutid, so a mistaken removal can be put back with
+ * `/link-scoutid`.
+ */
+export function logLinksPruned({ removed }) {
+  logEvent(
+    `🧹 ${removed.length} länkar borttagna för konton som inte är med i servern:\n` +
+      removed
+        .map((l) => `- \`${l.discordUserId}\` — scoutid \`${l.scoutId}\``)
+        .join("\n"),
+  );
+}
+
+/**
  * An admin created a link by hand with `/link-scoutid`. The target's name rides
  * along on `result`, which the sync fills in from the member it already had.
  */

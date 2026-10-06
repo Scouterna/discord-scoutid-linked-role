@@ -588,7 +588,7 @@ Utfallen, i den ordning det första som stämmer vinner:
 
 | Utfall | När | Sida |
 | --- | --- | --- |
-| `not-in-server` | skrivningarna fick 404 | *Fel Discord-konto*, med kontots namn |
+| `not-in-server` | skrivningarna fick 404 — se nedan, numera nästan bara ett mellanfall | *Fel Discord-konto*, med kontots namn |
 | `no-roles` | inget delades ut, av annat skäl | *Inga roller*, eller *Rollerna kommer senare* vid ScoutNet-avbrott |
 | `incomplete` | roller ja, men `verified` saknas | *Nästan klart* |
 | `linked` | allt | lyckad-sidan |
@@ -600,6 +600,38 @@ gångerna det hänt satt personen i servern på ett annat konto, och frågan
 Discord-callbacken och följer med i OAuth-state; det är text någon annan valt,
 så det escapas. Avbrottsvarianten känns igen på `roles.SCOUTNET_UNREACHABLE`
 och inte på formuleringen.
+
+#### Ett konto utanför servern stoppas innan något sparas
+
+`not-in-server` sparade tidigare länken ändå, "den halva som fungerade". Men en
+länk för ett konto som inte är med i servern kan inte ge någonting, och varje
+synk rapporterade dess 404 — tolv av 1 051 länkar 2026-10-06, de flesta andra
+konton som länkat av misstag. `discord.isGuildMember` frågas därför två gånger:
+i Discord-callbacken, innan tokens sparas och innan medlemmen skickas till
+ScoutID, och i ScoutID-callbacken innan länken sparas. Svarar den `false`
+visas *Fel Discord-konto* direkt och raden i händelseloggen blir `⛔ … ingenting
+sparat`. Den andra frågan finns för den som lämnar mellan stegen.
+
+**Bara Discords egen 404 stoppar.** Ett fel eller uteblivet svar är `null`, och
+då fortsätter länkningen — ett Discord-avbrott får inte stänga ute någon som är
+med, av samma skäl som `verifyConnection` skiljer `unknown` från `rejected`.
+Kvar av det gamla är fallet där kontot lämnar *efter* frågan: skrivningarnas 404
+ger då samma sida via `outcomeOf`, och länken står kvar.
+
+Länkar som redan finns för konton utanför servern tas bort med
+[src/prune.js](src/prune.js), för hand och aldrig schemalagt: den som lämnar och
+kommer tillbaka måste länka om när länken är borta, så borttagningen är ett
+beslut. Två bevis krävs, eftersom en saknad medlem aldrig får läsas ur en lista
+som bara kom tillbaka kort — samma misstag som en trunkerad snapshot läst som
+frånvaro. Medlemslistan måste ha minst hälften så många medlemmar som det finns
+länkar, annars avbryts körningen, och varje kandidat tas bort först på en egen
+404. Länken och kontots Discord-tokens försvinner tillsammans, och
+händelseloggen får scoutid:t för varje, så ett misstag kan återställas med
+`/link-scoutid`.
+
+```bash
+node src/prune.js --dry-run
+```
 
 Samma genomgång tog bort två nakna svar till: ett utgånget state gav `500`
 (`getStateData` returnerar `null` efter tio minuter, och destruktureringen
@@ -1037,8 +1069,9 @@ den finns.
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
-| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Att sidan och loggraden följs åt: ett konto utanför servern får *Fel Discord-konto* med sitt namn escapat, en länkning utan roller får aldrig lyckad-sidan eller `✅`, och ett ScoutNet-avbrott säger att rollerna kommer i stället för att de saknas. Plus att ett utgånget state och en främmande cookie svarar med en sida och inte ett naket `400`/`403` |
+| `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Att ett konto utanför servern stoppas innan något sparas, i båda callbackarna, och får *Fel Discord-konto* med sitt namn escapat — men att en obesvarad medlemsfråga inte stoppar någon. Att sidan och loggraden följs åt: en länkning utan roller får aldrig lyckad-sidan eller `✅`, och ett ScoutNet-avbrott säger att rollerna kommer i stället för att de saknas. Plus att ett utgånget state och en främmande cookie svarar med en sida och inte ett naket `400`/`403` |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
+| `integration/prune` | Att en länk utanför servern tas bort med sina tokens, och de två sätten det kunde gå fel: en kort medlemslista läst som frånvaro, och ett fel läst som en 404. Båda behåller länken |
 
 **`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad
 binder den ingen port och installerar ingen signalhanterare, så testerna kan
@@ -1091,7 +1124,7 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 1. **Scout-roll utan storage-länk** — användare med Scout-rollen men ingen ScoutID-länkning i Table Storage
 2. **Saknar Scout-rollen *och* har ingen giltig Discord-koppling** — Discord Linked Role har fallit bort (frånkopplad app, lämnad/återansluten server). Användaren måste re-verifiera via `/linked-role` själv eftersom Scout är en managed roll
 3. **Länkade utan sparade Discord-tokens** — länken räcker för roller och smeknamn men inte för att prata med Discord i användarens namn, så `updateMetadata` kan inte pusha Linked Role-metadata. Felet är tyst: allt fungerar till Scout-rollen faller bort, och då kan varken admin eller bot laga det — personen måste själv köra om `/linked-role`. **`/link-scoutid` lagar inte det här**, den skapar bara länken. Exakt vad Redis-wipen 2026-05-26 lämnade efter sig, eftersom länkar och tokens försvann tillsammans
-4. **Storage-länk utan guild-medlem** — gamla länkningar för användare som lämnat servern
+4. **Storage-länk utan guild-medlem** — gamla länkningar för användare som lämnat servern. Rensas med `node src/prune.js`; nya kan inte uppstå från länkningsflödet, bara av att någon lämnar
 5. **Avbokade i ScoutNet** — länkade användare med `cancelled_date` satt
 6. **Namnskillnader** — Discord-smeknamn matchar inte ScoutNet-namn
 7. **Saknade statiska roller** — roller boten skulle tilldela som inte finns i guilden

@@ -265,8 +265,11 @@ What is covered:
 - **`integration/audit`** — all 13 categories, and that the audit never writes.
 - **`integration/linking`** — the ScoutID callback over a real socket: a failed
   metadata push still stores the link, grants roles and sets the nickname — and
-  answers with the page that says what is missing, instead of a 500.
+  answers with the page that says what is missing, instead of a 500. An account
+  outside the server is turned away before anything is stored.
 - **`integration/memberscan`** — the whole flow in sequence.
+- **`integration/prune`** — removing links for accounts outside the server, and
+  keeping them when the member list came back short or a check went unanswered.
 
 Two of those are worth understanding before changing them. **A clean guild must
 report zero issues**, which surfaces a false positive in any of the 13 audit

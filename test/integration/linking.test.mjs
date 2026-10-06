@@ -49,6 +49,8 @@ const GUILD_ROLES = [
 let pushStatus = 200;
 /** What a write to the member answers. 404 = this user is not in the guild. */
 let memberWriteStatus = 200;
+/** What a read of the member answers: the membership check before linking. */
+let memberReadStatus = 200;
 let participants = {};
 /** ScoutNet answering 503 — the outage `allowIncomplete` exists for. */
 let scoutnetDown = false;
@@ -77,6 +79,17 @@ globalThis.fetch = async (url, opts = {}) => {
     text: async () => "{}",
   });
 
+  // Discord's half of the flow, for the cases that start at its callback.
+  if (u.endsWith("/oauth2/token")) {
+    return ok({
+      access_token: "dc-at",
+      refresh_token: "dc-rt",
+      expires_in: 3600,
+    });
+  }
+  if (u.endsWith("/oauth2/@me")) {
+    return ok({ user: { id: "u9", username: "andra", global_name: null } });
+  }
   if (u.includes("access_token.php")) {
     return ok({ access_token: "sid-at", expires_in: 3600 });
   }
@@ -128,6 +141,7 @@ globalThis.fetch = async (url, opts = {}) => {
       calls.nicks.push(JSON.parse(opts.body).nick);
       return ok({});
     }
+    if (memberReadStatus !== 200) return refused(memberReadStatus);
     return ok({ user: { id: "u1" }, nick: null, roles: ["r-scout"] });
   }
   throw new Error(`unexpected fetch: ${opts.method ?? "GET"} ${u}`);
@@ -267,15 +281,15 @@ test("a ScoutNet outage says the roles are coming, not that none exist", async (
   }
 });
 
-test("a linking from an account that never joined the server says so", async () => {
+test("an account outside the server is turned away before anything is stored", async () => {
   // 2026-09-21: a leader linked fifteen times from a second Discord account,
   // created seven minutes before the first attempt, that had never joined the
-  // server. Every write 404'd, and the line said "rollerna kunde inte delas ut
-  // — finns de i servern?" — pointing at the four roles, all of which existed.
-  // She was in the server the whole time, on her everyday account, with no
-  // roles; the question the line could not raise was which account had linked.
+  // server. 2026-09-26: a participant, five times. Each linking stored a link
+  // that could never give anything, and every sync since reported its 404.
+  // The name is the one fact that tells a member which account they used — and
+  // it is text someone else chose, so it must arrive escaped.
   pushStatus = 200;
-  memberWriteStatus = 404;
+  memberReadStatus = 404;
   participants = {
     3259703: {
       fee_id: 25697,
@@ -287,10 +301,6 @@ test("a linking from an account that never joined the server says so", async () 
   };
 
   try {
-    // 2026-09-26: a participant, five times, each answered with the success
-    // page while the log said the account was not in the server. The name is
-    // the one fact that tells a member which account they used — and it is
-    // text someone else chose, so it must arrive escaped.
     const { status, body } = await completeLinking({
       userId: "u4",
       state: "s4",
@@ -298,21 +308,91 @@ test("a linking from an account that never joined the server says so", async () 
     });
     assert.equal(status, 200);
     assert.match(body, /Fel Discord-konto/);
+    assert.match(body, /ingenting kopplats/);
     assert.ok(body.includes("&lt;b&gt;hugo&lt;/b&gt;"), "username escaped");
     assert.ok(!body.includes("<b>hugo</b>"));
     assert.ok(body.includes(RELINK_PATH), "names the path back");
-    assert.doesNotMatch(body, /Successfully Linked/);
     assert.doesNotMatch(body, /\{\{/, "no placeholder left unreplaced");
-    // The link is stored either way: it is the half that worked.
-    assert.equal(await storage.getLinkedScoutIDUserId("u4"), "3259703");
+    assert.equal(await storage.getLinkedScoutIDUserId("u4"), null);
     assert.deepEqual(calls.rolesAdded, []);
     assert.deepEqual(calls.nicks, []);
 
     const line = calls.logs.join("\n");
-    assert.match(line, /⚠️/);
-    assert.match(line, /inga roller/);
+    assert.match(line, /⛔/);
+    assert.match(line, /3259703/);
+    assert.match(line, /inte är med i servern — ingenting sparat/);
+  } finally {
+    memberReadStatus = 200;
+  }
+});
+
+test("the Discord step turns the account away before ScoutID", async () => {
+  // Checked first where it is cheapest for the member: no ScoutID login for a
+  // linking that cannot work, and no Discord tokens stored for the account.
+  memberReadStatus = 404;
+  calls.logs.length = 0;
+  try {
+    const signed = "s:" + signature.sign("d1", process.env.COOKIE_SECRET);
+    const res = await fetch(
+      `${BASE}/discord-oauth-callback?state=d1&code=abc`,
+      {
+        headers: { Cookie: `clientState=${encodeURIComponent(signed)}` },
+        redirect: "manual",
+      },
+    );
+    const body = await res.text();
+    await eventlog.flushEventLog();
+    assert.equal(res.status, 200, "a page, not the redirect to ScoutID");
+    assert.match(body, /Fel Discord-konto/);
+    assert.match(body, /andra/);
+    assert.equal(await storage.getDiscordTokens("u9"), null);
+    assert.match(calls.logs.join("\n"), /⛔/);
+  } finally {
+    memberReadStatus = 200;
+  }
+});
+
+test("an unanswered membership check does not stop a linking", async () => {
+  // A Discord error is an unknown, not a no — the same rule as everywhere else.
+  pushStatus = 200;
+  memberReadStatus = 500;
+  participants = {
+    3259703: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Sandra",
+      last_name: "Gauffin",
+      questions: {},
+    },
+  };
+  try {
+    const { body } = await completeLinking({ userId: "u6", state: "s6" });
+    assert.doesNotMatch(body, /Fel Discord-konto/);
+    assert.equal(await storage.getLinkedScoutIDUserId("u6"), "3259703");
+  } finally {
+    memberReadStatus = 200;
+  }
+});
+
+test("a member who leaves between the check and the writes is still told", async () => {
+  // The writes' 404 remains the fallback, and the link is the half that worked.
+  pushStatus = 200;
+  memberWriteStatus = 404;
+  participants = {
+    3259703: {
+      fee_id: 25697,
+      cancelled_date: null,
+      first_name: "Sandra",
+      last_name: "Gauffin",
+      questions: {},
+    },
+  };
+  try {
+    const { body } = await completeLinking({ userId: "u10", state: "s10" });
+    assert.match(body, /Fel Discord-konto/);
+    assert.doesNotMatch(body, /Successfully Linked/);
+    const line = calls.logs.join("\n");
     assert.match(line, /inte med i servern/);
-    // The old text, which sent an admin to look for roles that were never gone.
     assert.doesNotMatch(line, /finns de i servern/);
   } finally {
     memberWriteStatus = 200;

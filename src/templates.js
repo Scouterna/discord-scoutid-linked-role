@@ -75,11 +75,11 @@ export function getNotInServerPageHTML({ discordUsername, relinkPath }) {
     : "ett Discord-konto";
   return problemPage({
     title: "Fel Discord-konto",
-    message: `Ditt ScoutID är kopplat till ${account}, men det kontot är inte med i WSJ27-servern. Därför fick du inga roller och inget nytt namn.`,
+    message: `Du loggade in med ${account}, men det kontot är inte med i WSJ27-servern. Därför har ingenting kopplats.`,
     steps: [
       "Använder du ett annat konto i servern? Logga ut ur Discord i webbläsaren, logga in med det kontot och gör om länkningen därifrån.",
       `Du gör om den i servern: ${path(relinkPath)}.`,
-      "Är det här kontot du vill använda? Gå med i servern med det. Rollerna kommer då vid nästa synk, senast inom ett dygn.",
+      "Är det här kontot du vill använda? Gå med i servern med det först, och gör sedan om länkningen.",
     ],
     footer: FOOTER_LOGGED,
   });

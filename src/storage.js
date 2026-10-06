@@ -119,6 +119,20 @@ export async function getLinkedScoutIDUserId(discordUserId) {
   return e ? e.value : null;
 }
 
+/**
+ * Remove a link and the account's Discord tokens together: without the link the
+ * tokens serve nothing, and a relinking stores fresh ones. A row already gone is
+ * not an error.
+ */
+export async function deleteLink(discordUserId) {
+  await ensureTable();
+  for (const partition of ["link", "discord-token"]) {
+    await client.deleteEntity(partition, discordUserId).catch((e) => {
+      if (e.statusCode !== 404) throw e;
+    });
+  }
+}
+
 export async function getAllLinkedUsers() {
   await ensureTable();
   const users = [];

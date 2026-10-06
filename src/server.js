@@ -135,6 +135,18 @@ app.get("/discord-oauth-callback", async (req, res) => {
     const tokens = await discord.getOAuthTokens(req.query["code"]);
     const { user } = await discord.getUserData(tokens);
     const userId = user.id;
+    const discordUsername = user.global_name ?? user.username;
+
+    // An account outside the server stops here, before ScoutID and before its
+    // tokens are stored: a link it made could give it nothing.
+    if (
+      (await discord.isGuildMember(config.DISCORD_GUILD_ID, userId)) === false
+    ) {
+      eventlog.logLinkRefused({ discordUserId: userId, name: discordUsername });
+      return res.send(
+        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+      );
+    }
 
     await storage.storeDiscordTokens(userId, {
       access_token: tokens.access_token,
@@ -148,7 +160,7 @@ app.get("/discord-oauth-callback", async (req, res) => {
     // the account on the page — see getNotInServerPageHTML.
     await storage.storeStateData(state, {
       discordUserId: userId,
-      discordUsername: user.global_name ?? user.username,
+      discordUsername,
       codeVerifier,
     });
     res.redirect(url);
@@ -172,7 +184,9 @@ app.get("/discord-oauth-callback", async (req, res) => {
  * In order, because the first that applies is the one worth telling:
  *
  *   not-in-server  every write 404'd — nothing else matters until the right
- *                  account links, so this outranks a failed metadata push
+ *                  account links, so this outranks a failed metadata push.
+ *                  The membership check before the link is stored makes this
+ *                  rare: it needs the member to leave in between
  *   no-roles       nothing granted, for any other reason
  *   incomplete     roles granted, but Discord holds no `verified`
  *   linked         everything the member came for
@@ -214,6 +228,24 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       codeVerifier,
     });
     const scoutIDUser = await scoutid.getUserData(tokens);
+
+    // Checked again before anything is stored: the Discord step already checked,
+    // but the member may have left since, and a link for an account outside the
+    // server only produces a 404 on every sync.
+    if (
+      (await discord.isGuildMember(config.DISCORD_GUILD_ID, discordUserId)) ===
+      false
+    ) {
+      eventlog.logLinkRefused({
+        discordUserId,
+        name: discordUsername,
+        scoutId: scoutIDUser.scoutid,
+      });
+      return res.send(
+        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+      );
+    }
+
     console.log(
       `Linked ScoutID ${scoutIDUser.scoutid} to Discord user ${discordUserId}`,
     );
