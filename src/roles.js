@@ -168,24 +168,70 @@ export async function explainMissingRoles(scoutnetMemberId) {
 }
 
 /**
- * Bring the member's roles in line with `desired`. Returns what moved.
+ * Which writes would bring the member's roles in line with `desired`: `{ role,
+ * name }` pairs to add and to remove, where `name` is the configured spelling
+ * for a configured role and the guild's for a division role. Pure — the sync performs it and the audit's drift
+ * category reports it, so there is one answer to "what would change".
  *
  * Removal has two halves: static managed names match exactly, division roles
  * match by **prefix**, since the guild holds one role per division and the config
  * names only the pattern. Managed roles are skipped on both sides — Discord owns
- * the Scout linked role. A failed single write is logged, not thrown: a 403 from
- * the role hierarchy on one role must not abandon the rest.
+ * the Scout linked role.
+ */
+export function planRoles({ roleMap, currentRoleIds, desired }) {
+  const desiredSet = new Set(desired.map((r) => r.toLowerCase()));
+  const toAdd = [];
+  const toRemove = new Map();
+
+  for (const name of desired) {
+    const role = roleMap.get(name.toLowerCase());
+    if (role && !role.managed && !currentRoleIds.has(role.id)) {
+      toAdd.push({ role, name });
+    }
+  }
+
+  for (const name of managedRoleNames({ includeUnverified: true })) {
+    const role = roleMap.get(name.toLowerCase());
+    if (
+      role &&
+      !role.managed &&
+      currentRoleIds.has(role.id) &&
+      !desiredSet.has(name.toLowerCase())
+    ) {
+      toRemove.set(role.id, { role, name });
+    }
+  }
+
+  for (const { prefix } of divisionPrefixes()) {
+    for (const [name, role] of roleMap) {
+      if (
+        name.startsWith(prefix) &&
+        currentRoleIds.has(role.id) &&
+        !desiredSet.has(name) &&
+        !toRemove.has(role.id)
+      ) {
+        toRemove.set(role.id, { role, name: role.name });
+      }
+    }
+  }
+
+  return { toAdd, toRemove: [...toRemove.values()] };
+}
+
+/**
+ * Perform `planRoles`. Returns the names that actually moved. A failed single
+ * write is logged, not thrown: a 403 from the role hierarchy on one role must not
+ * abandon the rest.
  */
 async function applyRoles(
   guildId,
   userId,
   { roleMap, currentRoleIds, desired, dryRun },
 ) {
-  const desiredSet = new Set(desired.map((r) => r.toLowerCase()));
   const added = [];
   const removed = [];
 
-  const write = async (verb, role, name, into) => {
+  const write = async (verb, { role, name }, into) => {
     const call =
       verb === "add" ? discord.addRoleToUser : discord.removeRoleFromUser;
     try {
@@ -198,36 +244,9 @@ async function applyRoles(
     }
   };
 
-  for (const name of desired) {
-    const role = roleMap.get(name.toLowerCase());
-    if (role && !role.managed && !currentRoleIds.has(role.id)) {
-      await write("add", role, name, added);
-    }
-  }
-
-  for (const name of managedRoleNames({ includeUnverified: true })) {
-    const role = roleMap.get(name.toLowerCase());
-    if (
-      role &&
-      !role.managed &&
-      currentRoleIds.has(role.id) &&
-      !desiredSet.has(name.toLowerCase())
-    ) {
-      await write("remove", role, name, removed);
-    }
-  }
-
-  for (const { prefix } of divisionPrefixes()) {
-    for (const [name, role] of roleMap) {
-      if (
-        name.startsWith(prefix) &&
-        currentRoleIds.has(role.id) &&
-        !desiredSet.has(name)
-      ) {
-        await write("remove", role, role.name, removed);
-      }
-    }
-  }
+  const { toAdd, toRemove } = planRoles({ roleMap, currentRoleIds, desired });
+  for (const w of toAdd) await write("add", w, added);
+  for (const w of toRemove) await write("remove", w, removed);
 
   return { added, removed };
 }

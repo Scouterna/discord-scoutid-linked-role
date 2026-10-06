@@ -426,6 +426,40 @@ test("a member the bot cannot modify is left out of role drift", async () => {
   );
 });
 
+test("role drift reports what a sync would remove, Overifierad included", async () => {
+  // The audit used to compute the drift itself and left `Overifierad` out of
+  // "wrongly held", while the sync removes it from a verified member. Two code
+  // paths answering "what would change", saying different things.
+  const before = members;
+  members = [
+    ...members,
+    M("u14", "Kvar Person (07)", ["r-scout", "r-event", "r-d07", "r-unver"]),
+  ];
+  await link("u14", "1414");
+  participants["1414"] = {
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Kvar",
+    last_name: "Person",
+    questions: { 88168: "7" },
+  };
+  await storage.clearScoutNetCache();
+
+  try {
+    const result = await audit.runAudit(GUILD);
+    const drift = result.categories.find((c) => c.id === "role_drift");
+    const item = drift.items.find((i) => i.includes("u14"));
+    assert.ok(item, "a verified member holding Overifierad is drift");
+    assert.match(item, /har felaktigt: Overifierad/);
+    assert.doesNotMatch(item, /saknar/);
+  } finally {
+    members = before;
+    await storage.deleteLink("u14");
+    delete participants["1414"];
+    await storage.clearScoutNetCache();
+  }
+});
+
 test("a bot role missing MANAGE_ROLES is reported", async () => {
   // Read from the role, not the member. A bot that cannot manage roles fails
   // every assignment silently from the user's point of view.

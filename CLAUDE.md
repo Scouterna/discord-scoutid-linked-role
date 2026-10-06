@@ -1131,7 +1131,7 @@ Audit-logiken ligger i [src/audit.js](src/audit.js) och körs antingen via slash
 8. **Saknade division-roller** — `Deltagare-{nr}` etc. som ScoutNet refererar till men som inte finns
 9. **Okända fee_id** — `fee_id` i ScoutNet utan mappning i `SCOUTNET_FEE_ROLES`
 10. **Bot-hierarki/permissions** — roller över botens position, eller saknade `MANAGE_ROLES`/`MANAGE_NICKNAMES`
-11. **Roll-drift** — per användare: vilka roller saknas / vilka borde inte finnas (dry-run sync)
+11. **Roll-drift** — per användare: vilka roller saknas / vilka borde inte finnas, ur samma `planRoles` som synken skriver efter
 12. **Multipla division-roller** — användare som har t.ex. `Deltagare-05` och `Deltagare-07` samtidigt
 13. **Fel nickname-suffix** — användare där `(X)` i nicket inte matchar förväntat värde
 
@@ -1202,10 +1202,14 @@ kräver att kommandona registreras om** — koden ensam räcker inte:
 docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
 ```
 
-Kvar att röja: auditens rolldrift-kategori återimplementerar dry-run-synken, så två
-kodvägar svarar på "vad skulle ändras" och kan säga olika saker — auditen hoppar
-över medlemmar boten inte kan ändra, dry-runen gör det inte. Auditen borde anropa
-dry-runen.
+**Auditens rolldrift och synken räknar med samma funktion**, `roles.planRoles`.
+Kategori 11 återimplementerade tidigare uträkningen, och de två sa olika saker:
+auditen räknade inte `Overifierad` som felaktigt hållen, synken tog bort den. Den
+anropar med flit *inte* hela dry-run-synken — den kör verifieringsproben, som kan
+förnya och spara ett token och alltså skriva, och den räknar smeknamn som
+kategori 6 och 13 redan granskar. Det som skilde var rolluträkningen, och den
+finns nu på ett ställe. Kvar som avsiktlig skillnad: auditen hoppar över
+medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åtgärda.
 
 - `/audit-scoutid` — full rapport (admin). Filattachment om >2000 tecken.
 - `/scan-scoutid` — kör medlemsscannern nu (admin). `dryrun:true` = visa utan att posta.

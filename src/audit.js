@@ -381,11 +381,7 @@ const CHECKS = [
      * nobody can act on.
      */
     run: async (ctx) => {
-      const { linkedUsers, memberMap, roleMap, roleById, botMember } = ctx;
-      const managedStatic = new Set(
-        managedRoleNames().map((n) => n.toLowerCase()),
-      );
-      const prefixes = divisionPrefixes().map((d) => d.prefix);
+      const { linkedUsers, memberMap, roleMap, botMember } = ctx;
       const items = [];
 
       for (const u of linkedUsers) {
@@ -399,27 +395,18 @@ const CHECKS = [
         } catch {
           continue;
         }
-        const desiredLower = new Set(desired.map((n) => n.toLowerCase()));
 
-        const missing = desired.filter((n) => {
-          const role = roleMap.get(n.toLowerCase());
-          return role && !role.managed && !member.roles.includes(role.id);
+        // The sync's own plan, so the audit cannot disagree with what a refresh
+        // would do. It used to recompute the diff here, and the two differed on
+        // `Overifierad`: the sync removes it from a verified member, the audit
+        // did not count it as wrongly held.
+        const { toAdd, toRemove } = roles.planRoles({
+          roleMap,
+          currentRoleIds: new Set(member.roles),
+          desired,
         });
-
-        // Only roles the bot manages count as wrongly held — anything else in
-        // the guild is somebody else's business.
-        const extra = (member.roles || [])
-          .map((id) => roleById.get(id)?.name)
-          .filter(Boolean)
-          .filter((n) => {
-            const lower = n.toLowerCase();
-            if (desiredLower.has(lower)) return false;
-            if (roleMap.get(lower)?.managed) return false;
-            return (
-              managedStatic.has(lower) ||
-              prefixes.some((p) => lower.startsWith(p))
-            );
-          });
+        const missing = toAdd.map((w) => w.name);
+        const extra = toRemove.map((w) => w.role.name);
 
         if (missing.length > 0 || extra.length > 0) {
           const parts = [];
