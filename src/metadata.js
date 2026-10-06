@@ -78,6 +78,12 @@ export async function updateMetadata(discordUserId) {
  * no path leads from there to verified except the user re-linking, so `unknown`
  * would grant permanent access and make `/link-scoutid` a standing bypass.
  *
+ * **A 403 is `unknown`, never `rejected`.** Revoking the app kills the token, and
+ * Discord answers that with 401 and then `invalid_grant` on the refresh — that is
+ * the no. A 403 is a live token refused for another reason, which a refresh
+ * cannot change and which says nothing about the grant. Reading it as revoked
+ * stripped a member nine minutes after she linked, on 2026-10-01.
+ *
  * `readOnly` is the audit's mode: nothing may be refreshed, because a refresh
  * rotates and re-stores the token pair — a write. A 401 is then ambiguous (an
  * expired access token and a revoked grant answer alike, and only a refresh can
@@ -107,7 +113,7 @@ export async function verifyConnection(
           "HTTP 401 — kan vara ett utgånget access-token; bara den fulla proben kan avgöra",
       };
     }
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       return { status: "rejected", detail: `HTTP ${status}` };
     }
     return { status: "unknown", detail: `HTTP ${status}` };

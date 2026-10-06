@@ -232,6 +232,17 @@ test("an unreachable Discord is unknown, never a no", async () => {
   assert.equal((await metadata.verifyConnection("v3")).status, "unknown");
 });
 
+test("a 403 is unknown, not a revocation", async () => {
+  // 2026-10-01: a member was stripped nine minutes after linking, on a 403. A
+  // revoked app kills the token, which Discord answers with 401; a 403 is a live
+  // token refused for some other reason, and says nothing about the grant.
+  connectionStatus = 403;
+  await link("v10", "910");
+  const result = await metadata.verifyConnection("v10");
+  assert.equal(result.status, "unknown");
+  assert.match(result.detail, /403/);
+});
+
 test("a dead refresh token is rejected, not unknown", async () => {
   // The user revoked the app *and* their access token has expired, so the probe
   // never reaches the role-connection read — the refresh fails first, with

@@ -377,8 +377,12 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
   Rollen kontrolleras först eftersom den är gratis; nätverksproben körs bara för
   den som saknar rollen. **`verifyConnection` har tre svar, inte två**: `accepted`,
-  `rejected` (401 — användaren har återkallat), och `unknown` (Discord svarade
-  inte). På `unknown` ändras ingenting, av samma skäl som ett ScoutNet-fel kastar.
+  `rejected` (401 även efter förnyelse, eller `invalid_grant` — användaren har
+  återkallat), och `unknown` (Discord svarade inte, eller svarade 403). På
+  `unknown` ändras ingenting, av samma skäl som ett ScoutNet-fel kastar. **En 403
+  är inget nej**: återkallelse dödar tokenet och ger 401, medan 403 är ett levande
+  token som nekas av annat skäl, och det kan en förnyelse inte ändra. Läst som nej
+  strippade den en medlem nio minuter efter att hon länkat, 2026-10-01.
   Ett *saknat* token räknas som `rejected`, med flit den mindre generösa läsningen
   — annars finns ingen väg därifrån till verifierad och `/link-scoutid` blir en
   permanent förbigång av gränsen.
