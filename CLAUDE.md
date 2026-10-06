@@ -1251,7 +1251,6 @@ patrullroll bort två gånger; och `getDesiredRoles` deduplicerar, eftersom
 resegruppsrollen efterfrågas både som markör och som väntande-roll. Båda
 pinnas i `integration/roles`.
 
-`IST-Väntande` är inte längre bot-hanterad, så boten tar inte bort den. Den
-försvinner från alla när infra-repot raderar rollen — vilket måste ske
-**efter** att boten delat ut resegrupperna, annars tappar IST sin åtkomst i
-mellantiden.
+`IST-Väntande` raderades i infra-repot 2026-10-06, efter att synken delat ut
+resegrupperna — ordningen var tvingande, eftersom en raderad roll försvinner
+från alla på en gång och boten inte längre hanterade den.
