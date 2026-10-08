@@ -6,99 +6,50 @@ data:
   PORT: "3000"
   TABLE_NAME: scoutidlinks
 
-  # Channel the verification event log is written to — #server-logg, owned by
-  # Scouterna/wsj27-infra (discord/main.tf), where the id comes from
-  # `terraform -chdir=discord output -raw server_log_channel_id`.
-  #
-  # Empty means the log is off and everything else behaves identically, so this
-  # stays empty until the channel exists *and* the bot's role has the overwrite
-  # granted there. The bot's role has no global View Channels, so the overwrite
-  # is the only thing that lets it write: a 403 here means the overwrite is
-  # missing, not that the token is wrong.
-  LOG_CHANNEL_ID: "1539589887563669505"
+  # Channel the verification event log is written to. Empty means the log is
+  # off and everything else behaves identically. The bot's role needs View
+  # Channel + Send Messages there; a 403 means that permission is missing, not
+  # that the token is wrong.
+  LOG_CHANNEL_ID: ""
 
   # Which member events the scheduled scan reports (memberscan-cronjob.yaml).
   # "off" or empty turns the scan off; it exits without touching anything.
   #
   # `roles` reports only changes made by someone other than the bot, read from the
-  # Discord audit log. It needs View Audit Log on the bot's role — granted
-  # 2026-08-19, so the role now carries 402653312 rather than 402653184. That bit
-  # is set by hand in Server Settings → Roles, because the role is a managed
-  # integration role Terraform does not own; if it is ever reset, this category
-  # starts warning and skipping instead of failing.
-  #
-  # The filter is not cosmetic. Every one of the five most recent
-  # MEMBER_ROLE_UPDATE entries in this guild was written by the bot itself, so
-  # without it the category would be almost entirely the bot's own echo.
+  # Discord audit log. It needs View Audit Log on the bot's role; without it the
+  # category warns and is skipped instead of failing.
   LOG_MEMBER_EVENTS: join,leave,nickname,roles
 
-  DISCORD_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback
-  DISCORD_VALIDATION_URL: https://discord-scoutid.wsj27.scouterna.net/linked-role
-  SCOUTID_REDIRECT_URI: https://discord-scoutid.wsj27.scouterna.net/scoutid-oauth-callback
+  DISCORD_REDIRECT_URI: https://discord-scoutid.example.org/discord-oauth-callback
+  DISCORD_VALIDATION_URL: https://discord-scoutid.example.org/linked-role
+  SCOUTID_REDIRECT_URI: https://discord-scoutid.example.org/scoutid-oauth-callback
 
-  # Not a secret: it is a plain env value on the Container App today. It lives
-  # in secrets.tfvars only because that is where the Terraform variable sits.
-  SCOUTNET_EVENT_ID: "43490"
+  # Empty: only the scout role is assigned. Not a secret.
+  SCOUTNET_EVENT_ID: ""
 
-  # Rolluppslagningen är skiftlägesokänslig, men värdet är sedan 2026-08-25
-  # också *medlemsvänt*: sidan efter en halvfärdig länkning och varje mening om
-  # rollen läser namnet härifrån i stället för att stava det själva. Därför
-  # `Scout` och inte `scout` — det är vad rollen heter i Discord, och det är den
-  # texten en medlem får läsa.
+  # Role lookup is case-insensitive, but the value is also member-facing: the
+  # page after a half-finished link and every sentence about the role read the
+  # name from here instead of spelling it out. So write it as it should read.
   SCOUTNET_SCOUT_ROLE: Scout
-  SCOUTNET_EVENT_ROLE: WSJ-event
-  # Medlemsvända namn på sidorna efter en länkning (src/templates.js).
-  DISCORD_SERVER_NAME: WSJ27-servern
-  SCOUTNET_EVENT_NAME: WSJ27
-  # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
-  # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till
-  # 2026-08-16 efter att en länkad CMT:are blivit utan CMT-roll.
-  #
-  # IST är två kategorier, en per resegrupp: 25696 är rundresa och 25702 egen
-  # resa. Båda läser patrullen ur samma fråga och delar `IST-Patrull-{div}`,
-  # eftersom patrullerna har gemensam numrering — patrull 07 finns i exakt en
-  # grupp. Det som skiljer dem är resegruppsrollen, som är kategorins väntande-
-  # roll *och* en platt markör (se SCOUTNET_CATEGORY_ROLES): den delas ut direkt
-  # och ligger kvar när patrullen kommer. Den ersätter IST-Väntande, som inte
-  # gav någon tillgång till resegruppens kanaler.
-  SCOUTNET_FEE_ROLES: 25694:deltagare,27561:deltagare,25696:ist-rundresa,25702:ist-egenresa,33293:ledare,34850:ledare,27560:ledare,25695:ledare,25697:cmt,25693:cmt,46628:cmt
-  SCOUTNET_DIVISION_ROLES: deltagare:88168:Deltagare-{div}:Deltagare-Väntande,ist-rundresa:88168:IST-Patrull-{div}:IST-Rundresa,ist-egenresa:88168:IST-Patrull-{div}:IST-Egenresa,ledare:107592:Ledare-{div}:Ledare-Väntande
-  # Platta kategorimarkörer, utöver divisionsrollen: en ledare i avdelning 12 får
-  # både `Ledare-12` och `Avdelningsledare`. De finns för AutoMod i wsj27-infra,
-  # som bara kan *undanta* roller och max 20 av dem — "alla utom deltagare" hade
-  # krävt 158 per-avdelning roller, men blir sex med de här. `deltagare` har med
-  # flit ingen rad: den saknade markören *är* det som gör att länkfiltret träffar
-  # dem. `cmt` behöver ingen heller, den får rollen `CMT` av kategorinamnet.
-  #
-  # `+` ger en kategori flera markörer. Varje IST:are får `IST`, som AutoMod och
-  # de gemensamma IST-kanalerna läser, plus sin resegrupp.
-  #
-  # `Avdelningsledare` hette `Ledare` fram till 2026-09-21. Rollen är sedan dess
-  # `hoist = true` i infra-repot, alltså en egen rubrik ovanför Online i
-  # medlemslistan — och därmed **läst av medlemmar**, av samma skäl som
-  # SCOUTNET_SCOUT_ROLE ovan. Därför det utskrivna namnet här, medan
-  # per-avdelningsrollerna står kvar som `Ledare-{nr}`. Namnbytet i Discord är en
-  # in-place-uppdatering: roll-id:t består, så ingen tappade rollen och AutoMods
-  # undantag (som pekar på id) bet hela vägen.
-  SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare,ist-rundresa:IST+IST-Rundresa,ist-egenresa:IST+IST-Egenresa
-  # `{divnamn}` slår upp avdelningsnamnet i SCOUTNET_DIVISION_NAMES nedan.
-  # Smeknamnet blir "Alexandra Johansson (12-Musen)" respektive "(AL12-Musen)".
-  # IST och CMT står med flit kvar utan namn: IST-patrullerna har inga.
-  #
-  # Discord tar 32 tecken, och med namnet i suffixet räcker de inte åt alla —
-  # 228 av de 2 117 med avdelning behöver kortas. Det är `fitNickname` som
-  # gör det, och den kortar *namnet*, aldrig suffixet. Längre suffix här
-  # betyder alltså fler förkortade efternamn, inte avhuggna avdelningar.
-  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}-{divnamn}:,ledare:AL{div}-{divnamn}:AL,ist-rundresa:IST{div}:IST,ist-egenresa:IST{div}:IST,cmt::CMT
+  SCOUTNET_EVENT_ROLE: participant
+  # Member-facing names on the pages after a link (src/templates.js).
+  DISCORD_SERVER_NAME: servern
+  SCOUTNET_EVENT_NAME: eventet
 
-  # nummer:namn för `{divnamn}`. **Andra kopian** — första står i
-  # discord/terraform.tfvars i Scouterna/wsj27-infra, där kanalernas topics
-  # läser dem. Döps en avdelning om där måste den döpas om här också;
-  # ingenting upptäcker driften, suffixet skulle bara bära det gamla namnet.
-  #
-  # Nyckeln är numret ensamt. Det håller så länge ett nummer betyder en sak:
-  # deltagare och ledare svarar båda med en avdelning och delar därför de här
-  # namnen rätt, medan IST läser samma ScoutNet-fråga för ett *patrull*nummer.
-  # IST-patrullerna har inga namn idag, så ingenting krockar — ger man dem namn
-  # måste kartan först bli per kategori.
-  SCOUTNET_DIVISION_NAMES: 01:Björnen,02:Bävern,03:Ekorren,04:Fladdermusen,05:Räven,06:Geten,07:Vildsvinet,08:Haren,09:Igelkotten,10:Lodjuret,11:Kräftan,12:Musen,13:Renen,14:Rådjuret,15:Fåret,16:Kråkan,17:Uttern,18:Vargen,19:Ormen,20:Ankan,21:Gräshoppan,22:Gåsen,23:Hönan,24:Sälen,25:Svanen,26:Hästen,27:Getingen,28:Myran,29:Ugglan,30:Abborren,31:Laxen,32:Maneten,33:Vesslan,34:Räkan,35:Hajen,36:Sparven,37:Ödlan,38:Grodan,39:Humlan,40:Fjärilen,41:Tranan,42:Nyckelpigan,43:Örnen,44:Krabban,45:Mullvaden,46:Kon,47:Trollsländan,48:Spindeln,49:Myskoxen,50:Hjorten,51:Strömmingen,52:Korpen,53:Staren
+  # fee_id:category. The names behind the ids are in the ScoutNet response's
+  # `labels.project_fee` — check there before mapping a new id.
+  SCOUTNET_FEE_ROLES: 1001:deltagare,1002:ledare,1003:funktionar
+  # category:questionId:roleWithDiv:roleWithoutDiv. Each category reads its
+  # division number from its own ScoutNet question; {div} is the zero-padded
+  # (min 2 digits) number.
+  SCOUTNET_DIVISION_ROLES: deltagare:5001:Deltagare-{div}:Deltagare-Väntande,ledare:5002:Ledare-{div}:Ledare-Väntande
+  # Flat category roles, granted in addition to the division role: a leader in
+  # division 12 gets both `Ledare-12` and `Avdelningsledare`. They let a Discord
+  # feature that can only list a limited number of roles (AutoMod exemptions, for
+  # one) address a whole category. `+` gives a category several markers. A
+  # category left out gets no flat role.
+  SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare
+  # category:withDiv:withoutDiv (empty = no suffix). Produces e.g. "Ida
+  # Sandholdt (12)" and "Erik Reiner (AL12)". Discord allows 32 characters;
+  # `fitNickname` shortens the *name*, never the suffix.
+  SCOUTNET_NICKNAME_SUFFIXES: deltagare:{div}:,ledare:AL{div}:AL,funktionar::F

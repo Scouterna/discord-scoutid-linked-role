@@ -11,7 +11,6 @@
 # Generated, and rewritten by their own tools on every install. Formatting them
 # means fighting npm and the devcontainer CLI for no benefit.
 package-lock.json
-.devcontainer/devcontainer-lock.json
 
 # Build output for the presentation deck, and gitignored working directories.
 docs/presentation/build/

@@ -10,15 +10,8 @@ logs/
 scoutid-metadata.json
 .claude/*.local.json
 
-# Terraform
-**/secrets.tfvars
-**/.terraform
-**/terraform.tfstate
-**/terraform.tfstate*.backup
-**/.terraform.tfstate.lock.info
-**/*tfplan
-
-# Azure CLI config/token cache for the Scouterna tenant (see CLAUDE.md)
+# Azure CLI config and token cache. AZURE_CONFIG_DIR may point at a directory
+# inside a checkout, and this repository is public.
 .azure*
 
 # Kubeconfigs hold long-lived service-account tokens; they live in ~/.kube
@@ -26,13 +19,9 @@ scoutid-metadata.json
 **/kubectl
 **/*.kubeconfig
 
-# Corporate root CAs for the devcontainer's TLS-intercepted npm mirror.
-# Site-specific, so they stay out of a public repo.
-.devcontainer/certs/
-
-# Local working notes — currently the AKS migration plan. Deliberately not
-# published: this repository is public, and the plan quotes resource names,
-# hostnames and operational detail that do not need to be.
+# Local working notes. Deliberately not published: this repository is public,
+# and such notes can quote resource names, hostnames and operational detail
+# that do not need to be.
 docs/
 
 # Working scratch for the agent flow, in campfire's shape: requirements, design

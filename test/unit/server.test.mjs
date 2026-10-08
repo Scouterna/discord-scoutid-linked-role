@@ -140,7 +140,7 @@ test("readiness fails when storage is unreachable", async () => {
   // The connection string here points at an account that does not exist, which
   // is the closest a unit test gets to a storage outage. 503 is the useful
   // answer: it takes the pod out of the Service instead of leaving it to answer
-  // every interaction with an error. /readyz is also what deploy.yml polls.
+  // every interaction with an error, and stalls a rollout until storage is back.
   //
   // This does not break the suite's no-network rule: the call fails whether or
   // not there is a network, and the route's own 3-second timeout bounds how long

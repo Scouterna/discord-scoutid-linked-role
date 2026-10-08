@@ -4,9 +4,9 @@ A Discord bot that links Discord accounts to [ScoutID](https://scoutid.se) and
 assigns roles and nicknames from [ScoutNet](https://scoutnet.se) event
 registrations.
 
-Built for the Swedish contingent to World Scout Jamboree 2027, but the
-fee-to-role mapping is entirely config-driven — nothing about the event is
-hardcoded.
+The fee-to-role mapping is entirely config-driven — nothing about any event is
+hardcoded. One running instance serves one Discord server and one ScoutNet
+event.
 
 ## How it works
 
@@ -51,7 +51,7 @@ Four kinds of role are assigned, all named in config and looked up by name
 | Role                    | When                                            | Config                       |
 | ----------------------- | ----------------------------------------------- | ---------------------------- |
 | `scout`                 | ScoutID linked                                  | `SCOUTNET_SCOUT_ROLE`        |
-| `WSJ-event`             | Registered (and not cancelled) in the event     | `SCOUTNET_EVENT_ROLE`        |
+| `participant`           | Registered (and not cancelled) in the event     | `SCOUTNET_EVENT_ROLE`        |
 | Fee/division role       | From the participant's `fee_id`, see below      | `SCOUTNET_FEE_ROLES` + `SCOUTNET_DIVISION_ROLES` |
 | Flat category role      | Alongside the division role, for whole-category targeting | `SCOUTNET_CATEGORY_ROLES` |
 
@@ -61,54 +61,54 @@ the question is unanswered; a category without one gets a role named after the
 category itself. Division numbers are zero-padded to at least 2 digits
 (`3` → `03`, `100` → `100`).
 
-**The values live in [k8s/configmap.yaml](k8s/configmap.yaml), and only
-there.** This section used to carry a copy of the mapping, and every change to
-the configmap had to be repeated here by hand or the copy went quietly wrong. Read one category across the four variables to see how they combine; a
-leader, for instance:
+**An instance's values live in its own configuration, and only there** — for
+the example deployment, [k8s/configmap.yaml](k8s/configmap.yaml). This section
+used to carry a copy of a real mapping, and every change to it had to be
+repeated here by hand or the copy went quietly wrong. The examples below are
+invented. Read one category across the four variables to see how they combine;
+a leader, for instance:
 
 | Variable | Entry | Gives |
 | --- | --- | --- |
-| `SCOUTNET_FEE_ROLES` | `33293:ledare` | fee 33293 → category `ledare` |
-| `SCOUTNET_DIVISION_ROLES` | `ledare:107592:Ledare-{div}:Ledare-Väntande` | `Ledare-12` from question 107592, or `Ledare-Väntande` |
+| `SCOUTNET_FEE_ROLES` | `1002:ledare` | fee 1002 → category `ledare` |
+| `SCOUTNET_DIVISION_ROLES` | `ledare:5002:Ledare-{div}:Ledare-Väntande` | `Ledare-12` from question 5002, or `Ledare-Väntande` |
 | `SCOUTNET_CATEGORY_ROLES` | `ledare:Avdelningsledare` | `Avdelningsledare` as well |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `ledare:AL{div}-{divnamn}:AL` | `(AL12-Musen)`, or `(AL)` |
 
-To read a live value:
+To read a live value from a running instance:
 
 ```bash
-kubectl get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_FEE_ROLES}'
+kubectl -n <namespace> get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_FEE_ROLES}'
 ```
 
 The flat role, `SCOUTNET_CATEGORY_ROLES`, is granted *in addition to* the
 division role: a leader in troop 12 carries both `Ledare-12` and
 `Avdelningsledare`. It
 exists because Discord's AutoMod can only *exempt* roles, never target them, and
-caps the exempt list at 20 — far below the 151 per-division roles that "everyone
-except participants" would otherwise need. `deltagare` has no entry on purpose:
-the missing marker is exactly what makes wsj27-infra's link filter apply to
-participants and nobody else. `cmt` needs none either, since a category without a
-division config already yields a flat role named after itself.
+caps the exempt list at 20 — far below the hundreds of per-division roles that
+"everyone except participants" would otherwise need. A category can be left
+without a marker on purpose: the missing marker is then exactly what makes an
+AutoMod filter apply to that category and nobody else. A category without a
+division config needs none either, since it already yields a flat role named
+after itself.
 
 The flat roles are managed like every other assigned role, so an ex-leader loses
 `Avdelningsledare` — and with it the exemption — on the next sync.
 
-`Avdelningsledare` is also the one flat marker that is hoisted, so it is the
-heading leaders appear under in the member list. That makes the name
-member-facing, which is why it is spelled out here while the per-troop roles
-stay `Ledare-{nr}`.
+A flat marker that is hoisted becomes the heading its members appear under in
+the member list. That makes its name member-facing, so spell it out, even when
+the per-division roles beside it stay terse like `Ledare-{nr}`.
 
-IST is split across two travel groups — the contingent tour and travelling on
-your own — with one category each. A category can carry several flat roles,
-joined with `+`: every IST member gets `IST`, which AutoMod and the shared IST
-channels key on, plus `IST-Rundresa` or `IST-Egenresa`. The travel group role is
-also the category's role *without* a patrol, so it is granted at once and kept
-once the patrol arrives — the patrols share one numbering, so the patrol role
-itself carries no group. It replaced `IST-Väntande`, which opened none of the
-travel group's channels while no IST member had a patrol yet.
+A category can carry several flat roles, joined with `+`: `ist-a:IST+IST-A`
+gives every member of the category both `IST`, for whatever keys on the whole
+group, and `IST-A`. A flat role can also be the category's role *without* a
+division (the last field of `SCOUTNET_DIVISION_ROLES`), so it is granted at once
+and kept once the division arrives. Two categories may share a division role
+pattern; the bot deduplicates.
 
-The roles themselves are owned by a separate Terraform repo,
-[Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`). Its troop
-and IST-patrol counts must cover every value ScoutNet can return for the
+The bot creates no roles. They must exist in the server with the names the
+configuration gives, whoever manages them — by hand or with Terraform — and
+there must be a per-division role for every value ScoutNet can return for the
 division questions.
 
 **Note:** Discord forbids a bot from modifying members ranked above it, so
@@ -144,13 +144,13 @@ verification URL is not enough: `Scout` is connection-gated, so only clicking
 
 ## Event log
 
-With `LOG_CHANNEL_ID` set, the bot writes what it did — and when — to
-`#server-logg`, a moderator-only channel owned by
-[wsj27-infra](https://github.com/Scouterna/wsj27-infra). Unset means the log is
-off and everything else is unchanged.
+With `LOG_CHANNEL_ID` set, the bot writes what it did — and when — to a
+channel, best a moderator-only one: the lines carry names and member numbers.
+The bot's role needs View Channel and Send Messages there. Unset means the log
+is off and everything else is unchanged.
 
 ```
-09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → WSJ-event, Ledare-12, Avdelningsledare
+09:14 ✅ Anna Andersson (@anna) länkade ScoutID `12345` → participant, Ledare-12, Avdelningsledare
 09:20 🔗 @moderator länkade @erik till scoutid `777` (ersatte `666`) — + Deltagare-05
 09:31 🔒 @kim saknar Scout-rollen — roller strippade, Overifierad satt
       (måste länka om Scout-rollen i Discord: Kanaler och roller → Scout → Länka)
@@ -168,7 +168,7 @@ Joins and leaves land in the same channel, from `src/memberscan.js` — a CronJo
 that fetches the member list every 10 minutes and diffs it against the previous
 run, with the snapshot in Table Storage.
 
-A poll rather than live events, because this bot speaks HTTP interactions and has
+A poll rather than live events, because this bot talks HTTP interactions and has
 no gateway connection to receive `guildMemberAdd` on. The trade is a reporting
 delay of up to one interval. What it avoids is a second bot, a privileged gateway
 intent, and the failure mode where a process that was down for an hour has lost
@@ -227,7 +227,7 @@ npm run format            # prettier --write .
 npm run format:check      # what CI runs
 ```
 
-Lint and formatting run in CI before the tests, so they gate the deploy too.
+Lint and formatting run in CI before the tests, so they gate the image too.
 Prettier does not touch markdown — see `.prettierignore` for why.
 
 The split is deliberate: a suite that cannot run without setup is a suite that
@@ -300,16 +300,16 @@ delimited strings:
 
 ```bash
 # fee_id:category
-SCOUTNET_FEE_ROLES=25694:deltagare,25696:ist-rundresa,25697:cmt
+SCOUTNET_FEE_ROLES=1001:deltagare,1002:ledare,1003:funktionar
 
 # category:questionId:roleWithDiv:roleWithoutDiv
-SCOUTNET_DIVISION_ROLES=deltagare:88168:Deltagare-{div}:Deltagare-Väntande
+SCOUTNET_DIVISION_ROLES=deltagare:5001:Deltagare-{div}:Deltagare-Väntande
 
 # category:role+role — flat roles granted besides the division role
-SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-rundresa:IST+IST-Rundresa
+SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-a:IST+IST-A
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
-SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,cmt::CMT
+SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,funktionar::F
 ```
 
 ## Running locally
@@ -331,45 +331,29 @@ docker compose run --rm discord-scoutid-linked-role node src/register.js
 
 ## Deploying
 
-The bot runs on Kubernetes — namespace `wsj27` on Scouterna's shared AKS
-cluster — with manifests in [k8s/](k8s/) and images in GHCR. What remains in
-Azure is the Table Storage account holding the links, and the DNS record; see
-the `azure/` module in `Scouterna/wsj27-infra`.
+[publish.yml](.github/workflows/publish.yml) tests, then builds and pushes
+`ghcr.io/scouterna/discord-scoutid-linked-role:<sha7>` on every push to `main`.
+It deploys nothing: an instance pins a tag in its own infrastructure repository.
+[k8s/](k8s/) is a generic example — set a namespace, the host, the ConfigMap
+values and the image tag, and create the `discord-scoutid-secrets` Secret.
 
-Pushing to `main` builds the image and applies the manifests — see
-[.github/workflows/deploy.yml](.github/workflows/deploy.yml). The `prod`
-environment gates it. Terraform is **not** part of deployment any more.
-
-**Always tag images with the git SHA, never `latest`.** On Container Apps a
-mutable tag silently kept the old container running; on Kubernetes it makes
-rollouts and `rollout undo` ambiguous, because two different images share one
-name. CI tags with the SHA automatically.
+**Pin the git SHA tag, never `latest`.** On Container Apps a mutable tag
+silently kept the old container running; on Kubernetes it makes rollouts and
+rollbacks ambiguous, because two different images share one name.
 
 Dependencies install from registry.npmjs.org. To build behind an npm proxy, drop
 a `.npmrc` in the repo root — it is gitignored, and the Dockerfile installs with
 it in a separate stage so it never becomes a layer in the image.
 
-Break-glass manual deploy. `kubectl apply -k k8s/` on its own gives
-`ImagePullBackOff`: the committed tag is a placeholder that CI rewrites in its
-own checkout, so the tag must be named explicitly.
-
-```bash
-export KUBECONFIG=~/.kube/wsj27.yaml
-IMG=ghcr.io/scouterna/discord-scoutid-linked-role
-
-(cd k8s && kustomize edit set image "$IMG=$IMG:$(git rev-parse --short HEAD)")
-kubectl apply -k k8s/
-kubectl rollout status deploy/discord-scoutid
-# then revert the kustomization edit — never commit a real tag
-
-kubectl logs -l app=discord-scoutid --follow --prefix
-```
+What the instance still needs outside the cluster: an Azure Table Storage
+account for the links, a backup target for it (see `k8s/backup-cronjob.yaml`),
+and a DNS name for the host.
 
 ## Discord Developer Portal setup
 
 The app needs the `bot` scope and **Manage Roles** + **Manage Nicknames**
 permissions, and its role must sit above every role it assigns. Three URLs point
-back at the deployment, all on `https://discord-scoutid.wsj27.scouterna.net`:
+back at the deployment, all on `https://<host>`:
 
 | Portal setting                                       | Path                       |
 | ---------------------------------------------------- | -------------------------- |
@@ -395,7 +379,7 @@ src/
 ├── metadata.js    Linked-role metadata push + OAuth grant probe
 ├── audit.js       Consistency checks behind /audit-scoutid
 ├── adoption.js    Linked-vs-registered coverage behind /adoption-scoutid
-├── eventlog.js    Buffered event log → #server-logg
+├── eventlog.js    Buffered event log → LOG_CHANNEL_ID
 ├── memberscan.js  Scheduled member diff (joins, leaves, renames, kicks, bans)
 ├── refresh.js     Nightly whole-server sync (CronJob entrypoint)
 ├── storage.js     Azure Table Storage (links, tokens, OAuth state)
