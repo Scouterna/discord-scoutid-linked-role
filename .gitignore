@@ -10,6 +10,10 @@ logs/
 scoutid-metadata.json
 .claude/*.local.json
 
+# Azure CLI config and token cache. AZURE_CONFIG_DIR may point at a directory
+# inside a checkout, and this repository is public.
+.azure*
+
 # Kubeconfigs hold long-lived service-account tokens; they live in ~/.kube
 **/kubeconfig*
 **/kubectl
