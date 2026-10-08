@@ -176,6 +176,10 @@ const config = {
   // Role configuration
   SCOUTNET_SCOUT_ROLE: process.env.SCOUTNET_SCOUT_ROLE || "scout",
   SCOUTNET_EVENT_ROLE: process.env.SCOUTNET_EVENT_ROLE || "participant",
+  // How the member-facing pages name the server and the event. Plain Swedish
+  // defaults, so an unset value still reads as a sentence.
+  DISCORD_SERVER_NAME: process.env.DISCORD_SERVER_NAME || "servern",
+  SCOUTNET_EVENT_NAME: process.env.SCOUTNET_EVENT_NAME || "eventet",
   SCOUTNET_FEE_ROLES: parseFeeRoles(process.env.SCOUTNET_FEE_ROLES),
   SCOUTNET_DIVISION_ROLES: parseDivisionRoles(
     process.env.SCOUTNET_DIVISION_ROLES,

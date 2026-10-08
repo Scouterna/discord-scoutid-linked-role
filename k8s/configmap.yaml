@@ -47,6 +47,9 @@ data:
   # texten en medlem får läsa.
   SCOUTNET_SCOUT_ROLE: Scout
   SCOUTNET_EVENT_ROLE: WSJ-event
+  # Medlemsvända namn på sidorna efter en länkning (src/templates.js).
+  DISCORD_SERVER_NAME: WSJ27-servern
+  SCOUTNET_EVENT_NAME: WSJ27
   # fee_id:kategori. Namnen bakom id:na finns i ScoutNet-svarets `labels.project_fee`
   # — kolla där innan ett nytt id mappas. 46628 ("CMT Special") lades till
   # 2026-08-16 efter att en länkad CMT:are blivit utan CMT-roll.

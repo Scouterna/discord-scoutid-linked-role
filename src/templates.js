@@ -69,13 +69,18 @@ const FOOTER_LOGGED =
  * time on another account, and "which account did I use?" was the one thing no
  * page told them.
  */
-export function getNotInServerPageHTML({ discordUsername, relinkPath }) {
+export function getNotInServerPageHTML({
+  discordUsername,
+  relinkPath,
+  serverName,
+}) {
   const account = discordUsername
     ? `<strong>${escapeHtml(discordUsername)}</strong>`
     : "ett Discord-konto";
+  const server = escapeHtml(serverName || "servern");
   return problemPage({
     title: "Fel Discord-konto",
-    message: `Du loggade in med ${account}, men det kontot är inte med i WSJ27-servern. Därför har ingenting kopplats.`,
+    message: `Du loggade in med ${account}, men det kontot är inte med i ${server}. Därför har ingenting kopplats.`,
     steps: [
       "Använder du ett annat konto i servern? Logga ut ur Discord i webbläsaren, logga in med det kontot och gör om länkningen därifrån.",
       `Du gör om den i servern: ${path(relinkPath)}.`,
@@ -86,7 +91,7 @@ export function getNotInServerPageHTML({ discordUsername, relinkPath }) {
 }
 
 /** Linked, but nothing was granted — see `outcomeOf` in server.js for when. */
-export function getNoRolesPageHTML({ scoutnetUnreachable }) {
+export function getNoRolesPageHTML({ scoutnetUnreachable, eventName }) {
   if (scoutnetUnreachable) {
     return problemPage({
       title: "Rollerna kommer senare",
@@ -99,10 +104,10 @@ export function getNoRolesPageHTML({ scoutnetUnreachable }) {
       footer: FOOTER_LOGGED,
     });
   }
+  const event = escapeHtml(eventName || "eventet");
   return problemPage({
     title: "Inga roller",
-    message:
-      "Ditt ScoutID är kopplat, men du fick inga roller i servern. Oftast betyder det att vi inte hittar någon aktiv anmälan till WSJ27 på det ScoutID du loggade in med.",
+    message: `Ditt ScoutID är kopplat, men du fick inga roller i servern. Oftast betyder det att vi inte hittar någon aktiv anmälan till ${event} på det ScoutID du loggade in med.`,
     steps: [
       "Kontrollera att du loggade in med ditt eget ScoutID och inte till exempel en förälders.",
       "Är din anmälan avbokad eller inte klar, är det den som behöver ordnas först.",
