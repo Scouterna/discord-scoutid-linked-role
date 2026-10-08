@@ -254,9 +254,7 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       );
     }
 
-    console.log(
-      `Linked ScoutID ${scoutIDUser.scoutid} to Discord user ${discordUserId}`,
-    );
+    console.log(`Linked Discord user ${discordUserId}`);
 
     await storage.setLinkedScoutIDUserId(discordUserId, scoutIDUser.scoutid);
 

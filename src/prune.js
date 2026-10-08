@@ -54,8 +54,7 @@ export function formatPruneSummary({ links, removed, kept, dryRun }) {
   const lines = [
     `${links} länkar, ${removed.length} ${dryRun ? "skulle tas bort" : "borttagna"}.`,
   ];
-  for (const l of removed)
-    lines.push(`  ${l.discordUserId} — scoutid ${l.scoutId}`);
+  for (const l of removed) lines.push(`  ${l.discordUserId}`);
   for (const l of kept) {
     lines.push(
       `  ⚠️ ${l.discordUserId} — saknas i listan men bekräftades inte, behålls`,

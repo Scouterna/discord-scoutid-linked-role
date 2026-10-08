@@ -412,7 +412,12 @@ if (process.argv[1]?.endsWith("memberscan.js")) {
     const result = await runMemberScan({
       dryRun: process.argv.includes("--dry-run"),
     });
-    for (const line of result.lines ?? []) console.log(`  ${line}`);
+    // The collected lines name members; stdout is not the place for them.
+    if (result.lines?.length) {
+      console.log(
+        `  ${result.lines.length} rader utelämnade (innehåller namn) — se /scan-scoutid dryrun:true`,
+      );
+    }
     console.log(formatScanSummary(result));
   } catch (e) {
     console.error("Member scan failed:", e);

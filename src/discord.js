@@ -216,9 +216,7 @@ export async function updateGuildMemberNickname(guildId, userId, nickname) {
       headers: json(bot()),
       body: JSON.stringify({ nick: nickname }),
     });
-    console.log(
-      `Updated nickname for ${userId} in guild ${guildId} to "${nickname}"`,
-    );
+    console.log(`Updated nickname for ${userId} in guild ${guildId}`);
     return true;
   } catch (e) {
     // Logged here rather than left to the caller: both callers treat `false` as

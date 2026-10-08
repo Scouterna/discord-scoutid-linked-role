@@ -23,7 +23,11 @@ export async function runRefresh({ dryRun = false } = {}) {
   return { results, ...partitionResults(results), dryRun };
 }
 
-/** One line per changed user, for a dry run's stdout. */
+/**
+ * One line per changed user, for stdout. Never prints the new nickname: it is a
+ * person's name, and stdout goes to a log store the whole organisation can read.
+ * (The Discord-facing report is `formatRefreshEveryone` in commands.js.)
+ */
 export function formatRefreshSummary({ results, changed, errors, dryRun }) {
   const lines = [
     `${results.length} användare, ${changed.length} ändrade, ${errors.length} fel.`,
@@ -32,7 +36,7 @@ export function formatRefreshSummary({ results, changed, errors, dryRun }) {
     const parts = [];
     if (r.added?.length) parts.push(`+ ${r.added.join(", ")}`);
     if (r.removed?.length) parts.push(`- ${r.removed.join(", ")}`);
-    if (r.nickname) parts.push(`smeknamn: ${r.nickname}`);
+    if (r.nickname) parts.push("smeknamn ändrat");
     lines.push(`  ${r.discordUserId} — ${parts.join(" · ")}`);
   }
   for (const r of errors) lines.push(`  ⚠️ ${r.discordUserId} — ${r.error}`);

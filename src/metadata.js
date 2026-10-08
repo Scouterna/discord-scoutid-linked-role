@@ -53,7 +53,7 @@ export async function updateMetadata(discordUserId) {
     );
   } catch (e) {
     console.error(
-      `Kunde inte hämta ScoutNet-namn för ${scoutId}: ${e.message}`,
+      `Kunde inte hämta ScoutNet-namn för ${discordUserId}: ${e.message}`,
     );
   }
 
