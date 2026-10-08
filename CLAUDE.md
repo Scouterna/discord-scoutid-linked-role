@@ -1165,8 +1165,11 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
 
   Vyn listar var varje person *fastnat*, i den ordning vägen går, eftersom varje
   steg har en annan nästa åtgärd: inte länkad · länkad men inte i servern ·
-  inte accepterat reglerna · `Overifierad` · inne. Två begränsningar är med
-  flit:
+  inte accepterat reglerna · `Overifierad` · inne. **Alla namnges, också de som
+  är inne**, en per rad: första versionen räknade bara de inne och skrev de
+  andra som ett stycke separerat med komman, och en ledare kunde varken se vilka
+  som kommit in eller hitta ett namn bland 34. Förklaringarna står i Discords
+  småtext (`-#`) så namnen bär vikten. Två begränsningar är med flit:
 
   - **"Inte länkad" kan inte delas upp** i "i servern men inte länkad" och
     "aldrig gått med". Utan länk finns inget som binder ett Discord-konto till

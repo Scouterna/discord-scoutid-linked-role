@@ -496,11 +496,11 @@ export async function runDivision(guildId, { division, categories }) {
 }
 
 /**
- * The stuck stages, in the order a person walks the path, each with what it
- * means for the leader reading it. `done` is counted, never listed: the names
- * worth a leader's time are the ones that need a nudge.
+ * The stages as a leader reads them, in the order a person walks the path, each
+ * with what it means. Everyone is named, the done included: "who is in?" is as
+ * much the question as "who is stuck?", and a count alone answers neither.
  */
-const STUCK = [
+const STAGE_TEXT = [
   {
     key: "notLinked",
     icon: "❌",
@@ -525,24 +525,36 @@ const STUCK = [
     label: `Har tappat ${config.SCOUTNET_SCOUT_ROLE}-rollen`,
     why: `Måste ${RELINK_INSTRUCTION}.`,
   },
+  { key: "done", icon: "✅", label: "Inne och ser sina kanaler" },
 ];
 
+/** A category label as a heading: `deltagare` reads as a typo at line start. */
+const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 /**
- * The division report. `plain` drops the markup for the attachment, which
- * Discord renders nothing in. A person outside the scope's first category is
- * marked with theirs, so a leader in the list reads as a leader.
+ * The division report: one person per line under each stage, since a
+ * comma-separated paragraph of 34 names is a wall nobody scans for the one they
+ * are looking for. The explanations are Discord's small text (`-#`), so the
+ * names carry the weight.
+ *
+ * `plain` is the attachment's rendering — Discord renders nothing in a file, so
+ * no `**`, no `-#`. A person outside the scope's first category is marked with
+ * theirs, so a leader in the list reads as a leader.
  */
 export function formatDivision(result, { plain = false } = {}) {
   const b = (s) => (plain ? s : `**${s}**`);
+  const small = (s) => (plain ? `  ${s}` : `-# ${s}`);
   const title = `Avdelning ${result.division}${result.name ? ` – ${result.name}` : ""}`;
   const lines = [
-    `${b(title)} — ${result.done} av ${result.total} är inne (${pct(result.done, result.total)})`,
+    `${b(title)} · ${result.done} av ${result.total} är inne (${pct(result.done, result.total)})`,
   ];
   if (result.categories.length > 1)
     lines.push(
-      result.categories
-        .map((c) => `${c.label} ${c.done}/${c.total}`)
-        .join(" · "),
+      small(
+        result.categories
+          .map((c) => `${capitalize(c.label)} ${c.done}/${c.total}`)
+          .join(" · "),
+      ),
     );
   if (result.total === 0) {
     lines.push("", "Ingen anmäld i ScoutNet har den här avdelningen.");
@@ -550,17 +562,21 @@ export function formatDivision(result, { plain = false } = {}) {
   }
 
   const first = result.categories[0]?.category;
-  const labelOf = new Map(result.categories.map((c) => [c.category, c.label]));
-  const person = (x) =>
-    x.category === first ? x.name : `${x.name} (${labelOf.get(x.category)})`;
+  const labelOf = new Map(
+    result.categories.map((c) => [c.category, capitalize(c.label)]),
+  );
+  const person = (x) => {
+    if (x.category === first) return x.name;
+    const label = labelOf.get(x.category);
+    return plain ? `${x.name} (${label})` : `${x.name} · *${label}*`;
+  };
 
-  for (const s of STUCK) {
+  for (const s of STAGE_TEXT) {
     const people = result.stages[s.key];
     if (people.length === 0) continue;
-    lines.push("", `${s.icon} ${b(`${s.label} — ${people.length}`)}`, s.why);
-    if (plain) for (const x of people) lines.push(`  · ${person(x)}`);
-    else lines.push(people.map(person).join(", "));
+    lines.push("", `${s.icon} ${b(`${s.label} (${people.length})`)}`);
+    if (s.why) lines.push(small(s.why));
+    for (const x of people) lines.push(`${plain ? "  ·" : "-"} ${person(x)}`);
   }
-  lines.push("", `✅ Inne och ser sina kanaler: ${result.done}`);
   return lines.join("\n");
 }

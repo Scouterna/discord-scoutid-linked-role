@@ -344,7 +344,7 @@ test("someone linked from two accounts counts by the one that got furthest", () 
   assert.equal(result.stages.notInServer.length, 0);
 });
 
-test("the report names the stuck, counts the done, and marks the leaders", () => {
+test("the report names everyone, one per line, and marks the leaders", () => {
   const result = computeDivision({
     cfg: SCOPED,
     division: "12",
@@ -358,14 +358,18 @@ test("the report names the stuck, counts the done, and marks the leaders", () =>
     members: [{ user: { id: "d3" }, roles: [] }],
   });
   const text = formatDivision(result);
-  assert.match(text, /Avdelning 12 – Musen\*\* — 1 av 3 är inne/);
-  assert.match(text, /Ada L, Eva L \(Ledare\)/);
-  assert.match(text, /✅ Inne och ser sina kanaler: 1/);
-  assert.doesNotMatch(text, /Bo L/, "the done are counted, not listed");
+  assert.match(text, /^\*\*Avdelning 12 – Musen\*\* · 1 av 3 är inne/);
+  // The category label is a heading, so it is capitalised even when the
+  // config key it falls back to is not.
+  assert.match(text, /^-# Deltagare 1\/2 · Ledare 0\/1$/m);
+  assert.match(text, /^- Ada L$/m);
+  assert.match(text, /^- Eva L · \*Ledare\*$/m);
+  // The done are named too: "who is in?" is half the question.
+  assert.match(text, /✅ \*\*Inne och ser sina kanaler \(1\)\*\*\n- Bo L$/m);
   // An empty stage writes no heading.
   assert.doesNotMatch(text, /regler/);
 
   const plain = formatDivision(result, { plain: true });
-  assert.doesNotMatch(plain, /\*\*/, "a file renders no markup");
-  assert.match(plain, /^ {2}· Ada L$/m);
+  assert.doesNotMatch(plain, /\*|^-# /m, "a file renders no markup");
+  assert.match(plain, /^ {2}· Eva L \(Ledare\)$/m);
 });
