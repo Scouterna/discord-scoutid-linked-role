@@ -22,7 +22,7 @@ process.env.TABLE_NAME = "unittest";
 process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
-process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
+process.env.SCOUTNET_EVENT_ROLE = "event";
 process.env.SCOUTNET_FEE_ROLES =
   "25694:deltagare,25696:ist-rundresa,25702:ist-egenresa,33293:ledare,25697:cmt";
 process.env.SCOUTNET_DIVISION_ROLES =
@@ -109,7 +109,7 @@ test("a participant gets the event role, the division role and no flat marker", 
   });
   const r = await roles.getDesiredRoles("1");
   // Zero-padded to two digits: ScoutNet answers "7", the Discord role is "-07".
-  assert.deepEqual(r, ["scout", "wsj-event", "Deltagare-07"]);
+  assert.deepEqual(r, ["scout", "event", "Deltagare-07"]);
   // Participants deliberately have no flat marker — its absence is what makes
   // the AutoMod link filter apply to them.
   assert.ok(
@@ -127,7 +127,7 @@ test("a leader gets both the division role and the flat marker", async () => {
     },
   });
   const r = await roles.getDesiredRoles("2");
-  assert.deepEqual(r, ["scout", "wsj-event", "Ledare", "Ledare-12"]);
+  assert.deepEqual(r, ["scout", "event", "Ledare", "Ledare-12"]);
 });
 
 test("each category reads its own question for the division", async () => {
@@ -138,7 +138,7 @@ test("each category reads its own question for the division", async () => {
   });
   assert.deepEqual(await roles.getDesiredRoles("3"), [
     "scout",
-    "wsj-event",
+    "event",
     "Ledare",
     "Ledare-Väntande",
   ]);
@@ -150,7 +150,7 @@ test("a missing division answer falls back to the pending role", async () => {
   });
   assert.deepEqual(await roles.getDesiredRoles("4"), [
     "scout",
-    "wsj-event",
+    "event",
     "Deltagare-Väntande",
   ]);
 });
@@ -164,13 +164,13 @@ test("IST without a patrol gets the marker and its travel group, once each", asy
   });
   assert.deepEqual(await roles.getDesiredRoles("5"), [
     "scout",
-    "wsj-event",
+    "event",
     "IST",
     "IST-Rundresa",
   ]);
   assert.deepEqual(await roles.getDesiredRoles("6"), [
     "scout",
-    "wsj-event",
+    "event",
     "IST",
     "IST-Egenresa",
   ]);
@@ -189,14 +189,14 @@ test("IST with a patrol keeps its travel group beside the patrol role", async ()
   });
   assert.deepEqual(await roles.getDesiredRoles("5"), [
     "scout",
-    "wsj-event",
+    "event",
     "IST",
     "IST-Rundresa",
     "IST-Patrull-07",
   ]);
   assert.deepEqual(await roles.getDesiredRoles("6"), [
     "scout",
-    "wsj-event",
+    "event",
     "IST",
     "IST-Egenresa",
     "IST-Patrull-21",
@@ -210,7 +210,7 @@ test("a category with no division config uses the category name as the role", as
   const r = await roles.getDesiredRoles("7");
   // Returned lowercase; the guild role is `CMT` and matching is case-insensitive
   // in syncUserRoles. Changing that match would break this silently.
-  assert.deepEqual(r, ["scout", "wsj-event", "cmt"]);
+  assert.deepEqual(r, ["scout", "event", "cmt"]);
 });
 
 test("an unmapped fee id yields event access but no category role", async () => {
@@ -219,7 +219,7 @@ test("an unmapped fee id yields event access but no category role", async () => 
   });
   // `/audit-scoutid` reports the unknown fee_id; the person still gets in, which
   // is the safer failure — they are registered for the event.
-  assert.deepEqual(await roles.getDesiredRoles("8"), ["scout", "wsj-event"]);
+  assert.deepEqual(await roles.getDesiredRoles("8"), ["scout", "event"]);
 });
 
 test("a division number of 10 or more is not padded further", async () => {
@@ -232,7 +232,7 @@ test("a division number of 10 or more is not padded further", async () => {
   });
   assert.deepEqual(await roles.getDesiredRoles("9"), [
     "scout",
-    "wsj-event",
+    "event",
     "Deltagare-42",
   ]);
 });
@@ -396,7 +396,7 @@ test("explaining never throws, whatever ScoutNet does", async () => {
 
 const GUILD_ROLES = [
   { id: "r-scout", name: "scout", managed: true },
-  { id: "r-event", name: "wsj-event", managed: false },
+  { id: "r-event", name: "event", managed: false },
   { id: "r-led47", name: "Ledare-47", managed: false },
 ];
 
@@ -430,7 +430,7 @@ test("a linking from an account that never joined the server says so", async () 
   const attempted = withGuild({ putStatus: 404 });
   const { granted, problem } = await roles.grantRoles("u1", [
     "scout",
-    "wsj-event",
+    "event",
     "Ledare-47",
   ]);
 
@@ -446,7 +446,7 @@ test("a linking from an account that never joined the server says so", async () 
 
 test("a refusal is reported as a refusal, not as an absent member", async () => {
   withGuild({ putStatus: 403 });
-  const { problem } = await roles.grantRoles("u1", ["wsj-event"]);
+  const { problem } = await roles.grantRoles("u1", ["event"]);
   // 403 is the hierarchy answer — the reading the old text applied to every
   // failure. It is kept, but only where Discord actually gave it.
   assert.match(problem, /nekade/);
@@ -467,11 +467,11 @@ test("the skipped scout role is not a problem", async () => {
   withGuild();
   const { granted, problem } = await roles.grantRoles("u1", [
     "scout",
-    "wsj-event",
+    "event",
     "Ledare-47",
   ]);
   // `scout` is managed and absent from `granted` by design — Discord grants it.
   // Reporting that as a fault would put a warning on every healthy linking.
-  assert.deepEqual(granted, ["wsj-event", "Ledare-47"]);
+  assert.deepEqual(granted, ["event", "Ledare-47"]);
   assert.equal(problem, null);
 });

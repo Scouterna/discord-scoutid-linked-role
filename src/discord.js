@@ -216,9 +216,7 @@ export async function updateGuildMemberNickname(guildId, userId, nickname) {
       headers: json(bot()),
       body: JSON.stringify({ nick: nickname }),
     });
-    console.log(
-      `Updated nickname for ${userId} in guild ${guildId} to "${nickname}"`,
-    );
+    console.log(`Updated nickname for ${userId} in guild ${guildId}`);
     return true;
   } catch (e) {
     // Logged here rather than left to the caller: both callers treat `false` as
@@ -335,7 +333,7 @@ export function removeRoleFromUser(guildId, userId, roleId) {
  * `@okänd-användare`. Hence `who()` in eventlog.js writes names, not mentions.
  *
  * The bot's role grants only Manage Roles and Manage Nicknames, so it can write
- * here purely on a channel overwrite granted in wsj27-infra. A 403 therefore
+ * here purely on a channel overwrite granted by whoever owns the server's channel overwrites. A 403 therefore
  * means the overwrite is missing, not that the token is wrong.
  */
 export function postChannelMessage(channelId, content) {

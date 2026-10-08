@@ -34,14 +34,14 @@ process.env.SCOUTID_CLIENT_SECRET = "sid-secret";
 process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
-process.env.SCOUTNET_EVENT_ROLE = "WSJ-event";
+process.env.SCOUTNET_EVENT_ROLE = "Event";
 process.env.SCOUTNET_FEE_ROLES = "25697:cmt";
 process.env.SCOUTNET_NICKNAME_SUFFIXES = "cmt::CMT";
 process.env.LOG_CHANNEL_ID = "C1";
 
 const GUILD_ROLES = [
   { id: "r-scout", name: "scout", managed: true },
-  { id: "r-event", name: "WSJ-event", managed: false },
+  { id: "r-event", name: "Event", managed: false },
   { id: "r-cmt", name: "CMT", managed: false },
 ];
 

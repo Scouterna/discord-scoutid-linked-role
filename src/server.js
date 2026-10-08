@@ -144,7 +144,11 @@ app.get("/discord-oauth-callback", async (req, res) => {
     ) {
       eventlog.logLinkRefused({ discordUserId: userId, name: discordUsername });
       return res.send(
-        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+        getNotInServerPageHTML({
+          discordUsername,
+          relinkPath: RELINK_PATH,
+          serverName: config.DISCORD_SERVER_NAME,
+        }),
       );
     }
 
@@ -242,13 +246,15 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
         scoutId: scoutIDUser.scoutid,
       });
       return res.send(
-        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+        getNotInServerPageHTML({
+          discordUsername,
+          relinkPath: RELINK_PATH,
+          serverName: config.DISCORD_SERVER_NAME,
+        }),
       );
     }
 
-    console.log(
-      `Linked ScoutID ${scoutIDUser.scoutid} to Discord user ${discordUserId}`,
-    );
+    console.log(`Linked Discord user ${discordUserId}`);
 
     await storage.setLinkedScoutIDUserId(discordUserId, scoutIDUser.scoutid);
 
@@ -327,10 +333,15 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
     });
     const page = {
       "not-in-server": () =>
-        getNotInServerPageHTML({ discordUsername, relinkPath: RELINK_PATH }),
+        getNotInServerPageHTML({
+          discordUsername,
+          relinkPath: RELINK_PATH,
+          serverName: config.DISCORD_SERVER_NAME,
+        }),
       "no-roles": () =>
         getNoRolesPageHTML({
           scoutnetUnreachable: reason === roles.SCOUTNET_UNREACHABLE,
+          eventName: config.SCOUTNET_EVENT_NAME,
         }),
       incomplete: () =>
         getIncompletePageHTML({

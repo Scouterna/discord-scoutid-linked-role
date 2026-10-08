@@ -78,17 +78,14 @@ export async function getDesiredRoles(
     }
   } catch (e) {
     if (!allowIncomplete) throw e;
-    console.error(
-      `Error fetching ScoutNet data for member ${scoutnetMemberId}:`,
-      e.message,
-    );
+    console.error("Error fetching ScoutNet data for a member:", e.message);
     // Discard the partial answer: half a wish list is indistinguishable from a
     // complete one to the caller.
     return [config.SCOUTNET_SCOUT_ROLE];
   }
 
-  // A travel group role is both the IST marker's companion and the pending role
-  // of the same category, so it can be asked for twice. The sync adds per entry.
+  // A flat category role can also be the same category's pending role, so it
+  // can be asked for twice. The sync adds per entry.
   return [...new Set(roles)];
 }
 
@@ -116,10 +113,7 @@ export async function getNicknameSuffix(
     return suffix.withoutDiv ? ` (${suffix.withoutDiv})` : "";
   } catch (e) {
     if (!allowIncomplete) throw e;
-    console.error(
-      `Error getting nickname suffix for member ${scoutnetMemberId}:`,
-      e.message,
-    );
+    console.error("Error getting nickname suffix for a member:", e.message);
     return "";
   }
 }
@@ -146,7 +140,7 @@ export async function explainMissingRoles(scoutnetMemberId) {
     participant = await scoutnet.getParticipant(scoutnetMemberId);
   } catch (e) {
     console.error(
-      `Could not explain the empty role set for member ${scoutnetMemberId}:`,
+      "Could not explain the empty role set for a member:",
       e.message,
     );
     // Without `e.message`: this string goes to a Discord channel, and ScoutNet's
@@ -377,7 +371,7 @@ export async function syncUserRoles(guildId, discordUserId, options = {}) {
   // not an event, and logging it every night describes an action not taken.
   if (!verified.ok && changedAnything({ added, removed, nickname })) {
     console.log(
-      `User ${discordUserId} (scoutid=${scoutId}) has neither proof (${verified.detail}) — access stripped`,
+      `User ${discordUserId} has neither proof (${verified.detail}) — access stripped`,
     );
   }
 

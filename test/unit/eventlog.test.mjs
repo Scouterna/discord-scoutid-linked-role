@@ -175,13 +175,13 @@ test("a link that granted roles carries no explanation", async () => {
     discordUserId: "1",
     scoutId: "12345",
     name: "Anna Andersson",
-    roles: ["WSJ-event", "CMT"],
+    roles: ["Event", "CMT"],
     reason: "inte anmäld i eventet",
   });
   const { posts: sent } = await drain();
   // Roles won: a reason left over from a caller that computed one anyway must
   // not contradict the list of what was actually handed out.
-  assert.match(sent[0].content, /→ WSJ-event, CMT$/m);
+  assert.match(sent[0].content, /→ Event, CMT$/m);
   assert.doesNotMatch(sent[0].content, /inte anmäld/);
 });
 
@@ -190,7 +190,7 @@ test("a link Discord was never told about is not reported as a success", async (
     discordUserId: "1",
     scoutId: "3259703",
     name: "Sandra Gauffin",
-    roles: ["WSJ-event", "CMT"],
+    roles: ["Event", "CMT"],
     metadataFailed: true,
   });
   const { posts: sent } = await drain();
@@ -199,7 +199,7 @@ test("a link Discord was never told about is not reported as a success", async (
   // come back. A ✅ would hide the only part anyone has to act on.
   assert.doesNotMatch(sent[0].content, /✅/);
   assert.match(sent[0].content, /⚠️/);
-  assert.match(sent[0].content, /WSJ-event, CMT/);
+  assert.match(sent[0].content, /Event, CMT/);
   assert.match(sent[0].content, /Discord kunde inte uppdateras/);
   assert.match(sent[0].content, /`Scout-Test`/);
   assert.match(sent[0].content, /Kanaler och roller → Scout-Test → Länka/);
@@ -310,7 +310,7 @@ test("losing the Scout role gets its own unmistakable line", async () => {
   eventlog.logSync({
     discordUserId: "1",
     callerId: "1",
-    result: { added: ["Overifierad"], removed: ["Ledare-12", "wsj-event"] },
+    result: { added: ["Overifierad"], removed: ["Ledare-12", "event"] },
   });
   const { posts: sent } = await drain();
   // It is the one failure an admin cannot fix for the user, and it would
@@ -335,7 +335,7 @@ test("a strip line carries the probe's answer when there is one", async () => {
     callerId: "1",
     result: {
       added: ["Overifierad"],
-      removed: ["wsj-event"],
+      removed: ["event"],
       stripReason: "HTTP 401",
     },
   });

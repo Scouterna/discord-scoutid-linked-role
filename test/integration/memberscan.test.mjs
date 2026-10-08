@@ -165,7 +165,7 @@ test("a diff reports joins, departures, renames and other people's role changes"
   ];
   audit[ROLE_UPDATE] = [
     roleEntry("700", MOD_ID, KIM, ["Ledare-12"], ["Overifierad"]), // a human: report
-    roleEntry("600", BOT_ID, ANNA, ["WSJ-event"]), // the bot itself: never report
+    roleEntry("600", BOT_ID, ANNA, ["Event"]), // the bot itself: never report
     ...audit[ROLE_UPDATE],
   ];
   await storage.setLinkedScoutIDUserId(ERIK, "12345");
@@ -193,7 +193,7 @@ test("a diff reports joins, departures, renames and other people's role changes"
   // for any client that has not cached the member, and is not clickable either.
   assert.doesNotMatch(out, /<@/, "wrote a mention instead of a name");
   assert.doesNotMatch(out, /\*\*\*\*/, "rendered an empty bold name");
-  assert.doesNotMatch(out, /WSJ-event/, "reported the bot's OWN role change");
+  assert.doesNotMatch(out, /Event/, "reported the bot's OWN role change");
   assert.doesNotMatch(out, /CMT/, "replayed an entry older than the cursor");
   assert.doesNotMatch(out, /Anna Andersson/, "reported an unchanged member");
 
