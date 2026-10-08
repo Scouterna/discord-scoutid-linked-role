@@ -13,7 +13,7 @@ name: Tests
 on:
   pull_request:
   push:
-    # main is covered through deploy.yml, which calls this workflow before it
+    # main is covered through publish.yml, which calls this workflow before it
     # builds. Running both here as well would double every run on main.
     branches-ignore: [main]
   workflow_call:
@@ -26,6 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: No deployment-specific names
+        # This repository is the app; every deployment's identity — its event,
+        # host, namespace and role mapping — lives in that deployment's own
+        # infrastructure repository. A name that creeps back in is a second
+        # copy nothing keeps true.
+        run: |
+          # The character classes keep the pattern from matching this very line.
+          if git grep -nIiE 'w[s]j|jambor[e]e|scouterna[.]net' -- . ':!package-lock.json'; then
+            echo "::error::deployment-specific names found (see above)"; exit 1
+          fi
 
       - name: Lint the workflows
         # A linter that only exists in the devcontainer gets skipped, and the
@@ -90,10 +101,9 @@ jobs:
         # nobody's branch has to satisfy, which is the same reason actionlint
         # runs here and not only locally.
         #
-        # Unlike the RBAC drift check, this fails the build rather than warning:
-        # what it reports is caused by the very commit being built, and it is
-        # fixed by editing that commit. Drift in something no code change caused
-        # is the case for warning; this is not that.
+        # This fails the build rather than warning: what it reports is caused
+        # by the very commit being built, and it is fixed by editing that
+        # commit.
         run: npm run lint
 
       - name: Formatting
