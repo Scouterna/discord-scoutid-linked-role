@@ -26,6 +26,9 @@ const {
   parseDivisionRoles,
   parseCategoryRoles,
   parseMemberEvents,
+  parseDivisionNames,
+  normalizeDivision,
+  divisionOptionName,
 } = await import("../../src/config.js");
 
 test("fee roles map fee ids to categories", () => {
@@ -165,4 +168,37 @@ test("member events ignore unknown names and accept case and spacing", () => {
 test("every accepted member event is recognised", () => {
   const s = parseMemberEvents("join,leave,nickname,roles");
   assert.deepEqual([...s].sort(), ["join", "leave", "nickname", "roles"]);
+});
+
+// --- Divisions that are not troop numbers ---
+// A deployment may split people by a patrol name, a colour or a multiple-choice
+// answer. Padding is for numbers only: "A" padded to "0A" names a role nobody
+// created, and the member would silently get nothing.
+
+test("a numeric division is zero-padded, anything else is kept as given", () => {
+  assert.equal(normalizeDivision("7"), "07");
+  assert.equal(normalizeDivision(" 12 "), "12");
+  assert.equal(normalizeDivision("123"), "123");
+  assert.equal(normalizeDivision("A"), "A");
+  assert.equal(normalizeDivision(" Räven "), "Räven");
+});
+
+test("division names may be shared or belong to one category", () => {
+  assert.deepEqual(parseDivisionNames("1:Björnen,ledare/7:Musen,lag/A:Alfa"), {
+    "01": "Björnen",
+    "ledare/07": "Musen",
+    "lag/A": "Alfa",
+  });
+});
+
+test("a division name without a category or a value is dropped", () => {
+  assert.equal(parseDivisionNames("/3:x,ledare/:y,:z"), null);
+});
+
+test("the division option follows the label, or falls back to avdelning", () => {
+  assert.equal(divisionOptionName("avdelning"), "avdelning");
+  assert.equal(divisionOptionName("Patrull"), "patrull");
+  // Discord refuses spaces in option names; registration must not fail on it.
+  assert.equal(divisionOptionName("min grupp"), "avdelning");
+  assert.equal(divisionOptionName(""), "avdelning");
 });

@@ -237,7 +237,25 @@ restore-jobben är med flit utanför: de kör `azure-cli`-imagen, som skriver fr
   markören delas ut oavsett division, så också den som står på väntande-rollen
   hamnar under rubriken
 - Each fee category can have its own ScoutNet question ID for division assignment
-- Division numbers are zero-padded to minimum 2 digits
+- **En division är svaret på en ScoutNet-fråga, inte nödvändigtvis ett nummer.**
+  Numeriska svar zero-paddas till två siffror (`normalizeDivision` i
+  [src/config.js](src/config.js)), så `7` och `07` är samma roll. Allt annat —
+  ett patrullnamn, en bokstav — används som det är: paddat hade `A` blivit `0A`,
+  en roll ingen skapat, och medlemmen hade tyst fått ingenting. Flervalsfrågor
+  svarar med opaka alternativ-id:n, och då är det `SCOUTNET_DIVISION_NAMES` som
+  gör id:t till ett namn — i ett rollmönster utan `{div}` (`Patrull-{divnamn}`)
+  står värdet självt kvar när namnet saknas, annars hade varje grupp fått samma
+  roll. Vad en division *kallas* i svar och rapporter, och vad slash-optionen
+  heter, styrs av `SCOUTNET_DIVISION_LABEL`
+- **Gamla divisionsroller tas bort efter hela mönstret, aldrig efter prefix**
+  (`divisionPattern` i [src/guild.js](src/guild.js)). Prefixmatchningen tog bort
+  varje roll som råkade börja likadant, och ett mönster som börjar med `{div}`
+  har det tomma prefixet — som matchar *varje* roll medlemmen har. Synken hade då
+  tagit moderatorrollen från alla den rankar över. Nu matchar `Deltagare-{div}`
+  `Deltagare-07` och `Deltagare-Väntande` men inte `Deltagarstöd`, och ett mönster
+  utan fast text (`{div}` ensamt) delar ut sina roller men tar aldrig bort någon,
+  med en varning i loggen. Kvar är att en handskapad roll som *passar* mönstret
+  — `Deltagare-Extra` — behandlas som en division och tas bort
 - **Smeknamnet kortas i namnet, aldrig i suffixet** (`fitNickname` i
   [src/guild.js](src/guild.js)). Discord tar 32 tecken, och med avdelningsnamnet i
   suffixet räcker de inte åt alla: mätt mot ett verkligt event behövde runt en
@@ -595,11 +613,12 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_SCOUT_ROLE` | rollnamn. **Läses av medlemmar**, så guildens skiftläge |
 | `SCOUTNET_EVENT_ROLE` | rollnamn |
 | `SCOUTNET_FEE_ROLES` | `feeId:kategori,…` |
-| `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…` |
+| `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…`; `rollMedDiv` innehåller `{div}`, `{divnamn}` eller båda, och måste ha fast text runt dem för att gamla roller ska kunna tas bort |
 | `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
 | `SCOUTNET_ADOPTION_SCOPE` | `kategori:kategori+kategori,…` — vilka kategorier den förstas medlemmar ser i `/adoption-scoutid`, i sin *egen* avdelning. Tomt = bara admins |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
-| `SCOUTNET_DIVISION_NAMES` | `nummer:namn,…` — vad `{divnamn}` slår upp. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
+| `SCOUTNET_DIVISION_LABEL` | ord, `avdelning` som default — vad en division kallas i svar och rapporter, och namnet på `/adoption-scoutid`-optionen. Ett en-ord i obestämd form ("ingen patrull"). Ändras det måste kommandona registreras om |
+| `SCOUTNET_DIVISION_NAMES` | `värde:namn` eller `kategori/värde:namn`, kommaseparerat — vad `{divnamn}` slår upp; kategorins egen rad vinner. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
 
 Parsrarna ligger i [src/config.js](src/config.js) och pinnas av `unit/config`,
 inklusive vad som händer med trasig indata. Roll-konfigurationen låg tidigare i
@@ -969,16 +988,16 @@ den finns.
 
 | Fil | Täcker |
 | --- | --- |
-| `unit/config` | Env-parsrarna. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
+| `unit/config` | Env-parsrarna — inklusive att bara numeriska divisioner paddas och att ett namn kan gälla en kategori. De avgör vilken roll varje medlem får, från strängar skrivna för hand i en ConfigMap, så testerna pinnar även vad som händer med trasig indata |
 | `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus hela `/refresh-scoutid alla:true`-rapporten som ren funktion: att renderingen *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar" — att ingen halva använder mentions, att listan sorteras på namn med den namnlösa sist, och att bilagans dry run-markering bär ingen markup |
 | `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
-| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, att `explainMissingRoles` håller ett avbrott skilt från en frånvaro, och att `grantRoles` skiljer ett konto utanför servern (404) från en nekad skrivning (403) från en roll som inte finns |
+| `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus vilka gamla divisionsroller synken får ta bort: de mönstret ger, inte en roll som bara börjar likadant, och ingenting alls för ett mönster utan fast text. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, att `explainMissingRoles` håller ett avbrott skilt från en frånvaro, och att `grantRoles` skiljer ett konto utanför servern (404) från en nekad skrivning (403) från en roll som inte finns |
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas, och att `memberWriteHint` läser 404 som medlemmen och 403 som behörigheten — och gissar inte på något annat |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring. Plus avdelningsvyn: att en ledares scope kommer ur ScoutNet, att varje person hamnar i steget där vägen bröts, och att den som länkat från två konton räknas på det som kom längst |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
-| `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
+| `integration/roles` | `syncUserRoles` — verifieringsgrinden, mönsterborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
 | `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar: ett onåbart Discord är aldrig ett nej, men ett dött refresh-token (`invalid_grant`) är det |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
@@ -1133,7 +1152,7 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
 - `/status-scoutid person:` — detaljerad status för en användare. Antingen
   `person:` eller `personid:` krävs.
-- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin), eller för en ledare den egna avdelningen. `avdelning:12` visar en avdelning som ledarna ser den (admin).
+- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin), eller för en ledare den egna avdelningen. `avdelning:12` visar en avdelning som ledarna ser den (admin) — värdet eller dess namn ur `SCOUTNET_DIVISION_NAMES`, och optionen heter det `SCOUTNET_DIVISION_LABEL` säger.
   `saknas:true` listar namnen.
 
   **Grupperingen kommer helt ur configen** — [src/adoption.js](src/adoption.js)
@@ -1215,7 +1234,7 @@ före koden.
 patruller har gemensam numrering, båda `IST-Patrull-{div}`, med var sin platt
 markör som också är kategorins väntande-roll (`+` i `SCOUTNET_CATEGORY_ROLES`).
 Markören delas då ut direkt och ligger kvar när divisionen kommer. Två saker
-följer: `divisionPrefixes` returnerar varje prefix en gång, annars togs en gammal
+följer: `divisionPatterns` returnerar varje mönster en gång, annars togs en gammal
 divisionsroll bort två gånger; och `getDesiredRoles` deduplicerar, eftersom
 markören efterfrågas både som markör och som väntande-roll. Båda pinnas i
 `integration/roles`.

@@ -21,7 +21,8 @@ import assert from "node:assert/strict";
 // uses that same stream for its own protocol. Quiet it before config.js loads.
 process.env.DOTENV_CONFIG_QUIET = "true";
 
-process.env.SCOUTNET_DIVISION_NAMES = "07:Musen,12:Trollsländan";
+process.env.SCOUTNET_DIVISION_NAMES =
+  "07:Musen,12:Trollsländan,ledare/12:Ledarlyan,lag/48213:Rävarna";
 
 const {
   fitNickname,
@@ -124,4 +125,26 @@ test("an unnamed division drops the placeholder and its separator", () => {
   // leaving "AL44-" or printing "{divnamn}" at people.
   assert.equal(withDivision("AL{div}-{divnamn}", 44), "AL44");
   assert.equal(withDivision("Ledare-{div}", 44), "Ledare-44");
+});
+
+test("a category's own name wins over the shared one", () => {
+  assert.equal(
+    withDivision("AL{div}-{divnamn}", 12, "ledare"),
+    "AL12-Ledarlyan",
+  );
+  assert.equal(
+    withDivision("{div}-{divnamn}", 12, "deltagare"),
+    "12-Trollsländan",
+  );
+});
+
+test("a non-numeric division is used as given, not padded", () => {
+  assert.equal(withDivision("Patrull-{div}", "A"), "Patrull-A");
+});
+
+test("a pattern without {div} names the role by the name, or the value", () => {
+  // An opaque option id becomes its name; without one the value stands in, or
+  // every group would get the same "Lag" role.
+  assert.equal(withDivision("Lag-{divnamn}", "48213", "lag"), "Lag-Rävarna");
+  assert.equal(withDivision("Lag-{divnamn}", "99999", "lag"), "Lag-99999");
 });

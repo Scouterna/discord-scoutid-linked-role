@@ -260,7 +260,7 @@ test("the missing are named, but only when asked for", async () => {
 
 // --- One division, for its leaders ---
 
-const { computeDivision, formatDivision, leaderScope } =
+const { computeDivision, formatDivision, leaderScope, resolveDivision } =
   await import("../../src/adoption.js");
 
 const SCOPED = {
@@ -372,4 +372,33 @@ test("the report names everyone, one per line, and marks the leaders", () => {
   const plain = formatDivision(result, { plain: true });
   assert.doesNotMatch(plain, /\*|^-# /m, "a file renders no markup");
   assert.match(plain, /^ {2}· Eva L \(Ledare\)$/m);
+});
+
+test("a division can be asked for by its name as well as its value", () => {
+  const cfg = {
+    SCOUTNET_DIVISION_NAMES: {
+      12: "Musen",
+      "ledare/12": "Lyan",
+      "lag/A": "Rävarna",
+    },
+  };
+  assert.equal(resolveDivision("musen", ["deltagare"], cfg), "12");
+  assert.equal(resolveDivision("Lyan", ["ledare"], cfg), "12");
+  assert.equal(resolveDivision("Rävarna", ["lag"], cfg), "A");
+  assert.equal(resolveDivision("7", ["deltagare"], cfg), "07");
+  // Unknown names come back as typed and match nobody, rather than an error:
+  // the value itself may be a word.
+  assert.equal(resolveDivision("Okänd", ["deltagare"], cfg), "Okänd");
+});
+
+test("the report calls a division what the config calls it", () => {
+  const result = computeDivision({
+    cfg: { ...SCOPED, SCOUTNET_DIVISION_LABEL: "patrull" },
+    division: "12",
+    categories: ["deltagare", "ledare"],
+    participants: {},
+  });
+  const text = formatDivision(result, { plain: true });
+  assert.match(text, /^Patrull 12 – Musen/);
+  assert.match(text, /Ingen anmäld i ScoutNet har patrull 12\./);
 });

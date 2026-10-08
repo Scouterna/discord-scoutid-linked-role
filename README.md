@@ -58,8 +58,15 @@ Four kinds of role are assigned, all named in config and looked up by name
 Each `fee_id` maps to a *category*. A category with a division config gets a
 per-division role from a ScoutNet question, falling back to a waiting role when
 the question is unanswered; a category without one gets a role named after the
-category itself. Division numbers are zero-padded to at least 2 digits
-(`3` → `03`, `100` → `100`).
+category itself. A division is whatever the question answers: numbers are
+zero-padded to at least 2 digits (`3` → `03`, `100` → `100`), anything else — a
+patrol name, a letter — is used as given. `SCOUTNET_DIVISION_NAMES` turns a
+value into a name for `{divnamn}`, per category if needed (`ledare/12:Musen`),
+which is also how an opaque option id from a multiple-choice question becomes a
+readable role (`Patrull-{divnamn}`). Stale division roles are removed by the
+whole pattern, so a hand-made role that merely starts the same way is left
+alone. `SCOUTNET_DIVISION_LABEL` (default `avdelning`) is what a division is
+called in replies and what the `/adoption-scoutid` option is named.
 
 **An instance's values live in its own configuration, and only there** — for
 the example deployment, [k8s/configmap.yaml](k8s/configmap.yaml). This section
@@ -125,7 +132,7 @@ reports it.
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/adoption-scoutid`                 | Admin    | How many registered participants have linked, per group    |
 | `/adoption-scoutid`                 | Leader   | Where each person in your own troop stands, and who is stuck |
-| `/adoption-scoutid avdelning:12`    | Admin    | One troop, as its leaders see it                           |
+| `/adoption-scoutid avdelning:12`    | Admin    | One troop, as its leaders see it — by value or name; the option follows `SCOUTNET_DIVISION_LABEL` |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
 | `/scan-scoutid`                     | Admin    | Run the member scan now; `dryrun:true` for a dry run      |
@@ -242,7 +249,9 @@ What is covered:
 - **`unit/config`** — the env-var parsers. They turn hand-typed ConfigMap strings
   into role assignments, so the tests pin down malformed input too.
 - **`unit/roles`** — `getDesiredRoles` and `getNicknameSuffix`: fee to category to
-  division role, zero-padding, flat markers, cancelled registrations.
+  division role, zero-padding, flat markers, cancelled registrations — and which
+  stale division roles may be removed: those the pattern produces, never a role
+  that only starts alike.
 - **`unit/discord`** — pagination past the 1000-member page limit, 429 retries,
   errors carrying their HTTP status, mentions always suppressed.
 - **`unit/eventlog`** — never throws, never delays, never loses the buffer, and
@@ -258,7 +267,7 @@ What is covered:
   acknowledged within Discord's 3-second window, and the admin gate enforced.
   Plus the two health routes, which exist to answer differently: liveness must
   say 200 with no storage in reach, readiness must say 503.
-- **`integration/roles`** — `syncUserRoles`: the verification gate, prefix-based
+- **`integration/roles`** — `syncUserRoles`: the verification gate, pattern-based
   removal of stale division roles, a 403 from the role hierarchy, the 32-character
   nickname limit, and that a ScoutNet outage changes nothing at all.
 - **`integration/metadata`** — that the Linked Role push carries `verified: true`

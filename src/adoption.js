@@ -4,6 +4,7 @@ import * as storage from "./storage.js";
 import * as discord from "./discord.js";
 import { RELINK_INSTRUCTION } from "./metadata.js";
 import {
+  divisionName,
   divisionRoleName,
   padDiv,
   roleMapOf,
@@ -40,6 +41,7 @@ function groupLabel(cfg, category, participant) {
   return divisionRoleName(
     divConfig,
     participant.questions?.[divConfig.questionId],
+    category,
   );
 }
 
@@ -363,6 +365,29 @@ export function leaderScope(participant, cfg = config) {
 /** A division as typed, in the form the report and the roles use. */
 export const padDivision = (division) => padDiv(String(division).trim());
 
+/**
+ * A division as someone typed it — the value (`12`) or its configured name
+ * (`Musen`) — as the value. A name is what a group whose values are opaque
+ * option ids is known by, so it has to work as input too. Matching is
+ * case-insensitive and looks at the given categories' own names before the
+ * shared ones; an unknown name is returned as typed and simply matches nobody.
+ */
+export function resolveDivision(input, categories, cfg = config) {
+  const typed = String(input ?? "").trim();
+  const names = cfg.SCOUTNET_DIVISION_NAMES ?? {};
+  const wanted = typed.toLowerCase();
+  const keys = [
+    ...categories.flatMap((c) =>
+      Object.keys(names).filter((k) => k.startsWith(`${c}/`)),
+    ),
+    ...Object.keys(names).filter((k) => !k.includes("/")),
+  ];
+  for (const key of keys) {
+    if (names[key].toLowerCase() === wanted) return key.split("/").pop();
+  }
+  return padDiv(typed);
+}
+
 /** Every category any scope reaches — what an admin's `avdelning:` covers. */
 export function allScopedCategories(cfg = config) {
   return [...new Set(Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {}).flat())];
@@ -469,7 +494,8 @@ export function computeDivision({
   const groups = [...byCategory.values()];
   return {
     division: div,
-    name: cfg.SCOUTNET_DIVISION_NAMES?.[div] ?? null,
+    name: divisionName(categories[0], div, cfg.SCOUTNET_DIVISION_NAMES),
+    label: cfg.SCOUTNET_DIVISION_LABEL ?? "avdelning",
     categories: groups,
     total: groups.reduce((n, c) => n + c.total, 0),
     done: stages.done.length,
@@ -544,7 +570,8 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export function formatDivision(result, { plain = false } = {}) {
   const b = (s) => (plain ? s : `**${s}**`);
   const small = (s) => (plain ? `  ${s}` : `-# ${s}`);
-  const title = `Avdelning ${result.division}${result.name ? ` – ${result.name}` : ""}`;
+  const label = result.label ?? "avdelning";
+  const title = `${capitalize(label)} ${result.division}${result.name ? ` – ${result.name}` : ""}`;
   const lines = [
     `${b(title)} · ${result.done} av ${result.total} är inne (${pct(result.done, result.total)})`,
   ];
@@ -557,7 +584,7 @@ export function formatDivision(result, { plain = false } = {}) {
       ),
     );
   if (result.total === 0) {
-    lines.push("", "Ingen anmäld i ScoutNet har den här avdelningen.");
+    lines.push("", `Ingen anmäld i ScoutNet har ${label} ${result.division}.`);
     return lines.join("\n");
   }
 
