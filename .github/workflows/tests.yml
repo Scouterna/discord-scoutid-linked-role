@@ -34,9 +34,15 @@ jobs:
         # copy nothing keeps true.
         run: |
           # The character classes keep the pattern from matching this very line.
-          if git grep -nIiE 'w[s]j|jambor[e]e|scouterna[.]net' -- . ':!package-lock.json'; then
-            echo "::error::deployment-specific names found (see above)"; exit 1
-          fi
+          # Fail closed: only git grep's "no match" (1) passes. A match (0) fails,
+          # and so does an error (2+), which would otherwise look like a clean tree.
+          rc=0
+          git grep -nIiE 'w[s]j|jambor[e]e|scouterna[.]net' -- . ':!package-lock.json' || rc=$?
+          case "$rc" in
+            1) ;;
+            0) echo "::error::deployment-specific names found (see above)"; exit 1 ;;
+            *) echo "::error::the name check could not run (git grep exit $rc)"; exit 1 ;;
+          esac
 
       - name: Lint the workflows
         # A linter that only exists in the devcontainer gets skipped, and the

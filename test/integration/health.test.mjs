@@ -11,9 +11,9 @@
  *   npm run test:integration
  *
  * Why this matters more than a health check usually would: `maxUnavailable: 0`
- * means a rollout waits for a Ready pod, and deploy.yml polls this route from
- * the public ingress afterwards. A /readyz that answers 503 when it should not
- * does not degrade the service — it stops deploys.
+ * means a rollout waits for a Ready pod, and a deployment's own checks may poll
+ * this route from the public ingress afterwards. A /readyz that answers 503 when
+ * it should not does not degrade the service — it stops deploys.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
