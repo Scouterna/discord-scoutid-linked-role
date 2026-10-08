@@ -1,8 +1,9 @@
 # Devcontainer
 
 Covers every repo of the WSJ27 workspace: this one, `wsj27-infra`,
-`wsj27-discord-bot`, `wsj27-cms`, and the three of the campfire platform
-(`wsj27-campfire`, `wsj27-auth-api`, `wsj27-project-api`).
+`wsj27-discord-bot`, `wsj27-cms`, the three of the campfire platform
+(`wsj27-campfire`, `wsj27-auth-api`, `wsj27-project-api`), and
+`azure-webservices`, the shared AKS platform they all run on.
 
 ## Opening it
 
@@ -20,6 +21,7 @@ code/
   wsj27-campfire/                ← Scouterna/wsj27-campfire
   wsj27-auth-api/                ← Scouterna/wsj27-auth-api
   wsj27-project-api/             ← Scouterna/wsj27-project-api
+  azure-webservices/             ← Scouterna/azure-webservices
 ```
 
 Note the bot's repository is `wsj27-discord-bot`, not `discord-wsj27-bot`; the

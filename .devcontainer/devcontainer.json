@@ -46,6 +46,11 @@
     "source=${localWorkspaceFolder}/../wsj27-auth-api,target=/workspaces/wsj27-auth-api,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/../wsj27-project-api,target=/workspaces/wsj27-project-api,type=bind,consistency=cached",
 
+    // The shared AKS platform (`webservices`) every workload above runs on —
+    // cluster provisioning in Bicep, plus its GitOps manifests. Same rule:
+    // clone it on the host before rebuilding.
+    "source=${localWorkspaceFolder}/../azure-webservices,target=/workspaces/azure-webservices,type=bind,consistency=cached",
+
     // The multi-root workspace file lives in the host `code/` directory —
     // machine-local, not version-controlled with any one repo — and is bound
     // in so it can be opened from inside the container. Like the repo mounts,
