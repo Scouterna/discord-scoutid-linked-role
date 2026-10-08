@@ -30,7 +30,7 @@ process.env.DISCORD_TOKEN = "fake";
 process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
-process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
+process.env.SCOUTNET_EVENT_ROLE = "event";
 process.env.SCOUTNET_FEE_ROLES = "25694:deltagare,33293:ledare";
 process.env.SCOUTNET_DIVISION_ROLES =
   "deltagare:88168:Deltagare-{div}:Deltagare-Väntande," +
@@ -50,7 +50,7 @@ const BOT_PERMS = String((1 << 28) | (1 << 27));
 const ROLES = [
   { id: "r-everyone", name: "@everyone", managed: false, position: 0 },
   { id: "r-scout", name: "scout", managed: true, position: 1 },
-  { id: "r-event", name: "WSJ-event", managed: false, position: 2 },
+  { id: "r-event", name: "Event", managed: false, position: 2 },
   { id: "r-unver", name: "Overifierad", managed: false, position: 3 },
   { id: "r-dpend", name: "Deltagare-Väntande", managed: false, position: 4 },
   { id: "r-lpend", name: "Ledare-Väntande", managed: false, position: 5 },
@@ -418,7 +418,7 @@ test("a member the bot cannot modify is left out of role drift", async () => {
 
   const result = await audit.runAudit(GUILD);
   const drift = result.categories.find((c) => c.id === "role_drift");
-  // They are genuinely drifted — missing WSJ-event and Deltagare-07 — so without
+  // They are genuinely drifted — missing Event and Deltagare-07 — so without
   // the skip they would show up here.
   assert.ok(
     !drift.items.some((i) => i.includes("u13")),

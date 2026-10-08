@@ -31,7 +31,7 @@ process.env.DISCORD_TOKEN = "fake";
 process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
-process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
+process.env.SCOUTNET_EVENT_ROLE = "event";
 process.env.SCOUTNET_FEE_ROLES = "25694:deltagare,33293:ledare";
 process.env.SCOUTNET_DIVISION_ROLES =
   "deltagare:88168:Deltagare-{div}:Deltagare-Väntande," +
@@ -44,7 +44,7 @@ const GUILD = "G1";
 
 const GUILD_ROLES = [
   { id: "r-scout", name: "scout", managed: true },
-  { id: "r-event", name: "WSJ-event", managed: false },
+  { id: "r-event", name: "Event", managed: false },
   { id: "r-unver", name: "Overifierad", managed: false },
   { id: "r-ledare", name: "Ledare", managed: false },
   { id: "r-l12", name: "Ledare-12", managed: false },
@@ -225,7 +225,7 @@ test("an orphan with the Scout role but no link is stripped", async () => {
   const stripped = results.find((r) => r.discordUserId === "orphan");
   assert.ok(stripped, "the orphan must appear in the report");
   assert.ok(stripped.added.includes("Overifierad"));
-  assert.deepEqual(stripped.removed.sort(), ["Ledare-12", "wsj-event"]);
+  assert.deepEqual(stripped.removed.sort(), ["Ledare-12", "event"]);
 });
 
 test("a link whose member has left the guild is reported, not skipped", async () => {

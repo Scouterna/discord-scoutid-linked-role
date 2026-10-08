@@ -62,5 +62,5 @@ test("no page carries a deployment's name by itself", () => {
     getNoRolesPageHTML({ scoutnetUnreachable: false }),
     getNoRolesPageHTML({ scoutnetUnreachable: true }),
   ];
-  for (const html of pages) assert.doesNotMatch(html, /wsj/i);
+  for (const html of pages) assert.doesNotMatch(html, /w[s]j/i);
 });

@@ -26,7 +26,7 @@ process.env.DISCORD_TOKEN = "fake";
 process.env.SCOUTNET_EVENT_ID = "9999";
 process.env.SCOUTNET_PARTICIPANTS_APIKEY = "fake";
 process.env.SCOUTNET_SCOUT_ROLE = "scout";
-process.env.SCOUTNET_EVENT_ROLE = "wsj-event";
+process.env.SCOUTNET_EVENT_ROLE = "event";
 process.env.SCOUTNET_FEE_ROLES =
   "25694:deltagare,33293:ledare,25697:cmt,25696:ist-rundresa,25702:ist-egenresa";
 process.env.SCOUTNET_DIVISION_ROLES =
@@ -46,7 +46,7 @@ const GUILD = "G1";
 /** The guild's roles. `managed: true` marks roles Discord owns, like Scout. */
 const GUILD_ROLES = [
   { id: "r-scout", name: "scout", managed: true },
-  { id: "r-event", name: "WSJ-event", managed: false },
+  { id: "r-event", name: "Event", managed: false },
   { id: "r-unver", name: "Overifierad", managed: false },
   { id: "r-cmt", name: "CMT", managed: false },
   { id: "r-ledare", name: "Ledare", managed: false },
@@ -175,8 +175,8 @@ test("a verified leader gets the division role, the flat marker and a nickname",
   });
 
   const result = await roles.syncUserRoles(GUILD, "u1");
-  assert.deepEqual(namesOf(calls.added), ["Ledare", "Ledare-12", "WSJ-event"]);
-  assert.deepEqual(result.added.sort(), ["Ledare", "Ledare-12", "wsj-event"]);
+  assert.deepEqual(namesOf(calls.added), ["Event", "Ledare", "Ledare-12"]);
+  assert.deepEqual(result.added.sort(), ["Ledare", "Ledare-12", "event"]);
   // The name comes from ScoutNet, not from whatever they set themselves.
   assert.deepEqual(calls.nicks, ["Anna Andersson (AL12)"]);
   assert.equal(result.nickname, "Anna Andersson (AL12)");
@@ -327,11 +327,7 @@ test("losing the Scout role strips every managed role and sets Overifierad", asy
 
   const result = await roles.syncUserRoles(GUILD, "u3");
   assert.deepEqual(namesOf(calls.added), ["Overifierad"]);
-  assert.deepEqual(namesOf(calls.removed), [
-    "Ledare",
-    "Ledare-12",
-    "WSJ-event",
-  ]);
+  assert.deepEqual(namesOf(calls.removed), ["Event", "Ledare", "Ledare-12"]);
   assert.ok(result.added.includes("Overifierad"));
   // The strip must say which no it acted on — it is the only record of a state
   // in Discord that nothing else keeps, and the difference between "the user
@@ -379,7 +375,7 @@ test("a cancelled participant loses event access but keeps Scout", async () => {
     },
   });
   const result = await roles.syncUserRoles(GUILD, "u4");
-  assert.deepEqual(namesOf(calls.removed), ["Deltagare-07", "WSJ-event"]);
+  assert.deepEqual(namesOf(calls.removed), ["Deltagare-07", "Event"]);
   assert.deepEqual(
     calls.added,
     [],
@@ -412,7 +408,7 @@ test("a role above the bot in the hierarchy fails without aborting the rest", as
   );
   assert.deepEqual(
     result.added.sort(),
-    ["Ledare", "wsj-event"],
+    ["Ledare", "event"],
     "the rest should still apply",
   );
 });
@@ -490,11 +486,7 @@ test("the verification gate still works while ScoutNet is down", async () => {
 
   const result = await roles.syncUserRoles(GUILD, "u9");
   assert.equal(result.error, undefined);
-  assert.deepEqual(namesOf(calls.removed), [
-    "Ledare",
-    "Ledare-12",
-    "WSJ-event",
-  ]);
+  assert.deepEqual(namesOf(calls.removed), ["Event", "Ledare", "Ledare-12"]);
   assert.deepEqual(namesOf(calls.added), ["Overifierad"]);
 });
 
@@ -537,11 +529,7 @@ test("stripUnlinkedMember clears access for a Scout role with no link behind it"
   };
   const result = await roles.stripUnlinkedMember(GUILD, "u7", roleMap, orphan);
 
-  assert.deepEqual(namesOf(calls.removed), [
-    "Ledare",
-    "Ledare-12",
-    "WSJ-event",
-  ]);
+  assert.deepEqual(namesOf(calls.removed), ["Event", "Ledare", "Ledare-12"]);
   assert.deepEqual(result.added, ["Overifierad"]);
   assert.deepEqual(calls.nicks, ["Orphan Person"]);
   assert.ok(

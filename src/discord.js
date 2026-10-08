@@ -335,7 +335,7 @@ export function removeRoleFromUser(guildId, userId, roleId) {
  * `@okänd-användare`. Hence `who()` in eventlog.js writes names, not mentions.
  *
  * The bot's role grants only Manage Roles and Manage Nicknames, so it can write
- * here purely on a channel overwrite granted in wsj27-infra. A 403 therefore
+ * here purely on a channel overwrite granted by whoever owns the server's channel overwrites. A 403 therefore
  * means the overwrite is missing, not that the token is wrong.
  */
 export function postChannelMessage(channelId, content) {

@@ -12,7 +12,7 @@ dotenv.config();
 
 /**
  * `"feeId:category,feeId:category"` → `{ feeId: category }`.
- * Example: `"25694:deltagare,25697:cmt"`.
+ * Example: `"1001:deltagare,1003:funktionar"`.
  */
 export function parseFeeRoles(str) {
   if (!str) return null;
@@ -49,16 +49,15 @@ export function parseNicknameSuffixes(str) {
  * What `{divnamn}` in a nickname suffix resolves to. Numbers are zero-padded on
  * read, so `"1:Björnen"` and `"01:Björnen"` are the same row.
  *
- * **This is a second copy.** The names live in `discord/terraform.tfvars` in
- * Scouterna/wsj27-infra, which is where the channel topics read them from; a
- * division renamed there has to be renamed here too. Nothing detects the drift
- * — the suffix would simply keep the old name.
+ * **This is usually a second copy.** Whatever owns the Discord server — in
+ * practice an infrastructure repo — names the divisions too, for channel
+ * topics; a division renamed there has to be renamed here. Nothing detects
+ * the drift: the suffix would simply keep the old name.
  *
  * The map is keyed by number alone, which holds only as long as one number means
- * one thing. `deltagare` and `ledare` both answer with an avdelning, so they
- * share these names correctly, but IST reads the same ScoutNet question for a
- * *patrol* number. IST patrols have no names today, so nothing collides; give
- * them names and this has to become per-category first.
+ * one thing. Two categories may read the same question for different kinds of
+ * number; names keyed by number alone then collide, and the map has to become
+ * per-category first.
  */
 export function parseDivisionNames(str) {
   if (!str) return null;
@@ -73,7 +72,7 @@ export function parseDivisionNames(str) {
 /**
  * `"category:questionId:withDiv:withoutDiv,..."` →
  * `{ category: { questionId, withDiv, withoutDiv } }`.
- * Example: `"deltagare:88168:Deltagare-{div}:Deltagare-Väntande"`.
+ * Example: `"deltagare:5001:Deltagare-{div}:Deltagare-Väntande"`.
  *
  * Each category reads its own ScoutNet question for the division number.
  */
@@ -155,9 +154,8 @@ const config = {
   DISCORD_VALIDATION_URL: process.env.DISCORD_VALIDATION_URL,
   DISCORD_GUILD_ID: process.env.DISCORD_GUILD_ID,
 
-  // Channel the verification event log is written to (#server-logg, created by
-  // Scouterna/wsj27-infra). Unset means the log is off, and everything else
-  // behaves identically — see src/eventlog.js.
+  // Channel the verification event log is written to. Unset means the log is
+  // off, and everything else behaves identically — see src/eventlog.js.
   LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
 
   // Which member events the scheduled scan reports. Empty Set = no scan.
