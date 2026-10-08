@@ -72,10 +72,20 @@ expiry. Everything else is kept — the `link` rows are the irreplaceable part,
 since losing them means every user must re-verify, while tokens merely force a
 re-auth.
 
-Two properties worth preserving if this is ever edited: it paginates explicitly
-(the service caps a page at 1000 entities and the CLI does not follow the
-marker, so a single call silently truncates once enough people link), and it
-refuses to upload a snapshot containing zero `link` rows.
+Three properties worth preserving if this is ever edited: it paginates
+explicitly (the service caps a page at 1000 entities and the CLI does not follow
+the marker, so a single call silently truncates once enough people link), it
+refuses to upload a snapshot containing zero `link` rows, and it hands the
+marker back in the form the CLI takes it.
+
+That last one is not obvious and cost twelve days of backups. `az storage entity
+query` returns `nextMarker` as an object, `{nextpartitionkey, nextrowkey}`, but
+`--marker` wants `nextpartitionkey=… nextrowkey=…` as separate words. The job
+printed the object and passed that string back, which the CLI rejects — so the
+pagination, written for the day the table passed 1000 entities, failed on that
+very day, and every run after it. Nothing noticed: a failed Job notifies nobody
+unless the cluster routes its failures somewhere. Test a change against a table
+of more than 1000 entities, not an empty one.
 
 **Restoring** — [k8s/backup-restore-job.yaml](k8s/backup-restore-job.yaml),
 applied by hand, never part of the kustomization. It defaults to a scratch table

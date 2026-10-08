@@ -69,25 +69,33 @@ spec:
                   # entities and the CLI does not follow the marker itself, so
                   # a single call would silently truncate once enough people
                   # link — the failure would not surface until a restore.
-                  MARKER=""
+                  #
+                  # The CLI returns the marker as an object
+                  # ({nextpartitionkey, nextrowkey}) but takes it back as
+                  # key=value words: `--marker nextpartitionkey=… nextrowkey=…`.
+                  # The object's printed form is rejected outright, so the
+                  # marker is turned into those words, one per line, and read
+                  # into an array. It is captured with $( ) rather than read
+                  # through a process substitution so that a failure to parse
+                  # the page stops the job instead of ending the loop early —
+                  # which would upload a truncated snapshot as if it were whole.
+                  MARKER=()
                   while : ; do
-                    if [ -z "$MARKER" ]; then
-                      PAGE="$(az storage entity query \
-                        --table-name "$TABLE_NAME" \
-                        --connection-string "$TABLE_CONNECTION_STRING" \
-                        --filter "PartitionKey ne 'state'" \
-                        --num-results 1000 -o json)"
-                    else
-                      PAGE="$(az storage entity query \
-                        --table-name "$TABLE_NAME" \
-                        --connection-string "$TABLE_CONNECTION_STRING" \
-                        --filter "PartitionKey ne 'state'" \
-                        --num-results 1000 --marker "$MARKER" -o json)"
-                    fi
+                    PAGE="$(az storage entity query \
+                      --table-name "$TABLE_NAME" \
+                      --connection-string "$TABLE_CONNECTION_STRING" \
+                      --filter "PartitionKey ne 'state'" \
+                      --num-results 1000 "${MARKER[@]}" -o json)"
                     printf '%s\n' "$PAGE" >> /tmp/pages.json
-                    MARKER="$(printf '%s' "$PAGE" | python3 -c \
-                      'import json,sys; print(json.load(sys.stdin).get("nextMarker") or "")')"
-                    [ -n "$MARKER" ] || break
+                    NEXT="$(printf '%s' "$PAGE" | python3 -c '
+                  import json, sys
+                  m = json.load(sys.stdin).get("nextMarker") or {}
+                  if m:
+                      print("--marker")
+                      for k, v in m.items():
+                          print(f"{k}={v}")')"
+                    [ -n "$NEXT" ] || break
+                    mapfile -t MARKER <<< "$NEXT"
                   done
 
                   python3 - "$OUT" <<'PY'
