@@ -132,6 +132,7 @@ reports it.
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/adoption-scoutid`                 | Admin    | How many registered participants have linked, per group    |
 | `/adoption-scoutid`                 | Leader   | Where each person in your own troop stands, and who is stuck |
+| `/adoption-scoutid`                 | `*` scope | Everything an admin sees — for staff who are not Discord admins |
 | `/adoption-scoutid avdelning:12`    | Admin    | One troop, as its leaders see it — by value or name; the option follows `SCOUTNET_DIVISION_LABEL` |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
@@ -320,7 +321,8 @@ SCOUTNET_DIVISION_ROLES=deltagare:5001:Deltagare-{div}:Deltagare-Väntande
 # category:role+role — flat roles granted besides the division role
 SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-a:IST+IST-A
 
-# category:category+category — what a member of the first sees in /adoption-scoutid
+# category:category+category — what a member of the first sees in /adoption-scoutid;
+# category:* sees everything, as an admin does
 SCOUTNET_ADOPTION_SCOPE=ledare:deltagare+ledare
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)

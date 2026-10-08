@@ -260,8 +260,13 @@ test("the missing are named, but only when asked for", async () => {
 
 // --- One division, for its leaders ---
 
-const { computeDivision, formatDivision, leaderScope, resolveDivision } =
-  await import("../../src/adoption.js");
+const {
+  computeDivision,
+  formatDivision,
+  leaderScope,
+  resolveDivision,
+  allScopedCategories,
+} = await import("../../src/adoption.js");
 
 const SCOPED = {
   ...CFG,
@@ -401,4 +406,16 @@ test("the report calls a division what the config calls it", () => {
   const text = formatDivision(result, { plain: true });
   assert.match(text, /^Patrull 12 – Musen/);
   assert.match(text, /Ingen anmäld i ScoutNet har patrull 12\./);
+});
+
+test("a category scoped to * sees everything, with or without a division", () => {
+  const cfg = {
+    ...SCOPED,
+    SCOUTNET_ADOPTION_SCOPE: { ledare: ["deltagare", "ledare"], cmt: ["*"] },
+  };
+  // cmt has no division config: `*` must not need one.
+  assert.deepEqual(leaderScope(P(300), cfg), { all: true });
+  assert.equal(leaderScope(P(300, {}, { cancelled: true }), cfg), null);
+  // `*` is not a category a division contains.
+  assert.deepEqual(allScopedCategories(cfg), ["deltagare", "ledare"]);
 });

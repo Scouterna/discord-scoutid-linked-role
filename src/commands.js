@@ -448,9 +448,10 @@ const auditCommand = handler(
 
 /**
  * Admins get the whole event, or one division with the division option
- * (`avdelning:` by default — it follows SCOUTNET_DIVISION_LABEL). Everyone else
- * gets their own division if `SCOUTNET_ADOPTION_SCOPE` gives their category one
- * — a leader sees their troop — and a refusal otherwise.
+ * (`avdelning:` by default — it follows SCOUTNET_DIVISION_LABEL). So does a
+ * category scoped to `*` in `SCOUTNET_ADOPTION_SCOPE`, such as the event's
+ * staff. Everyone else gets their own division if the scope gives their
+ * category one — a leader sees their troop — and a refusal otherwise.
  *
  * The scope is read from ScoutNet through the caller's own link, not from their
  * Discord roles: the roles are derived from the same answer and can lag it by a
@@ -462,7 +463,22 @@ const adoptionCommand = handler(
     const optionName = divisionOptionName(label);
     const requested = option(interaction, optionName);
 
-    if (isAdmin(interaction) && requested == null) {
+    // Admins, and a category scoped to `*`, see everything; anyone else needs
+    // a scope of their own, read from ScoutNet through their link.
+    let own = null;
+    if (!isAdmin(interaction)) {
+      const scoutId = await storage.getLinkedScoutIDUserId(callerId);
+      own = scoutId
+        ? adoption.leaderScope(await scoutnet.getParticipant(scoutId))
+        : null;
+      if (!own) {
+        await reply(token, "Det här kommandot är för ledare och admins.");
+        return;
+      }
+    }
+    const seesAll = isAdmin(interaction) || own.all === true;
+
+    if (seesAll && requested == null) {
       const result = await adoption.runAdoption();
       // Always a file as well: the per-group breakdown is 130 lines at full size,
       // and it is the breakdown, not the total, that someone acts on.
@@ -478,7 +494,7 @@ const adoptionCommand = handler(
     }
 
     let scope;
-    if (isAdmin(interaction)) {
+    if (seesAll) {
       const typed = String(requested).trim();
       // A value or a configured name, so not only numbers — but a division is
       // never blank, and nothing typed by hand is a hundred characters long.
@@ -504,14 +520,6 @@ const adoptionCommand = handler(
         categories,
       };
     } else {
-      const scoutId = await storage.getLinkedScoutIDUserId(callerId);
-      const own = scoutId
-        ? adoption.leaderScope(await scoutnet.getParticipant(scoutId))
-        : null;
-      if (!own) {
-        await reply(token, "Det här kommandot är för ledare och admins.");
-        return;
-      }
       if (own.waiting) {
         await reply(
           token,

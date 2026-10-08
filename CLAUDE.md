@@ -615,7 +615,7 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_FEE_ROLES` | `feeId:kategori,…` |
 | `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…`; `rollMedDiv` innehåller `{div}`, `{divnamn}` eller båda, och måste ha fast text runt dem för att gamla roller ska kunna tas bort |
 | `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
-| `SCOUTNET_ADOPTION_SCOPE` | `kategori:kategori+kategori,…` — vilka kategorier den förstas medlemmar ser i `/adoption-scoutid`, i sin *egen* avdelning. Tomt = bara admins |
+| `SCOUTNET_ADOPTION_SCOPE` | `kategori:kategori+kategori,…` — vilka kategorier den förstas medlemmar ser i `/adoption-scoutid`, i sin *egen* avdelning. `kategori:*` ser allt, som en admin. Tomt = bara admins |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
 | `SCOUTNET_DIVISION_LABEL` | ord, `avdelning` som default — vad en division kallas i svar och rapporter, och namnet på `/adoption-scoutid`-optionen. Ett en-ord i obestämd form ("ingen patrull"). Ändras det måste kommandona registreras om |
 | `SCOUTNET_DIVISION_NAMES` | `värde:namn` eller `kategori/värde:namn`, kommaseparerat — vad `{divnamn}` slår upp; kategorins egen rad vinner. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
@@ -1186,6 +1186,14 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   avdelning, och den vars kategori har en rad i `SCOUTNET_ADOPTION_SCOPE` sin
   egen. Alla andra nekas. Vill man dölja kommandot i väljaren för deltagarna görs
   det i Server Settings → Integrations; grinden i koden gäller oavsett.
+
+  **`*` i stället för en kategorilista ser allt**, precis som en admin: hela
+  rapporten, och vilken avdelning som helst med `avdelning:`. Det finns för
+  eventets stab (`cmt:*`), som behöver överblicken utan att vara
+  Discord-administratörer — att ge Administrator för en rapports skull hade gett
+  långt mer än rapporten. Samma regel som för ledarna: kategorin läses ur
+  ScoutNet via den egna länken, inte ur rollen, så en CMT:are som inte länkat sig
+  nekas.
 
   Avdelningen läses ur **ScoutNet via ledarens egen länk**, inte ur rollerna —
   rollerna härleds ur samma svar men kan ligga en natt efter. En ledare som inte

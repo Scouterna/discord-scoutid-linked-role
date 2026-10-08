@@ -339,6 +339,9 @@ export function formatAdoptionSummary(result) {
 
 // --- One division, for the leaders who run it ---
 
+/** The scope that sees everything, as an admin does. */
+const ALL = "*";
+
 /**
  * Who may see which division. `SCOUTNET_ADOPTION_SCOPE` maps a category to the
  * categories its members see, at their *own* division: `ledare:deltagare+ledare`
@@ -346,7 +349,13 @@ export function formatAdoptionSummary(result) {
  * nobody else. A category with no row sees nothing — the command is then
  * admin-only for them, as it always was.
  *
- * Returns `{ division, categories }`, `{ waiting: true }` for someone in a scoped
+ * `*` instead of a category list means everything, as an admin sees it: the
+ * whole report, and any division by name. `cmt:*` is the case it exists for —
+ * the event's staff need the overview without being Discord administrators, and
+ * granting Administrator for a report would grant far more than the report.
+ *
+ * Returns `{ all: true }` for that, `{ division, categories }`,
+ * `{ waiting: true }` for someone in a scoped
  * category who has no division yet, or `null` for everyone else. A cancelled
  * registration is `null`: the troop is no longer theirs.
  */
@@ -354,6 +363,7 @@ export function leaderScope(participant, cfg = config) {
   if (!participant || scoutnet.isCancelled(participant)) return null;
   const category = cfg.SCOUTNET_FEE_ROLES?.[String(participant.fee_id)];
   const categories = cfg.SCOUTNET_ADOPTION_SCOPE?.[category];
+  if (categories?.includes(ALL)) return { all: true };
   const divConfig = cfg.SCOUTNET_DIVISION_ROLES?.[category];
   if (!categories || !divConfig) return null;
   const answer = participant.questions?.[divConfig.questionId];
@@ -390,7 +400,9 @@ export function resolveDivision(input, categories, cfg = config) {
 
 /** Every category any scope reaches — what an admin's `avdelning:` covers. */
 export function allScopedCategories(cfg = config) {
-  return [...new Set(Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {}).flat())];
+  return [
+    ...new Set(Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {}).flat()),
+  ].filter((c) => c !== ALL);
 }
 
 /**
