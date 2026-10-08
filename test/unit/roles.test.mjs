@@ -475,3 +475,49 @@ test("the skipped scout role is not a problem", async () => {
   assert.deepEqual(granted, ["event", "Ledare-47"]);
   assert.equal(problem, null);
 });
+
+// --- Which stale division roles the sync may take away ---
+// The pattern, not its prefix, decides. A prefix match would remove any role
+// that happens to start the same way — and a pattern beginning with {div} has an
+// empty prefix, which matches every role the member holds.
+
+const { divisionPatterns, divisionPattern } =
+  await import("../../src/guild.js");
+
+function planFor(withDiv, held, desired) {
+  const roleMap = new Map(
+    held.map((name, i) => [name.toLowerCase(), { id: `r${i}`, name }]),
+  );
+  return roles
+    .planRoles({
+      roleMap,
+      currentRoleIds: new Set(held.map((_, i) => `r${i}`)),
+      desired,
+      patterns: divisionPatterns({ x: { withDiv, withoutDiv: "" } }),
+    })
+    .toRemove.map((r) => r.name)
+    .sort();
+}
+
+test("a stale division role is removed, a role that only starts alike is not", () => {
+  assert.deepEqual(
+    planFor(
+      "Deltagare-{div}",
+      ["Deltagare-07", "Deltagare-12", "Deltagarstöd", "Deltagare"],
+      ["Deltagare-12"],
+    ),
+    ["Deltagare-07"],
+  );
+});
+
+test("a pattern that starts with {div} removes its own roles, not everything", () => {
+  assert.deepEqual(
+    planFor("{div}-Grupp", ["07-Grupp", "12-Grupp", "Moderator"], ["12-Grupp"]),
+    ["07-Grupp"],
+  );
+});
+
+test("a pattern with no fixed text grants but never removes", () => {
+  assert.equal(divisionPattern("{div}"), null);
+  assert.deepEqual(planFor("{div}", ["07", "Moderator"], ["12"]), []);
+});

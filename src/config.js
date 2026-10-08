@@ -25,6 +25,30 @@ export function parseFeeRoles(str) {
 }
 
 /**
+ * A division value in the form roles and lookups use. A numeric answer is
+ * zero-padded to two digits, so `"7"` and `"07"` name the same role; anything
+ * else is a label — a patrol name, an option text — and is kept as given, since
+ * padding `"A"` to `"0A"` would name a role nobody created.
+ */
+export function normalizeDivision(value) {
+  const s = String(value ?? "").trim();
+  return /^\d+$/.test(s) ? s.padStart(2, "0") : s;
+}
+
+/**
+ * The slash-command option that names a division, derived from the label so a
+ * deployment that says "patrull" gets `patrull:`. Discord accepts lowercase
+ * letters, digits, `-` and `_`, at most 32; anything else falls back to
+ * `avdelning` rather than failing registration.
+ */
+export function divisionOptionName(label) {
+  const name = String(label ?? "")
+    .trim()
+    .toLowerCase();
+  return /^[-_\p{L}\p{N}]{1,32}$/u.test(name) ? name : "avdelning";
+}
+
+/**
  * `"category:withDiv:withoutDiv,..."` → `{ category: { withDiv, withoutDiv } }`.
  * Example: `"deltagare:{div}:,ledare:AL{div}:AL,funktionar::F"`.
  *
@@ -44,27 +68,38 @@ export function parseNicknameSuffixes(str) {
 }
 
 /**
- * `"01:Björnen,02:Bävern,..."` → `{ "01": "Björnen" }`.
+ * `"01:Björnen,02:Bävern,ledare/12:Musen,..."` →
+ * `{ "01": "Björnen", "02": "Bävern", "ledare/12": "Musen" }`.
  *
- * What `{divnamn}` in a nickname suffix resolves to. Numbers are zero-padded on
- * read, so `"1:Björnen"` and `"01:Björnen"` are the same row.
+ * What `{divnamn}` resolves to, in a nickname suffix or a role pattern. Values
+ * go through `normalizeDivision`, so `"1:Björnen"` and `"01:Björnen"` are the
+ * same row. A `category/value` key names the value for that category only and
+ * wins over a bare one — which is what lets two categories read the same
+ * question for different things, and what turns an opaque option id from a
+ * multiple-choice question into a name.
  *
  * **This is usually a second copy.** Whatever owns the Discord server — in
  * practice an infrastructure repo — names the divisions too, for channel
  * topics; a division renamed there has to be renamed here. Nothing detects
  * the drift: the suffix would simply keep the old name.
  *
- * The map is keyed by number alone, which holds only as long as one number means
- * one thing. Two categories may read the same question for different kinds of
- * number; names keyed by number alone then collide, and the map has to become
- * per-category first.
+ *  * A bare key holds only as long as one value means one thing across the
+ * categories that share it; where it does not, give each category its own row.
  */
 export function parseDivisionNames(str) {
   if (!str) return null;
   const map = {};
   for (const entry of str.split(",")) {
-    const [num, name] = entry.split(":").map((s) => s.trim());
-    if (num && name) map[num.padStart(2, "0")] = name;
+    const [key, name] = entry.split(":").map((s) => s.trim());
+    if (!key || !name) continue;
+    const slash = key.indexOf("/");
+    const normalized =
+      slash >= 0
+        ? `${key.slice(0, slash).trim()}/${normalizeDivision(key.slice(slash + 1))}`
+        : normalizeDivision(key);
+    const [category, value] =
+      slash >= 0 ? normalized.split("/") : [null, normalized];
+    if (value && category !== "") map[normalized] = name;
   }
   return Object.keys(map).length > 0 ? map : null;
 }
@@ -197,6 +232,12 @@ const config = {
   SCOUTNET_DIVISION_NAMES: parseDivisionNames(
     process.env.SCOUTNET_DIVISION_NAMES,
   ),
+  // What a division is called in replies and reports — "avdelning", "patrull",
+  // "grupp". An en-word in the indefinite form: the texts say "ingen
+  // ${label}" and "din egen ${label}". Also names the slash-command option
+  // (see divisionOptionName), so changing it means registering the commands
+  // again.
+  SCOUTNET_DIVISION_LABEL: process.env.SCOUTNET_DIVISION_LABEL || "avdelning",
 
   // General
   COOKIE_SECRET: process.env.COOKIE_SECRET,

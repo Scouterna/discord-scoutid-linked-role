@@ -13,7 +13,7 @@ import {
   divisionRoleName,
   withDivision,
   managedRoleNames,
-  divisionPrefixes,
+  divisionPatterns,
   changedAnything,
 } from "./guild.js";
 
@@ -73,7 +73,9 @@ export async function getDesiredRoles(
 
       const divConfig = config.SCOUTNET_DIVISION_ROLES?.[info.category];
       roles.push(
-        divConfig ? divisionRoleName(divConfig, info.division) : info.category,
+        divConfig
+          ? divisionRoleName(divConfig, info.division, info.category)
+          : info.category,
       );
     }
   } catch (e) {
@@ -108,7 +110,7 @@ export async function getNicknameSuffix(
     const suffix = config.SCOUTNET_NICKNAME_SUFFIXES[info.category];
     if (!suffix) return "";
     if (info.division && suffix.withDiv) {
-      return ` (${withDivision(suffix.withDiv, info.division)})`;
+      return ` (${withDivision(suffix.withDiv, info.division, info.category)})`;
     }
     return suffix.withoutDiv ? ` (${suffix.withoutDiv})` : "";
   } catch (e) {
@@ -168,11 +170,16 @@ export async function explainMissingRoles(scoutnetMemberId) {
  * category reports it, so there is one answer to "what would change".
  *
  * Removal has two halves: static managed names match exactly, division roles
- * match by **prefix**, since the guild holds one role per division and the config
- * names only the pattern. Managed roles are skipped on both sides — Discord owns
- * the Scout linked role.
+ * match the configured **pattern** (`divisionPattern`), since the guild holds one
+ * role per division and the config names only the pattern. Managed roles are
+ * skipped on both sides — Discord owns the Scout linked role.
  */
-export function planRoles({ roleMap, currentRoleIds, desired }) {
+export function planRoles({
+  roleMap,
+  currentRoleIds,
+  desired,
+  patterns = divisionPatterns(),
+}) {
   const desiredSet = new Set(desired.map((r) => r.toLowerCase()));
   const toAdd = [];
   const toRemove = new Map();
@@ -196,10 +203,10 @@ export function planRoles({ roleMap, currentRoleIds, desired }) {
     }
   }
 
-  for (const { prefix } of divisionPrefixes()) {
+  for (const { pattern } of patterns) {
     for (const [name, role] of roleMap) {
       if (
-        name.startsWith(prefix) &&
+        pattern.test(name) &&
         currentRoleIds.has(role.id) &&
         !desiredSet.has(name) &&
         !toRemove.has(role.id)

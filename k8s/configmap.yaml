@@ -40,8 +40,9 @@ data:
   # `labels.project_fee` — check there before mapping a new id.
   SCOUTNET_FEE_ROLES: 1001:deltagare,1002:ledare,1003:funktionar
   # category:questionId:roleWithDiv:roleWithoutDiv. Each category reads its
-  # division number from its own ScoutNet question; {div} is the zero-padded
-  # (min 2 digits) number.
+  # division from its own ScoutNet question; {div} is the answer, zero-padded
+  # to 2 digits when it is a number. Keep fixed text in the pattern: stale
+  # roles are removed by matching it.
   SCOUTNET_DIVISION_ROLES: deltagare:5001:Deltagare-{div}:Deltagare-Väntande,ledare:5002:Ledare-{div}:Ledare-Väntande
   # Flat category roles, granted in addition to the division role: a leader in
   # division 12 gets both `Ledare-12` and `Avdelningsledare`. They let a Discord

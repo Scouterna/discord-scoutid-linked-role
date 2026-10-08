@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
 import * as storage from "./storage.js";
-import config from "./config.js";
+import config, { divisionOptionName } from "./config.js";
 import { request, retryDelayMs } from "./http.js";
 
 /**
@@ -516,8 +516,7 @@ export const COMMANDS = [
     // Visible to everyone, and gated in the handler: a leader sees their own
     // division, so the command cannot be admin-only. Narrow who sees it in
     // Server Settings → Integrations if the picker should hide it from the rest.
-    description:
-      "Hur många som länkat sig — admin: per grupp, ledare: din avdelning",
+    description: `Hur många som länkat sig — admin: per grupp, ledare: din ${config.SCOUTNET_DIVISION_LABEL}`,
     options: [
       {
         // Off by default: naming everyone who has not linked is thousands of
@@ -527,8 +526,10 @@ export const COMMANDS = [
         type: BOOLEAN,
       },
       {
-        name: "avdelning",
-        description: "Visa en avdelning som en ledare ser den (admin)",
+        // Follows SCOUTNET_DIVISION_LABEL, so the commands must be registered
+        // again after changing it.
+        name: divisionOptionName(config.SCOUTNET_DIVISION_LABEL),
+        description: `Visa en ${config.SCOUTNET_DIVISION_LABEL} som en ledare ser den (admin)`,
         type: STRING,
       },
     ],

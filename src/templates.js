@@ -60,7 +60,7 @@ function problemPage({ title, message, steps, footer }) {
 }
 
 const FOOTER_LOGGED =
-  "Det här är loggat, så en admin kan se vad som hände. Hör av dig till din avdelningsledare om det inte löser sig.";
+  "Det här är loggat, så en admin kan se vad som hände. Hör av dig till din ledare om det inte löser sig.";
 
 /**
  * The ScoutID half worked, but the Discord account that linked is not in the

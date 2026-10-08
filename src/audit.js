@@ -11,7 +11,7 @@ import {
   abbreviatedNames,
   withDivision,
   managedRoleNames,
-  divisionPrefixes,
+  divisionPatterns,
 } from "./guild.js";
 
 /**
@@ -55,7 +55,9 @@ function expectedDivisionRoleNames(participants) {
       : null;
     const division = divConfig ? p.questions?.[divConfig.questionId] : null;
     if (!division) continue;
-    expected.get(category).add(withDivision(divConfig.withDiv, division));
+    expected
+      .get(category)
+      .add(withDivision(divConfig.withDiv, division, category));
   }
   return expected;
 }
@@ -425,15 +427,15 @@ const CHECKS = [
     title: "Användare med flera division-roller i samma kategori",
     /** Two divisions in one category means one of them was never removed. */
     run: ({ guildMembers, roleById }) => {
-      const prefixes = divisionPrefixes();
+      const patterns = divisionPatterns();
       const items = [];
       for (const m of guildMembers) {
         const byCategory = new Map();
         for (const id of m.roles) {
           const lower = roleById.get(id)?.name.toLowerCase();
           if (!lower) continue;
-          for (const { category, prefix } of prefixes) {
-            if (!lower.startsWith(prefix)) continue;
+          for (const { category, pattern } of patterns) {
+            if (!pattern.test(lower)) continue;
             if (!byCategory.has(category)) byCategory.set(category, []);
             byCategory.get(category).push(roleById.get(id).name);
           }

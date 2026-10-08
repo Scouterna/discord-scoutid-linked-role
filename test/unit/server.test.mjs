@@ -279,11 +279,12 @@ for (const [what, options, expected] of [
   });
 }
 
-test("/adoption-scoutid refuses a division that is not a number", async () => {
+test("/adoption-scoutid refuses a blank division", async () => {
+  // Names are valid input now, so only what cannot be a division is refused.
   const token = "tok-adoption-bad-division";
   await post(
     command("adoption-scoutid", {
-      options: [{ name: "avdelning", value: "Musen" }],
+      options: [{ name: "avdelning", value: "   " }],
       token,
     }),
   );

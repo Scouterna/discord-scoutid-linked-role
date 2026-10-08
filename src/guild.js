@@ -1,4 +1,4 @@
-import config from "./config.js";
+import config, { normalizeDivision } from "./config.js";
 
 /**
  * Everything the role sync, the audit and the adoption report need to derive
@@ -57,24 +57,40 @@ export const guildNick = (member) =>
 export const stripNickSuffix = (name) =>
   (name || "").replace(/\s*\(.*\)\s*$/, "");
 
-/** Division numbers are zero-padded to two digits, or the role names would not match. */
-export const padDiv = (division) => String(division).padStart(2, "0");
+/** A division value as roles and lookups use it — see `normalizeDivision`. */
+export const padDiv = normalizeDivision;
+
+/**
+ * A division's name from `SCOUTNET_DIVISION_NAMES`: the category's own row
+ * (`ledare/12`) first, then the shared one (`12`), else `null`.
+ */
+export function divisionName(
+  category,
+  division,
+  names = config.SCOUTNET_DIVISION_NAMES,
+) {
+  const div = padDiv(division);
+  return names?.[`${category}/${div}`] ?? names?.[div] ?? null;
+}
 
 /**
  * Fill `{div}` and `{divnamn}` in a configured pattern — "Deltagare-{div}",
- * "AL{div}-{divnamn}".
+ * "AL{div}-{divnamn}", "Patrull-{divnamn}".
  *
- * A division with no name in `SCOUTNET_DIVISION_NAMES` drops the placeholder
- * *and* the separator in front of it, so "AL{div}-{divnamn}" degrades to "AL12"
- * — what the suffix looked like before names existed — rather than leaving a
- * dangling dash or printing "{divnamn}" at people.
+ * A division with no name drops the placeholder *and* the separator in front of
+ * it, so "AL{div}-{divnamn}" degrades to "AL12" rather than leaving a dangling
+ * dash or printing "{divnamn}" at people — **unless the pattern has no `{div}`**.
+ * Then the name is all that tells one group from another, and dropping it would
+ * give every group the same role; the value itself stands in instead.
  */
-export const withDivision = (pattern, division) => {
+export const withDivision = (pattern, division, category) => {
   const div = padDiv(division);
-  const name = config.SCOUTNET_DIVISION_NAMES?.[div];
+  const name = divisionName(category, div);
   const named = name
     ? pattern.replace("{divnamn}", name)
-    : pattern.replace(/[\s-]*\{divnamn\}/, "");
+    : pattern.includes("{div}")
+      ? pattern.replace(/[\s-]*\{divnamn\}/, "")
+      : pattern.replace("{divnamn}", div);
   return named.replace("{div}", div);
 };
 
@@ -142,12 +158,14 @@ export function fitNickname(base, suffix = "") {
 }
 
 /** The division role for an answer, or the pending role when there is no answer. */
-export const divisionRoleName = (divConfig, division) =>
-  division ? withDivision(divConfig.withDiv, division) : divConfig.withoutDiv;
+export const divisionRoleName = (divConfig, division, category) =>
+  division
+    ? withDivision(divConfig.withDiv, division, category)
+    : divConfig.withoutDiv;
 
 /**
  * Static role names the bot hands out and takes away, excluding the per-division
- * ones (those are matched by prefix instead — see `divisionPrefixes`).
+ * ones (those are matched by pattern instead — see `divisionPatterns`).
  *
  * `includeUnverified` is what separates the sync's view from the audit's: the
  * sync manages `Overifierad` and so must be able to remove it again, while the
@@ -176,29 +194,69 @@ export function managedRoleNames({ includeUnverified = false } = {}) {
   return [...names];
 }
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
- * `[{ category, prefix }]` for pattern-based removal of division roles:
- * "Deltagare-{div}" yields the prefix "deltagare-".
+ * A division role pattern as a matcher for the roles it can produce:
+ * "Deltagare-{div}" matches `Deltagare-07` and `Deltagare-Väntande`, and nothing
+ * else — not `Deltagare` and not `Deltagarstöd`. Anchored at both ends and
+ * case-insensitive, like every other role lookup here.
  *
- * One entry per prefix: two categories may share one pattern (e.g. both use
+ * `null` for a pattern with no fixed letter or digit in it. "{div}" alone would
+ * match every role in the guild, and the sync would take away everything the
+ * member holds that it did not ask for — moderator roles included, wherever the
+ * bot ranks above them. Such a pattern still *grants* its roles; it just never
+ * removes one, and the caller says so.
+ */
+export function divisionPattern(withDiv) {
+  const literal = withDiv.replace(/\{divnamn\}|\{div\}/g, "");
+  if (!/[\p{L}\p{N}]/u.test(literal)) return null;
+  const hasDiv = withDiv.includes("{div}");
+  const source = withDiv
+    .split(/([\s-]*\{divnamn\}|\{div\})/)
+    .map((part) => {
+      if (part === "{div}") return ".+";
+      const named = part.match(/^([\s-]*)\{divnamn\}$/);
+      if (named)
+        return hasDiv
+          ? `(?:${escapeRegExp(named[1])}.+)?`
+          : `${escapeRegExp(named[1])}.+`;
+      return escapeRegExp(part);
+    })
+    .join("");
+  return new RegExp(`^${source}$`, "iu");
+}
+
+const warnedPatterns = new Set();
+
+/**
+ * `[{ category, pattern }]` for removing stale division roles — the roles a
+ * category's pattern produces that the member is no longer meant to have.
+ *
+ * One entry per pattern: two categories may share one (e.g. both use
  * `Patrull-{div}`), and a second entry would make the sync remove each stale
  * role twice.
  */
-export function divisionPrefixes() {
-  const prefixes = [];
-  for (const [category, { withDiv }] of Object.entries(
-    config.SCOUTNET_DIVISION_ROLES ?? {},
-  )) {
-    const idx = withDiv.indexOf("{div}");
-    const prefix = withDiv.substring(0, idx).toLowerCase();
-    if (idx >= 0 && !prefixes.some((p) => p.prefix === prefix)) {
-      prefixes.push({
-        category,
-        prefix: withDiv.substring(0, idx).toLowerCase(),
-      });
+export function divisionPatterns(
+  divisionRoles = config.SCOUTNET_DIVISION_ROLES,
+) {
+  const patterns = [];
+  for (const [category, { withDiv }] of Object.entries(divisionRoles ?? {})) {
+    const pattern = divisionPattern(withDiv);
+    if (!pattern) {
+      if (!warnedPatterns.has(withDiv)) {
+        warnedPatterns.add(withDiv);
+        console.warn(
+          `Division pattern "${withDiv}" (${category}) has no fixed text, so stale roles from it are never removed`,
+        );
+      }
+      continue;
+    }
+    if (!patterns.some((p) => p.pattern.source === pattern.source)) {
+      patterns.push({ category, pattern });
     }
   }
-  return prefixes;
+  return patterns;
 }
 
 /** Did a sync result actually move anything? A rename counts — users notice it first. */

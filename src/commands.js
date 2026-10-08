@@ -1,4 +1,4 @@
-import config from "./config.js";
+import config, { divisionOptionName } from "./config.js";
 import * as discord from "./discord.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
@@ -421,7 +421,7 @@ async function scoutNetLines(scoutId) {
         ? participant.questions?.[divConfig.questionId] || null
         : null;
       lines.push(
-        `📋 ScoutNet: fee_id=${participant.fee_id}, kategori=${category}, avdelning=${division ?? "(saknas)"}`,
+        `📋 ScoutNet: fee_id=${participant.fee_id}, kategori=${category}, ${config.SCOUTNET_DIVISION_LABEL}=${division ?? "(saknas)"}`,
       );
     }
   } catch (e) {
@@ -447,7 +447,8 @@ const auditCommand = handler(
 // --- /adoption-scoutid ---
 
 /**
- * Admins get the whole event, or one division with `avdelning:`. Everyone else
+ * Admins get the whole event, or one division with the division option
+ * (`avdelning:` by default — it follows SCOUTNET_DIVISION_LABEL). Everyone else
  * gets their own division if `SCOUTNET_ADOPTION_SCOPE` gives their category one
  * — a leader sees their troop — and a refusal otherwise.
  *
@@ -457,7 +458,9 @@ const auditCommand = handler(
  */
 const adoptionCommand = handler(
   async (interaction, { token, guildId, callerId }) => {
-    const requested = option(interaction, "avdelning");
+    const label = config.SCOUTNET_DIVISION_LABEL;
+    const optionName = divisionOptionName(label);
+    const requested = option(interaction, optionName);
 
     if (isAdmin(interaction) && requested == null) {
       const result = await adoption.runAdoption();
@@ -476,11 +479,13 @@ const adoptionCommand = handler(
 
     let scope;
     if (isAdmin(interaction)) {
-      const division = String(requested).trim();
-      if (!/^\d{1,3}$/.test(division)) {
+      const typed = String(requested).trim();
+      // A value or a configured name, so not only numbers — but a division is
+      // never blank, and nothing typed by hand is a hundred characters long.
+      if (!typed || typed.length > 100) {
         await reply(
           token,
-          `Ogiltig \`avdelning\`: \`${division}\` — ange ett nummer, t.ex. \`12\`.`,
+          `Ogiltig \`${optionName}\` — ange ett värde eller ett namn, t.ex. \`12\`.`,
         );
         return;
       }
@@ -490,37 +495,37 @@ const adoptionCommand = handler(
       if (categories.length === 0) {
         await reply(
           token,
-          "`SCOUTNET_ADOPTION_SCOPE` är inte satt, så det finns ingen avdelningsvy.",
+          `\`SCOUTNET_ADOPTION_SCOPE\` är inte satt, så det finns ingen vy per ${label}.`,
         );
         return;
       }
-      scope = { division, categories };
+      scope = {
+        division: adoption.resolveDivision(typed, categories),
+        categories,
+      };
     } else {
       const scoutId = await storage.getLinkedScoutIDUserId(callerId);
       const own = scoutId
         ? adoption.leaderScope(await scoutnet.getParticipant(scoutId))
         : null;
       if (!own) {
-        await reply(
-          token,
-          "Det här kommandot är för avdelningsledare och admins.",
-        );
+        await reply(token, "Det här kommandot är för ledare och admins.");
         return;
       }
       if (own.waiting) {
         await reply(
           token,
-          "Du har ingen avdelning i ScoutNet än, så det finns ingen att visa.",
+          `Du har ingen ${label} i ScoutNet än, så det finns ingen att visa.`,
         );
         return;
       }
       if (
         requested != null &&
-        adoption.padDivision(requested) !== own.division
+        adoption.resolveDivision(requested, own.categories) !== own.division
       ) {
         await reply(
           token,
-          `Du kan bara se din egen avdelning, ${own.division}.`,
+          `Du kan bara se din egen ${label}, ${own.division}.`,
         );
         return;
       }
@@ -529,8 +534,8 @@ const adoptionCommand = handler(
 
     const result = await adoption.runDivision(guildId, scope);
     await replyOrAttach(token, adoption.formatDivision(result), {
-      filename: `avdelning-${result.division}.txt`,
-      summary: `Avdelning ${result.division}: ${result.done} av ${result.total} är inne — hela listan i bifogad fil`,
+      filename: `${optionName}-${result.division}.txt`,
+      summary: `${label[0].toUpperCase()}${label.slice(1)} ${result.division}: ${result.done} av ${result.total} är inne — hela listan i bifogad fil`,
       full: adoption.formatDivision(result, { plain: true }),
     });
   },
