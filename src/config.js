@@ -185,6 +185,12 @@ const config = {
   SCOUTNET_CATEGORY_ROLES: parseCategoryRoles(
     process.env.SCOUTNET_CATEGORY_ROLES,
   ),
+  // `category:category+category` — which categories a member of the first sees in
+  // `/adoption-scoutid`, at their own division. Same shape as
+  // SCOUTNET_CATEGORY_ROLES, so the same parser. Unset = admins only.
+  SCOUTNET_ADOPTION_SCOPE: parseCategoryRoles(
+    process.env.SCOUTNET_ADOPTION_SCOPE,
+  ),
   SCOUTNET_NICKNAME_SUFFIXES: parseNicknameSuffixes(
     process.env.SCOUTNET_NICKNAME_SUFFIXES,
   ),

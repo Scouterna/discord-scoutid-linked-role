@@ -49,6 +49,10 @@ data:
   # one) address a whole category. `+` gives a category several markers. A
   # category left out gets no flat role.
   SCOUTNET_CATEGORY_ROLES: ledare:Avdelningsledare
+  # category:category+category — which categories a member of the first sees in
+  # `/adoption-scoutid`, at their own division: a leader in division 12 sees the
+  # participants and leaders of 12. Empty = the command is admin-only.
+  SCOUTNET_ADOPTION_SCOPE: ledare:deltagare+ledare
   # category:withDiv:withoutDiv (empty = no suffix). Produces e.g. "Ida
   # Sandholdt (12)" and "Erik Reiner (AL12)". Discord allows 32 characters;
   # `fitNickname` shortens the *name*, never the suffix.

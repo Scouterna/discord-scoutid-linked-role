@@ -1,7 +1,14 @@
 import config from "./config.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
-import { divisionRoleName } from "./guild.js";
+import * as discord from "./discord.js";
+import { RELINK_INSTRUCTION } from "./metadata.js";
+import {
+  divisionRoleName,
+  padDiv,
+  roleMapOf,
+  UNVERIFIED_ROLE,
+} from "./guild.js";
 
 /**
  * Adoption: how many registered participants have actually linked, per group.
@@ -325,5 +332,235 @@ export function formatAdoptionSummary(result) {
         " — se filen för vilka och varför",
     );
   }
+  return lines.join("\n");
+}
+
+// --- One division, for the leaders who run it ---
+
+/**
+ * Who may see which division. `SCOUTNET_ADOPTION_SCOPE` maps a category to the
+ * categories its members see, at their *own* division: `ledare:deltagare+ledare`
+ * lets a leader in troop 12 see the participants and leaders of troop 12, and
+ * nobody else. A category with no row sees nothing — the command is then
+ * admin-only for them, as it always was.
+ *
+ * Returns `{ division, categories }`, `{ waiting: true }` for someone in a scoped
+ * category who has no division yet, or `null` for everyone else. A cancelled
+ * registration is `null`: the troop is no longer theirs.
+ */
+export function leaderScope(participant, cfg = config) {
+  if (!participant || scoutnet.isCancelled(participant)) return null;
+  const category = cfg.SCOUTNET_FEE_ROLES?.[String(participant.fee_id)];
+  const categories = cfg.SCOUTNET_ADOPTION_SCOPE?.[category];
+  const divConfig = cfg.SCOUTNET_DIVISION_ROLES?.[category];
+  if (!categories || !divConfig) return null;
+  const answer = participant.questions?.[divConfig.questionId];
+  return answer
+    ? { division: padDiv(answer), categories }
+    : { waiting: true, categories };
+}
+
+/** A division as typed, in the form the report and the roles use. */
+export const padDivision = (division) => padDiv(String(division).trim());
+
+/** Every category any scope reaches — what an admin's `avdelning:` covers. */
+export function allScopedCategories(cfg = config) {
+  return [...new Set(Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {}).flat())];
+}
+
+/**
+ * Where each person in one division stands, from registration to seeing the
+ * channels. The stages are the ways the path actually breaks, in the order a
+ * person walks it, and each is someone else's next step:
+ *
+ *   notLinked    never linked — or linked from nowhere we can see. The bot cannot
+ *                tell "in the server, not linked" from "never joined": without a
+ *                link there is nothing that ties a Discord account to a scoutid.
+ *   notInServer  linked, but that account is not a member. Left, or linked from a
+ *                second account.
+ *   pending      in the server, has not accepted the rules — sees no channel at
+ *                all, however right the roles are.
+ *   unverified   carries `Overifierad`: the sync found no proof of verification
+ *                and stripped the roles. Only the member can fix it, by relinking.
+ *   done         in, and sees what they should.
+ *
+ * `unverified` reads the role the sync set rather than probing the OAuth grant:
+ * the probe may refresh and store a token, and this report must stay read-only.
+ * The cost is up to a night's lag, which is the sync's own cadence.
+ *
+ * Someone linked from two accounts counts by the one furthest along.
+ */
+export const STAGES = [
+  "notLinked",
+  "notInServer",
+  "pending",
+  "unverified",
+  "done",
+];
+
+export function computeDivision({
+  participants,
+  linkedUsers = [],
+  members = [],
+  guildRoles = [],
+  division,
+  categories,
+  cfg = config,
+}) {
+  const div = padDiv(division);
+  const accounts = new Map();
+  for (const u of linkedUsers) {
+    const id = String(u.scoutId);
+    if (!accounts.has(id)) accounts.set(id, []);
+    accounts.get(id).push(u.discordUserId);
+  }
+  const memberById = new Map(members.map((m) => [m.user?.id, m]));
+  const unverifiedId = roleMapOf(guildRoles).get(
+    UNVERIFIED_ROLE.toLowerCase(),
+  )?.id;
+
+  const stageOf = (scoutId) => {
+    const ids = accounts.get(scoutId);
+    if (!ids) return 0;
+    let best = 1;
+    for (const id of ids) {
+      const m = memberById.get(id);
+      if (!m) continue;
+      const stage = m.pending
+        ? 2
+        : unverifiedId && m.roles?.includes(unverifiedId)
+          ? 3
+          : 4;
+      best = Math.max(best, stage);
+    }
+    return best;
+  };
+
+  const stages = Object.fromEntries(STAGES.map((s) => [s, []]));
+  const byCategory = new Map(
+    categories.map((c) => [
+      c,
+      { category: c, label: categoryLabel(cfg, c), total: 0, done: 0 },
+    ]),
+  );
+
+  for (const [memberNo, p] of Object.entries(participants ?? {})) {
+    if (scoutnet.isCancelled(p)) continue;
+    const category = cfg.SCOUTNET_FEE_ROLES?.[String(p.fee_id)];
+    const divConfig = cfg.SCOUTNET_DIVISION_ROLES?.[category];
+    if (!byCategory.has(category) || !divConfig) continue;
+    const answer = p.questions?.[divConfig.questionId];
+    if (!answer || padDiv(answer) !== div) continue;
+
+    const stage = STAGES[stageOf(String(memberNo))];
+    const c = byCategory.get(category);
+    c.total++;
+    if (stage === "done") c.done++;
+    stages[stage].push({
+      name: scoutnet.fullName(p) || memberNo,
+      memberNo,
+      category,
+    });
+  }
+
+  for (const list of Object.values(stages))
+    list.sort((a, b) => a.name.localeCompare(b.name, "sv"));
+
+  const groups = [...byCategory.values()];
+  return {
+    division: div,
+    name: cfg.SCOUTNET_DIVISION_NAMES?.[div] ?? null,
+    categories: groups,
+    total: groups.reduce((n, c) => n + c.total, 0),
+    done: stages.done.length,
+    stages,
+  };
+}
+
+/** Reads the live data and computes one division. */
+export async function runDivision(guildId, { division, categories }) {
+  const [participants, linkedUsers, members, guildRoles] = await Promise.all([
+    scoutnet.getParticipants(),
+    storage.getAllLinkedUsers(),
+    discord.getGuildMembers(guildId),
+    discord.getGuildRoles(guildId),
+  ]);
+  return computeDivision({
+    participants,
+    linkedUsers,
+    members,
+    guildRoles,
+    division,
+    categories,
+  });
+}
+
+/**
+ * The stuck stages, in the order a person walks the path, each with what it
+ * means for the leader reading it. `done` is counted, never listed: the names
+ * worth a leader's time are the ones that need a nudge.
+ */
+const STUCK = [
+  {
+    key: "notLinked",
+    icon: "❌",
+    label: "Har inte länkat sig",
+    why: "Kan vara med i servern utan att ha länkat, eller inte ha gått med alls — boten ser inte skillnad.",
+  },
+  {
+    key: "notInServer",
+    icon: "🚪",
+    label: "Länkad, men inte med i servern",
+    why: "Har lämnat, eller länkade från ett annat Discord-konto än det de använder.",
+  },
+  {
+    key: "pending",
+    icon: "⏳",
+    label: "Har inte accepterat serverns regler",
+    why: "Ser inga kanaler förrän de gjort det, oavsett roller.",
+  },
+  {
+    key: "unverified",
+    icon: "⚠️",
+    label: `Har tappat ${config.SCOUTNET_SCOUT_ROLE}-rollen`,
+    why: `Måste ${RELINK_INSTRUCTION}.`,
+  },
+];
+
+/**
+ * The division report. `plain` drops the markup for the attachment, which
+ * Discord renders nothing in. A person outside the scope's first category is
+ * marked with theirs, so a leader in the list reads as a leader.
+ */
+export function formatDivision(result, { plain = false } = {}) {
+  const b = (s) => (plain ? s : `**${s}**`);
+  const title = `Avdelning ${result.division}${result.name ? ` – ${result.name}` : ""}`;
+  const lines = [
+    `${b(title)} — ${result.done} av ${result.total} är inne (${pct(result.done, result.total)})`,
+  ];
+  if (result.categories.length > 1)
+    lines.push(
+      result.categories
+        .map((c) => `${c.label} ${c.done}/${c.total}`)
+        .join(" · "),
+    );
+  if (result.total === 0) {
+    lines.push("", "Ingen anmäld i ScoutNet har den här avdelningen.");
+    return lines.join("\n");
+  }
+
+  const first = result.categories[0]?.category;
+  const labelOf = new Map(result.categories.map((c) => [c.category, c.label]));
+  const person = (x) =>
+    x.category === first ? x.name : `${x.name} (${labelOf.get(x.category)})`;
+
+  for (const s of STUCK) {
+    const people = result.stages[s.key];
+    if (people.length === 0) continue;
+    lines.push("", `${s.icon} ${b(`${s.label} — ${people.length}`)}`, s.why);
+    if (plain) for (const x of people) lines.push(`  · ${person(x)}`);
+    else lines.push(people.map(person).join(", "));
+  }
+  lines.push("", `✅ Inne och ser sina kanaler: ${result.done}`);
   return lines.join("\n");
 }

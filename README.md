@@ -124,6 +124,8 @@ reports it.
 | `/refresh-scoutid alla:true`        | Admin    | Re-sync every linked user                                 |
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/adoption-scoutid`                 | Admin    | How many registered participants have linked, per group    |
+| `/adoption-scoutid`                 | Leader   | Where each person in your own troop stands, and who is stuck |
+| `/adoption-scoutid avdelning:12`    | Admin    | One troop, as its leaders see it                           |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
 | `/scan-scoutid`                     | Admin    | Run the member scan now; `dryrun:true` for a dry run      |
@@ -249,7 +251,8 @@ What is covered:
   runs backwards on purpose.
 - **`unit/adoption`** — the grouping follows the config and nothing else: giving
   a category a division config splits it, removing one collapses it, with no
-  code change either way.
+  code change either way. Plus the troop view: a leader's scope comes from
+  ScoutNet, and each person lands in the stage where their path broke.
 - **`unit/server`** — the interactions endpoint, driven over a real socket with a
   real ed25519 keypair: forged signatures rejected, PING answered, every command
   acknowledged within Discord's 3-second window, and the admin gate enforced.
@@ -307,6 +310,9 @@ SCOUTNET_DIVISION_ROLES=deltagare:5001:Deltagare-{div}:Deltagare-Väntande
 
 # category:role+role — flat roles granted besides the division role
 SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-a:IST+IST-A
+
+# category:category+category — what a member of the first sees in /adoption-scoutid
+SCOUTNET_ADOPTION_SCOPE=ledare:deltagare+ledare
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,funktionar::F

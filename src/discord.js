@@ -513,16 +513,23 @@ export const COMMANDS = [
   },
   {
     name: "adoption-scoutid",
+    // Visible to everyone, and gated in the handler: a leader sees their own
+    // division, so the command cannot be admin-only. Narrow who sees it in
+    // Server Settings → Integrations if the picker should hide it from the rest.
     description:
-      "Hur många av de anmälda som har länkat sig, per grupp (admin)",
-    default_member_permissions: ADMIN_ONLY,
+      "Hur många som länkat sig — admin: per grupp, ledare: din avdelning",
     options: [
       {
         // Off by default: naming everyone who has not linked is thousands of
         // lines, and the counts are what most questions need.
         name: "saknas",
-        description: "Lista namnen på dem som inte länkat sig",
+        description: "Lista namnen på dem som inte länkat sig (admin)",
         type: BOOLEAN,
+      },
+      {
+        name: "avdelning",
+        description: "Visa en avdelning som en ledare ser den (admin)",
+        type: STRING,
       },
     ],
   },

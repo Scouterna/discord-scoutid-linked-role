@@ -587,6 +587,7 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_FEE_ROLES` | `feeId:kategori,…` |
 | `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…` |
 | `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
+| `SCOUTNET_ADOPTION_SCOPE` | `kategori:kategori+kategori,…` — vilka kategorier den förstas medlemmar ser i `/adoption-scoutid`, i sin *egen* avdelning. Tomt = bara admins |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
 | `SCOUTNET_DIVISION_NAMES` | `nummer:namn,…` — vad `{divnamn}` slår upp. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
 
@@ -965,7 +966,7 @@ den finns.
 | `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas, och att `memberWriteHint` läser 404 som medlemmen och 403 som behörigheten — och gissar inte på något annat |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
-| `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring |
+| `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring. Plus avdelningsvyn: att en ledares scope kommer ur ScoutNet, att varje person hamnar i steget där vägen bröts, och att den som länkat från två konton räknas på det som kom längst |
 | `unit/server` | Interactions-endpointen över en riktig socket med ett riktigt ed25519-nyckelpar: förfalskade signaturer avvisas, PING besvaras, varje kommando ACK:as inom Discords 3-sekundersfönster, och admin-grinden hålls. Plus att de två health-routerna svarar *olika*: liveness 200 utan storage inom räckhåll, readiness 503 |
 | `integration/roles` | `syncUserRoles` — verifieringsgrinden, prefixborttagning av gamla divisionsroller, 403 i hierarkin, 32-teckensgränsen, att ett ScoutNet-avbrott inte ändrar någonting, och att `note` skiljer "redan rätt" från "aldrig anmäld" |
 | `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar: ett onåbart Discord är aldrig ett nej, men ett dött refresh-token (`invalid_grant`) är det |
@@ -1069,7 +1070,7 @@ måste därför anges sedan 2026-08-21.
 | --- | --- | --- |
 | `/refresh-scoutid` | **ändrar** | vad rollerna ska vara, och sätter dem (`dryrun:true` visar utan att ändra) |
 | `/audit-scoutid` | granskar | vad som är inkonsekvent, just nu |
-| `/adoption-scoutid` | granskar | hur många av de anmälda som har länkat sig, per grupp |
+| `/adoption-scoutid` | granskar | hur många av de anmälda som har länkat sig, per grupp — för en ledare: var varje person i avdelningen står |
 | `/status-scoutid person:` | granskar | allt boten vet om en person |
 | `/scan-scoutid` | **ändrar** | vad som hänt sedan förra körningen (medlemshändelser) |
 
@@ -1122,7 +1123,7 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
 - `/status-scoutid person:` — detaljerad status för en användare. Antingen
   `person:` eller `personid:` krävs.
-- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin).
+- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin), eller för en ledare den egna avdelningen. `avdelning:12` visar en avdelning som ledarna ser den (admin).
   `saknas:true` listar namnen.
 
   **Grupperingen kommer helt ur configen** — [src/adoption.js](src/adoption.js)
@@ -1149,6 +1150,31 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   | Utan `fee_id` | Obekräftad och obetald anmälan. ScoutNets sida, och kan lösa sig själv |
   | `fee_id` utan mappning | Vår sida: raden saknas i `SCOUTNET_FEE_ROLES`. De två ser likadana ut i datan, och skiljs åt här eller ingenstans |
   | Länkade utan anmälan | Har en länk men finns inte i deltagarlistan. Bär sitt discord-id, eftersom det är vad `/status-scoutid personid:` tar |
+
+  **Ledare ser sin egen avdelning.** Kommandot är därför inte längre dolt för
+  icke-admins (`default_member_permissions` saknas), och grinden sitter i
+  handlern: admin utan argument får hela rapporten, admin med `avdelning:` en
+  avdelning, och den vars kategori har en rad i `SCOUTNET_ADOPTION_SCOPE` sin
+  egen. Alla andra nekas. Vill man dölja kommandot i väljaren för deltagarna görs
+  det i Server Settings → Integrations; grinden i koden gäller oavsett.
+
+  Avdelningen läses ur **ScoutNet via ledarens egen länk**, inte ur rollerna —
+  rollerna härleds ur samma svar men kan ligga en natt efter. En ledare som inte
+  länkat sig kan alltså inte köra den, vilket är rätt: utan länk vet boten inte
+  vem hen är.
+
+  Vyn listar var varje person *fastnat*, i den ordning vägen går, eftersom varje
+  steg har en annan nästa åtgärd: inte länkad · länkad men inte i servern ·
+  inte accepterat reglerna · `Overifierad` · inne. Två begränsningar är med
+  flit:
+
+  - **"Inte länkad" kan inte delas upp** i "i servern men inte länkad" och
+    "aldrig gått med". Utan länk finns inget som binder ett Discord-konto till
+    ett scoutid, och att gissa på smeknamn hade gett säkra svar som är fel.
+    Sidan säger det rakt ut.
+  - **`Overifierad` läses ur rollen, inte ur OAuth-proben.** Proben kan förnya
+    och spara ett token, alltså skriva, och rapporten ska vara läsande. Priset
+    är upp till ett dygns eftersläpning — synkens egen takt.
 
   Två saker att hålla om filen ändras: **en tom kategori skriver inga rader**
   (fyra tomma rubriker lär folk skumma förbi den dagen en av dem inte är tom), och

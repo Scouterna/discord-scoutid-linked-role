@@ -220,12 +220,7 @@ for (const name of [
   });
 }
 
-for (const name of [
-  "audit-scoutid",
-  "scan-scoutid",
-  "link-scoutid",
-  "adoption-scoutid",
-]) {
+for (const name of ["audit-scoutid", "scan-scoutid", "link-scoutid"]) {
   test(`/${name} turns away a non-admin`, async () => {
     // The permission gate lives in the background handler, after the ACK, so the
     // rejection arrives as an edit to the deferred response rather than as a
@@ -283,6 +278,19 @@ for (const [what, options, expected] of [
     assert.match(replies[0].content, expected);
   });
 }
+
+test("/adoption-scoutid refuses a division that is not a number", async () => {
+  const token = "tok-adoption-bad-division";
+  await post(
+    command("adoption-scoutid", {
+      options: [{ name: "avdelning", value: "Musen" }],
+      token,
+    }),
+  );
+  const replies = await replyFor(token);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].content, /Ogiltig `avdelning`/);
+});
 
 test("the interactions route reads the raw body, not a parsed one", async () => {
   // The signature covers the exact bytes Discord sent. If a JSON body parser

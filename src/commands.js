@@ -23,7 +23,8 @@ import {
  *
  *   /refresh-scoutid    changes   what the roles should be, and sets them
  *   /audit-scoutid      reads     what is inconsistent, right now
- *   /adoption-scoutid   reads     how many of the registered have linked
+ *   /adoption-scoutid   reads     how many of the registered have linked,
+ *                                 or for a leader, where their troop stands
  *   /status-scoutid     reads     everything the bot knows about one person
  *   /scan-scoutid       changes   what has happened since the last run
  */
@@ -445,21 +446,94 @@ const auditCommand = handler(
 
 // --- /adoption-scoutid ---
 
+/**
+ * Admins get the whole event, or one division with `avdelning:`. Everyone else
+ * gets their own division if `SCOUTNET_ADOPTION_SCOPE` gives their category one
+ * — a leader sees their troop — and a refusal otherwise.
+ *
+ * The scope is read from ScoutNet through the caller's own link, not from their
+ * Discord roles: the roles are derived from the same answer and can lag it by a
+ * night, while this is the answer itself.
+ */
 const adoptionCommand = handler(
-  async (interaction, { token }) => {
-    const result = await adoption.runAdoption();
-    // Always a file as well: the per-group breakdown is 130 lines at full size,
-    // and it is the breakdown, not the total, that someone acts on.
-    await discord.editInteractionResponseWithFile(
-      token,
-      adoption.formatAdoptionSummary(result),
-      "adoption-scoutid.txt",
-      adoption.formatAdoptionText(result, {
-        includeMissing: flag(interaction, "saknas"),
-      }),
-    );
+  async (interaction, { token, guildId, callerId }) => {
+    const requested = option(interaction, "avdelning");
+
+    if (isAdmin(interaction) && requested == null) {
+      const result = await adoption.runAdoption();
+      // Always a file as well: the per-group breakdown is 130 lines at full size,
+      // and it is the breakdown, not the total, that someone acts on.
+      await discord.editInteractionResponseWithFile(
+        token,
+        adoption.formatAdoptionSummary(result),
+        "adoption-scoutid.txt",
+        adoption.formatAdoptionText(result, {
+          includeMissing: flag(interaction, "saknas"),
+        }),
+      );
+      return;
+    }
+
+    let scope;
+    if (isAdmin(interaction)) {
+      const division = String(requested).trim();
+      if (!/^\d{1,3}$/.test(division)) {
+        await reply(
+          token,
+          `Ogiltig \`avdelning\`: \`${division}\` — ange ett nummer, t.ex. \`12\`.`,
+        );
+        return;
+      }
+      const categories = adoption.allScopedCategories();
+      // Without a scope there is no notion of what a division contains, and an
+      // empty report would read as an empty troop.
+      if (categories.length === 0) {
+        await reply(
+          token,
+          "`SCOUTNET_ADOPTION_SCOPE` är inte satt, så det finns ingen avdelningsvy.",
+        );
+        return;
+      }
+      scope = { division, categories };
+    } else {
+      const scoutId = await storage.getLinkedScoutIDUserId(callerId);
+      const own = scoutId
+        ? adoption.leaderScope(await scoutnet.getParticipant(scoutId))
+        : null;
+      if (!own) {
+        await reply(
+          token,
+          "Det här kommandot är för avdelningsledare och admins.",
+        );
+        return;
+      }
+      if (own.waiting) {
+        await reply(
+          token,
+          "Du har ingen avdelning i ScoutNet än, så det finns ingen att visa.",
+        );
+        return;
+      }
+      if (
+        requested != null &&
+        adoption.padDivision(requested) !== own.division
+      ) {
+        await reply(
+          token,
+          `Du kan bara se din egen avdelning, ${own.division}.`,
+        );
+        return;
+      }
+      scope = own;
+    }
+
+    const result = await adoption.runDivision(guildId, scope);
+    await replyOrAttach(token, adoption.formatDivision(result), {
+      filename: `avdelning-${result.division}.txt`,
+      summary: `Avdelning ${result.division}: ${result.done} av ${result.total} är inne — hela listan i bifogad fil`,
+      full: adoption.formatDivision(result, { plain: true }),
+    });
   },
-  { admin: true },
 );
 
 // --- /scan-scoutid ---

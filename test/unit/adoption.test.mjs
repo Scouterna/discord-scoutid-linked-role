@@ -257,3 +257,115 @@ test("the missing are named, but only when asked for", async () => {
     /Saknad Person \(2\)/,
   );
 });
+
+// --- One division, for its leaders ---
+
+const { computeDivision, formatDivision, leaderScope } =
+  await import("../../src/adoption.js");
+
+const SCOPED = {
+  ...CFG,
+  SCOUTNET_ADOPTION_SCOPE: { ledare: ["deltagare", "ledare"] },
+  SCOUTNET_DIVISION_NAMES: { 12: "Musen" },
+};
+
+const named = (first, fee, answers, extra) =>
+  P(fee, answers, { first_name: first, last_name: "L", ...extra });
+
+test("a leader's scope is their own division, read from ScoutNet", () => {
+  assert.deepEqual(leaderScope(P(200, { 107592: "12" }), SCOPED), {
+    division: "12",
+    categories: ["deltagare", "ledare"],
+  });
+  // Väntande: in the scope, but no troop to show yet.
+  assert.equal(leaderScope(P(200, {}), SCOPED).waiting, true);
+  // A participant has no row, so sees nothing.
+  assert.equal(leaderScope(P(100, { 88168: "12" }), SCOPED), null);
+  // A cancelled leader no longer has the troop.
+  assert.equal(
+    leaderScope(P(200, { 107592: "12" }, { cancelled: true }), SCOPED),
+    null,
+  );
+});
+
+test("each person lands in the stage where their path broke", () => {
+  const result = computeDivision({
+    cfg: SCOPED,
+    division: "12",
+    categories: ["deltagare", "ledare"],
+    guildRoles: [{ id: "r-unv", name: "Overifierad" }],
+    participants: {
+      1: named("Ada", 100, { 88168: "12" }),
+      2: named("Bo", 100, { 88168: "12" }),
+      3: named("Cia", 100, { 88168: "12" }),
+      4: named("Dan", 100, { 88168: "12" }),
+      5: named("Eva", 200, { 107592: "12" }),
+      // Outside: another troop, a cancelled registration, and an IST-like
+      // category that answers the same question with the same number.
+      6: named("Fia", 100, { 88168: "7" }),
+      7: named("Gus", 100, { 88168: "12" }, { cancelled: true }),
+      8: named("Hal", 300, { 88168: "12" }),
+    },
+    linkedUsers: [
+      { scoutId: "2", discordUserId: "d2" },
+      { scoutId: "3", discordUserId: "d3" },
+      { scoutId: "4", discordUserId: "d4" },
+      { scoutId: "5", discordUserId: "d5" },
+    ],
+    members: [
+      { user: { id: "d3" }, pending: true, roles: [] },
+      { user: { id: "d4" }, roles: ["r-unv"] },
+      { user: { id: "d5" }, roles: [] },
+    ],
+  });
+  const names = (k) => result.stages[k].map((x) => x.name);
+  assert.deepEqual(names("notLinked"), ["Ada L"]);
+  assert.deepEqual(names("notInServer"), ["Bo L"]);
+  assert.deepEqual(names("pending"), ["Cia L"]);
+  assert.deepEqual(names("unverified"), ["Dan L"]);
+  assert.deepEqual(names("done"), ["Eva L"]);
+  assert.equal(result.total, 5);
+  assert.equal(result.name, "Musen");
+});
+
+test("someone linked from two accounts counts by the one that got furthest", () => {
+  const result = computeDivision({
+    cfg: SCOPED,
+    division: "12",
+    categories: ["deltagare"],
+    participants: { 1: named("Ada", 100, { 88168: "12" }) },
+    linkedUsers: [
+      { scoutId: "1", discordUserId: "stray" },
+      { scoutId: "1", discordUserId: "real" },
+    ],
+    members: [{ user: { id: "real" }, roles: [] }],
+  });
+  assert.equal(result.done, 1);
+  assert.equal(result.stages.notInServer.length, 0);
+});
+
+test("the report names the stuck, counts the done, and marks the leaders", () => {
+  const result = computeDivision({
+    cfg: SCOPED,
+    division: "12",
+    categories: ["deltagare", "ledare"],
+    participants: {
+      1: named("Ada", 100, { 88168: "12" }),
+      2: named("Eva", 200, { 107592: "12" }),
+      3: named("Bo", 100, { 88168: "12" }),
+    },
+    linkedUsers: [{ scoutId: "3", discordUserId: "d3" }],
+    members: [{ user: { id: "d3" }, roles: [] }],
+  });
+  const text = formatDivision(result);
+  assert.match(text, /Avdelning 12 – Musen\*\* — 1 av 3 är inne/);
+  assert.match(text, /Ada L, Eva L \(Ledare\)/);
+  assert.match(text, /✅ Inne och ser sina kanaler: 1/);
+  assert.doesNotMatch(text, /Bo L/, "the done are counted, not listed");
+  // An empty stage writes no heading.
+  assert.doesNotMatch(text, /regler/);
+
+  const plain = formatDivision(result, { plain: true });
+  assert.doesNotMatch(plain, /\*\*/, "a file renders no markup");
+  assert.match(plain, /^ {2}· Ada L$/m);
+});
