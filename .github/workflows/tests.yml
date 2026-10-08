@@ -1,7 +1,7 @@
 name: Tests
 
 # Defined once and used from two places: directly on pull requests and branch
-# pushes, and via `workflow_call` from deploy.yml so a red suite blocks a deploy.
+# pushes, and via `workflow_call` from publish.yml so a red suite blocks a publish.
 # Duplicating the job in both files would let them drift, and the copy that
 # mattered would be the one nobody updated.
 #

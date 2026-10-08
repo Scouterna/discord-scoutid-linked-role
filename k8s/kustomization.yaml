@@ -1,7 +1,6 @@
+# A generic example deployment. Set a namespace, the host in ingress.yaml, the values in configmap.yaml and the image tag.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
-namespace: wsj27
 
 resources:
   - configmap.yaml
@@ -16,24 +15,18 @@ resources:
 # backup-restore-job.yaml is deliberately NOT listed: it is a one-off, applied
 # by hand when a restore is actually needed.
 #
-# rbac-github-deployer.yaml is NOT listed either, for a stronger reason: it is the
-# Role that grants this very deploy its permissions, and the deployer has no
-# rights on `roles`. A deployer able to widen its own access would not be a
-# restricted deployer. Apply it by hand with an RBAC-capable kubeconfig.
 
-# The Secret is deliberately absent: it is created imperatively (plan P4), the
-# way scoutview-secrets already is. This cluster has no sealed-secrets or
-# external-secrets, so a Secret here would mean plaintext in a public repo.
+# The Secret `discord-scoutid-secrets` is deliberately absent: create it in the
+# target cluster by whatever means you trust. It holds the credentials the app
+# reads from .env.example (tokens, client secrets, TABLE_CONNECTION_STRING).
 
 images:
   - name: ghcr.io/scouterna/discord-scoutid-linked-role
-    # CI rewrites this in its own ephemeral checkout, so the committed value
-    # stays a placeholder and can never go stale. A manual apply must name the
-    # tag; skipping it fails loudly on ImagePullBackOff rather than shipping
-    # something unintended:
+    # A placeholder: this example is built, never deployed as is. Pin a real tag
+    # (the image is published as :<sha7>); an unset one fails loudly on
+    # ImagePullBackOff rather than shipping something unintended:
     #
     #   IMG=ghcr.io/scouterna/discord-scoutid-linked-role
-    #   (cd k8s && kustomize edit set image "$IMG=$IMG:<sha>") && kubectl apply -k k8s/
+    #   kustomize edit set image "$IMG=$IMG:<sha7>"
     #
-    # Revert the edit afterwards — do not commit a real tag here.
-    newTag: PLACEHOLDER-set-by-ci
+    newTag: PLACEHOLDER-pin-a-tag

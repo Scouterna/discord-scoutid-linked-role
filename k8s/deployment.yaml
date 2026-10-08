@@ -40,9 +40,8 @@ spec:
       # Dockerfile). Stating it here as well is what makes it enforced rather
       # than merely intended: `runAsNonRoot` refuses to start a container whose
       # image was changed to run as root, and the rest of the block is what a
-      # `restricted` Pod Security Standard requires. This namespace enforces no
-      # PSS today, so none of it changes behaviour — it means the workload keeps
-      # deploying unchanged on the day the shared cluster turns enforcement on.
+      # `restricted` Pod Security Standard requires, so the workload keeps
+      # deploying unchanged where that is enforced.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -59,16 +58,17 @@ spec:
           emptyDir: {}
       containers:
         - name: app
-          # Tag is set by CI (`kustomize edit set image`). Never :latest — it
-          # makes rollouts and `rollout undo` ambiguous.
-          image: ghcr.io/scouterna/discord-scoutid-linked-role:PLACEHOLDER-set-by-ci
+          # Tag is set through the kustomization's `images:` transformer
+          # (`kustomize edit set image`). Never :latest — it makes rollouts and
+          # `rollout undo` ambiguous.
+          image: ghcr.io/scouterna/discord-scoutid-linked-role:PLACEHOLDER-pin-a-tag
           ports:
             - name: http
               containerPort: 3000
           envFrom:
             - configMapRef:
                 name: discord-scoutid-config
-            # Created imperatively, not by kustomize. See the migration plan, P4.
+            # Not created by kustomize; see kustomization.yaml.
             - secretRef:
                 name: discord-scoutid-secrets
           # Pod deletion and endpoint removal happen concurrently, so traefik
@@ -87,7 +87,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-          # Sized against 93-97% actual node memory. Do not oversize.
+          # Modest on purpose; raise only if measurements call for it.
           resources:
             requests:
               cpu: 100m
