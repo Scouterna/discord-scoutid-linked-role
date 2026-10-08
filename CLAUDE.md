@@ -6,18 +6,17 @@
 och `docs/` beskriver *varför* koden ser ut som den gör, och en beskrivning som
 slutat stämma är sämre än ingen alls: den läses som sann och leder fel.
 
-Det här är inte hypotetiskt. `discord/CLAUDE.md` i wsj27-infra bar regeln
-"Avdelningsnamn inkluderas INTE i kanalnamn" medan kanalerna hette tvärtom, och
-det här repots configavsnitt stod rubricerat "aktuell prod-config" med fyra av
-fem stickprovade nycklar fel.
+Det här är inte hypotetiskt. Ett infra-repo bredvid det här bar en regel om
+kanalnamn medan kanalerna hette tvärtom, och det här repots configavsnitt stod
+rubricerat "aktuell prod-config" med fyra av fem stickprovade nycklar fel.
 
 Tre vanor som håller det sant:
 
 - **Duplicera aldrig ett värde som kan ändras.** Beskriv formen och peka på
   källan. Varje kopia är en andra sanning, och den förlorar — det var precis så
   configavsnittet gick sönder. Går en kopia inte att undvika (som
-  `SCOUTNET_DIVISION_NAMES`, som måste finnas i två repon), skriv ut på båda
-  ställena att den andra finns.
+  `SCOUTNET_DIVISION_NAMES`, som ofta måste finnas både i botens config och där
+  Discord-servern byggs), skriv ut på båda ställena att den andra finns.
 - **Sök efter det du just gjorde falskt.** Har du bytt ett namn, en flagga, ett
   suffix eller en regel — `grep -rn "<det gamla>" --include=*.md .` innan du
   committar. Det tar sekunder och är det enda som fångar en mening tre filer bort.
@@ -27,102 +26,31 @@ Tre vanor som håller det sant:
 
 ## Build & Deploy
 
-**The bot runs on Kubernetes**, in namespace `wsj27` on Scouterna's shared AKS
-cluster `webservices` — not on Azure Container Apps. Deploying is a push to
-`main`: [.github/workflows/deploy.yml](.github/workflows/deploy.yml) builds the
-image, pushes it to GHCR and applies `k8s/`. The `prod` environment gates it.
+**Det här repot bygger en image och inget annat.**
+[.github/workflows/publish.yml](.github/workflows/publish.yml) kör lint, format
+och testerna och pushar sedan `ghcr.io/scouterna/discord-scoutid-linked-role:<sha7>`.
+Det deployar ingenting: en instans pinnar en tagg i sitt eget infra-repo och
+sköter sina egna secrets, sin config och sin drift. Ingen CI här har
+klusterbehörighet, och repot är publikt och generiskt — instansspecifika värden,
+värdnamn och driftkommandon hör hemma i instansens repo, inte här.
 
-**Always tag images with the git SHA, never `latest`.** The reason changed with
-the platform but the rule did not: on Container Apps a mutable tag silently kept
-the old container running; on Kubernetes it makes rollouts and `rollout undo`
-ambiguous, because two different images share one name.
+[k8s/](k8s/) är ett **exempel**: en komplett uppsättning manifest (Deployment,
+PDB, Service, Ingress, ConfigMap med påhittade värden, tre CronJobs och ett
+restore-jobb) som visar vad en instans behöver. `publish.yml` bygger den med
+`kustomize` så att den inte ruttnar, men applyar den aldrig. Taggen i
+kustomizationen är en avsiktlig platshållare, så en applicering utan pinnad tagg
+faller på `ImagePullBackOff` i stället för att skeppa något oavsiktligt.
 
-```bash
-export KUBECONFIG=~/.kube/wsj27.yaml   # ~/.kube/config is rancher-desktop
+**Pinna git-SHA:n, aldrig `latest`.** Skälet bytte med plattformen men regeln
+stod kvar: på Container Apps höll en rörlig tagg tyst den gamla containern
+igång; på Kubernetes gör den rollouts och rollbacks tvetydiga, eftersom två
+olika images delar ett namn — och en GitOps-motor ser inte en rörlig tagg röra
+sig.
 
-kubectl get pods -l app=discord-scoutid
-kubectl logs -l app=discord-scoutid --tail=50 --prefix
-kubectl rollout status deploy/discord-scoutid
-kubectl rollout restart deploy/discord-scoutid      # zero-downtime, see below
-kubectl rollout undo deploy/discord-scoutid         # previous ReplicaSet
-```
-
-**Break-glass manual deploy.** `kubectl apply -k k8s/` alone will *not* work:
-the committed `newTag` is a deliberate placeholder that CI rewrites in its own
-checkout, so applying it as-is gives `ImagePullBackOff`. Name the tag:
-
-```bash
-IMG=ghcr.io/scouterna/discord-scoutid-linked-role
-(cd k8s && kustomize edit set image "$IMG=$IMG:<sha>") && kubectl apply -k k8s/
-# then revert the edit — never commit a real tag
-```
-
-**Rotating secrets** — replaces `az containerapp secret set`:
-
-```bash
-kubectl create secret generic discord-scoutid-secrets \
-  --from-env-file=.env.k8s --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deploy/discord-scoutid
-```
-
-**Registering slash commands** (rarely needed; definitions change seldom):
+**Registrera slash-kommandon** (sällan; definitionerna ändras sällan):
 
 ```bash
 docker run --rm --env-file .env ghcr.io/scouterna/discord-scoutid-linked-role:<sha> node src/register.js
-```
-
-### CI:s behörigheter — [k8s/rbac-github-deployer.yaml](k8s/rbac-github-deployer.yaml)
-
-`github-deployer`-rollen ger breda verb (`get, list, watch, create`) per
-resurs*typ*, men `update`/`patch` är **pinnade till namngivna objekt**. Lägger du
-till en resurs i `k8s/` som CI ska kunna ändra måste dess namn in i rollen, annars
-misslyckas varje deploy med `... is forbidden`.
-
-En ny resurs*typ* är strängare än så: den behöver `create` i rollen **innan** den
-deploy som introducerar den. Och eftersom filen applyas för hand ligger ordningen
-på den som shippar ändringen, inte på CI. `k8s/pdb.yaml` var senaste fallet —
-`policy/poddisruptionbudgets` fanns inte i rollen alls, så deployen hade fallit på
-`poddisruptionbudgets.policy ... is forbidden`. Applya rollen först, deploya sen.
-
-Det syns inte förrän det smäller, eftersom `discord-scoutid-backup` aldrig råkade
-ut för det: dess image är en pinnad `azure-cli`-version, så `kubectl apply`
-rapporterade alltid `unchanged` och försökte aldrig patcha.
-`discord-scoutid-memberscan` kör botens egen image, vars tag CI skriver om varje
-gång — så patchen försöks varje deploy, och saknades namnet föll hela deployen.
-Samma gäller `discord-scoutid-refresh`, som lades till senare och av samma skäl
-måste stå namngivet i rollen.
-
-**Rollen låg inte i något repo.** Den applyades för hand 2026-08-12, och dess
-levande regler hade sedan driftat från sin egen `last-applied-configuration`:
-`batch`-reglerna lades till med `kubectl edit`, så annoteringen beskrev
-fortfarande en roll utan cronjob-åtkomst. Att applya originalfilen igen hade
-tyst tagit bort möjligheten att patcha båda cronjobben. Filen i repot är den
-saknade källan, och att applya den synkar även annoteringen.
-
-Den ligger med flit **inte** i kustomizationen: deployern har inga rättigheter på
-`roles`, och en deployer som kan bredda sin egen åtkomst är inte begränsad.
-**Deployen varnar när klustret slutat matcha filen** — det är vad regeln som
-låter deployern läsa sin *egen* roll finns till för. Att veta sina egna
-rättigheter är ingen utökning av dem, och `kubectl diff` går inte: det kräver
-server-dry-run, alltså patch. Kontrollen varnar men fäller aldrig deployen;
-testgrinden finns för att hålla trasig kod borta från produktion, och
-behörighetsdrift är inte det.
-
-```bash
-scripts/check-rbac-drift.sh          # jämför levande roll mot filen
-```
-
-Applya för hand, med en kubeconfig som har RBAC-rättigheter:
-
-```bash
-kubectl apply -f k8s/rbac-github-deployer.yaml
-
-# Namnge resursen i kontrollen. `can-i patch cronjobs` utan namn frågar om
-# *vilket som helst* cronjob och svarar därför korrekt "no" även när grantet
-# sitter — grantet är namn-scopat. Den frågan får en att tro att applyen inte tog.
-SA=system:serviceaccount:wsj27:github-deployer
-kubectl auth can-i patch cronjobs/discord-scoutid-memberscan --as=$SA -n wsj27   # yes
-kubectl auth can-i --list --as=$SA -n wsj27 | grep cronjobs                      # ser resourceNames
 ```
 
 ### Backup and restore
@@ -130,44 +58,34 @@ kubectl auth can-i --list --as=$SA -n wsj27 | grep cronjobs                     
 **Table Storage has no soft delete and no point-in-time restore** — unlike blobs.
 An export is the only backup that exists, so
 [k8s/backup-cronjob.yaml](k8s/backup-cronjob.yaml) runs daily at 03:15 UTC and
-writes a JSON snapshot to the `scoutid-backups` container on
-**`stwsj27tfstatesec`** — a different storage account, in a different resource
-group, with blob versioning and 30-day soft delete. The data account has
-neither, and no `CanNotDelete` lock can be created without subscription Owner,
-so a backup sitting beside the data would not survive the case worth planning
-for. Blobs expire after 90 days via a lifecycle rule scoped to that container
-prefix (the same account holds Terraform state — never write an unscoped rule
-there).
+writes a JSON snapshot to a blob container on **a different storage account**
+(`BACKUP_CONNECTION_STRING`), ideally in a different resource group and with
+blob versioning and soft delete. A backup sitting beside the data does not
+survive the case worth planning for — deletion of the account or its resource
+group — and a delete lock on the data account may not be available to the
+people running the bot. Expire old blobs with a lifecycle rule scoped to the
+backup container's prefix: if the backup account holds anything else (Terraform
+state, say), an unscoped rule deletes that too.
 
 The `state` partition is excluded: OAuth state is ephemeral with a 10-minute
-expiry. Everything else is kept — the `link` rows are the irreplaceable part
-(18 of them on 2026-08-20, and growing), since losing them means every user must
-re-verify, while tokens merely force a re-auth.
+expiry. Everything else is kept — the `link` rows are the irreplaceable part,
+since losing them means every user must re-verify, while tokens merely force a
+re-auth.
 
 Two properties worth preserving if this is ever edited: it paginates explicitly
 (the service caps a page at 1000 entities and the CLI does not follow the
 marker, so a single call silently truncates once enough people link), and it
 refuses to upload a snapshot containing zero `link` rows.
 
-```bash
-kubectl get cronjob discord-scoutid-backup
-kubectl create job manual-backup --from=cronjob/discord-scoutid-backup   # run now
-kubectl logs job/manual-backup
-```
-
 **Restoring** — [k8s/backup-restore-job.yaml](k8s/backup-restore-job.yaml),
 applied by hand, never part of the kustomization. It defaults to a scratch table
-and refuses to touch `scoutidlinks` unless `ALLOW_PRODUCTION_RESTORE=yes`, so
-running it unedited cannot overwrite production.
+and refuses to touch the live table unless `ALLOW_PRODUCTION_RESTORE=yes`, so
+running it unedited cannot overwrite production. **Under GitOps with self-heal,
+never commit it where the sync picks it up**: after you delete the finished Job
+the engine would recreate it and run the restore again.
 
-```bash
-kubectl apply -f k8s/backup-restore-job.yaml   # edit BACKUP_BLOB / RESTORE_TABLE first
-kubectl logs -f job/discord-scoutid-restore
-kubectl delete job discord-scoutid-restore
-```
-
-Verified end to end on 2026-08-13: 27 entities exported, restored into a scratch
-table, and compared against the live table — every entity byte-identical. Repeat
+Verified end to end in August 2026: every entity exported, restored into a
+scratch table, and compared against the live table — byte-identical. Repeat
 that comparison after changing either job; a backup that has never been restored
 is not a backup.
 
@@ -182,12 +100,12 @@ dropped 5 of 559 requests; after, 0 of 254.
   terminating pod — that is what the next item is for.
 - A **PodDisruptionBudget** ([k8s/pdb.yaml](k8s/pdb.yaml)), `minAvailable: 1`,
   because `maxUnavailable: 0` only constrains what the Deployment controller
-  does to its own ReplicaSets. A node drain is a different mechanism — an AKS
-  node image upgrade, an autoscaler scale-down, a `kubectl drain` by a cluster
+  does to its own ReplicaSets. A node drain is a different mechanism — a
+  managed node image upgrade, an autoscaler scale-down, a `kubectl drain` by a cluster
   admin — and it evicts pods without consulting the rollout strategy at all.
   The anti-affinity is `preferred`, so both replicas may share a node and go
-  together. `webservices` is a shared cluster, upgraded by someone who is not
-  watching this app.
+  together. A shared cluster is upgraded by someone who is not watching this
+  app.
 - A **10s `preStop` sleep**, because pod deletion and endpoint removal are
   concurrent: traefik keeps routing here briefly after termination begins.
 - A **SIGTERM handler** in [src/server.js](src/server.js) that drains open
@@ -219,9 +137,9 @@ Två följder att känna till innan de ändras:
   att vräka ut en frisk pod. Appen cachar dessutom svaret i 5 sekunder och delar
   ett pågående anrop, så en *hängande* tabell inte staplar prober på varandra.
 
-`deploy.yml` pollar `/readyz` efter `rollout status`, alltså hela vägen från
-publika ingressen till datan. Faller det där är det routen eller certifikatet,
-inte appen — `rollout status` krävde redan en Ready-pod.
+Efter en release: polla `/readyz` över den publika värden, alltså hela vägen
+från ingressen till datan. Faller det där medan poddarna är Ready är det routen
+eller certifikatet, inte appen.
 
 ### Härdning i podspecen
 
@@ -230,32 +148,11 @@ Imagen släpper redan ner till `node` (uid 1000). `securityContext` i
 [k8s/memberscan-cronjob.yaml](k8s/memberscan-cronjob.yaml) gör det *upprätthållet*
 i stället för avsett: `runAsNonRoot` vägrar starta en image som ändrats till att
 köra som root, och resten är vad ett `restricted` Pod Security Standard kräver.
-Namespacet upprätthåller inget PSS idag, så ingenting ändras — det betyder att
-workloaden fortsätter deploya oförändrad den dag det slås på.
+Ett namespace som upprätthåller `baseline` eller `restricted` släpper därför
+igenom den oförändrad, också den dag nivån skärps.
 
 `readOnlyRootFilesystem: true` kräver en skrivbar `/tmp` (emptyDir). Backup- och
 restore-jobben är med flit utanför: de kör `azure-cli`-imagen, som skriver fritt.
-
-## Azure CLI: use the Scouterna config dir
-
-This project lives in the Scouterna tenant, which is **not** the tenant the
-default `az` login uses. Keep the two apart with a repo-local config dir
-(gitignored) so that `az login` here never changes the active subscription of
-the everyday session:
-
-```bash
-export AZURE_CONFIG_DIR="$PWD/.azure-scouterna"
-az login --tenant 317a47ba-fd32-41b8-8ebe-310a1adc9863
-az account set --subscription d4887907-2e73-4465-9fe3-44c82ed016d6
-```
-
-Every `az` command for this project needs that variable set, or it silently
-targets the wrong tenant. `.claude/settings.local.json` sets it for Claude Code
-sessions.
-
-The same directory is what `Scouterna/wsj27-infra` authenticates through: the
-azurerm provider and the state backend both go via the CLI, so Terraform there
-needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 ## Architecture
 
@@ -266,16 +163,14 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   test/unit/` slutade hitta något och föll på `Cannot find module`. Skripten i
   `package.json` expanderar därför `test/unit/*.test.mjs` i skalet i stället,
   vilket fungerar på båda
-- Runs on Kubernetes: namespace `wsj27` on Scouterna's shared AKS cluster
-  `webservices`, behind traefik with a cert-manager certificate. Manifests in
-  `k8s/`, images in GHCR. Storage stayed in Azure — Table Storage is durable,
-  costs öre, and keeping it meant no data migration and a free rollback
-- **No Terraform lives in this repository.** What is left in Azure — the storage
-  account holding the links, and the DNS record — is managed from the `azure/`
-  root module in `Scouterna/wsj27-infra`, alongside the Discord server config.
-  Infrastructure shared between projects should not live inside one of them.
-  Nothing applies it automatically: CI there validates but does not plan or
-  apply, so applying is a deliberate manual act
+- Built to run on Kubernetes behind an ingress with a TLS certificate (example
+  in `k8s/`), images in GHCR. Storage is Azure Table Storage even when the
+  compute is elsewhere — it is durable, costs öre, and when the bot left Azure
+  Container Apps, keeping it meant no data migration and a free rollback
+- **No Terraform and no deployment live in this repository.** The storage
+  account, the DNS record, the Discord server's roles and the manifests an
+  instance actually runs belong to that instance's own infrastructure repo.
+  Infrastructure for one deployment should not live inside a generic app
 - Docker build pulls from registry.npmjs.org unless a gitignored `.npmrc` overrides it (installed in a separate build stage, so it never lands in the image). On a network that TLS-intercepts npmjs, `npm ci` half-installs while still exiting 0 — so a local `.npmrc` pointing at a reachable mirror is required there. The Dockerfile verifies every dependency landed and fails the build otherwise
 - **`package-lock.json` must record `registry.npmjs.org` in every `resolved`,
   never the mirror.** npm rewrites the registry host at install time, so an
@@ -307,39 +202,36 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 - Fee-to-role mapping is fully configurable via env vars, not hardcoded
 - **Platta kategorimarkörer (`SCOUTNET_CATEGORY_ROLES`) delas ut utöver
   divisionsrollen** — en ledare i avdelning 12 får både `Ledare-12` och
-  `Avdelningsledare`. De finns för AutoMod i wsj27-infra, som bara kan *undanta*
-  roller och max 20 av dem: "alla utom deltagare" hade krävt 158 per-avdelning
-  roller, men blir sex med markörerna. `deltagare` har med flit ingen markör —
-  frånvaron *är* det som gör att länkfiltret träffar dem. Ändras utdelningen
-  måste ordningen hållas: bot först, `/refresh-scoutid alla:true`, sedan
-  `terraform apply` i infra-repot. Omvänd ordning länkblockerar alla ledare och
-  IST i mellantiden. Vänta *inte* in den nattliga synken för mellansteget — den
-  kommer, men "i mellantiden" är då upp till ett dygn långt
+  `Avdelningsledare`. De finns för AutoMod, som bara kan *undanta* roller och
+  max 20 av dem: "alla utom deltagare" hade krävt en roll per avdelning, men
+  blir en handfull med markörerna. En kategori kan med flit sakna markör —
+  frånvaron *är* då det som gör att ett AutoMod-filter träffar just den. Ändras
+  utdelningen av en markör som AutoMod läser måste ordningen hållas: botens
+  config först, `/refresh-scoutid alla:true`, sedan AutoMod-ändringen. Omvänd
+  ordning blockerar de undantagna i mellantiden. Vänta *inte* in den nattliga
+  synken för mellansteget — den kommer, men "i mellantiden" är då upp till ett
+  dygn långt
 
   **Att döpa om en markör är inte en sådan ändring**, och ordningen är fri där.
-  `discord_role` uppdaterar namnet in-place, så roll-id:t består — AutoMods
-  undantagslista pekar på id och märker ingenting, och ingen medlem tappar
-  rollen. Det enda mellanrummet är att den halva som ännu har det gamla namnet i
-  configen inte hittar rollen och tyst hoppar över *nya* utdelningar; nästa synk
-  efter att båda sidor landat lagar det. `Ledare` → `Avdelningsledare`
-  2026-09-21 gick den vägen, verifierad med en offline `terraform plan` mot en
-  påhittad state innan den applyades
+  En roll som döps om in-place behåller sitt id — AutoMods undantagslista pekar
+  på id och märker ingenting, och ingen medlem tappar rollen. Det enda
+  mellanrummet är att den halva som ännu har det gamla namnet i configen inte
+  hittar rollen och tyst hoppar över *nya* utdelningar; nästa synk efter att
+  båda sidor landat lagar det
 
-- **`Avdelningsledare` är hoistad, och därför läst av medlemmar.** Markören är
-  den enda av dem som visas som egen rubrik ovanför Online i medlemslistan
-  (`hoist = true` i infra-repots `roles.tf`), så namnet i configmappen är
-  medlemsvänd text på samma sätt som `SCOUTNET_SCOUT_ROLE`. Det är skälet till
-  att just den markören stavas ut medan per-avdelningsrollerna står kvar som
-  `Ledare-{nr}`: de senare syns bara i rollinställningarna. Hoisting visar en
-  medlems *högsta* hoistade roll, så en ledare som också är CMT eller Moderator
-  hamnar under dem — och `Ledare-Väntande`-ledare hamnar under rubriken precis
-  som alla andra, eftersom markören delas ut oavsett avdelning
+- **En hoistad markör läses av medlemmar.** En hoistad roll visas som egen
+  rubrik ovanför Online i medlemslistan, så dess namn i configen är medlemsvänd
+  text på samma sätt som `SCOUTNET_SCOUT_ROLE` — stava ut det, även när
+  per-divisionsrollerna bredvid står kvar som `Ledare-{nr}` och bara syns i
+  rollinställningarna. Hoisting visar en medlems *högsta* hoistade roll, och
+  markören delas ut oavsett division, så också den som står på väntande-rollen
+  hamnar under rubriken
 - Each fee category can have its own ScoutNet question ID for division assignment
 - Division numbers are zero-padded to minimum 2 digits
 - **Smeknamnet kortas i namnet, aldrig i suffixet** (`fitNickname` i
   [src/guild.js](src/guild.js)). Discord tar 32 tecken, och med avdelningsnamnet i
-  suffixet räcker de inte åt alla: mätt mot eventet behöver 228 av 2 117 med
-  avdelning kortas. Tidigare gjorde koden `(base + suffix).substring(0, 32)`,
+  suffixet räcker de inte åt alla: mätt mot ett verkligt event behövde runt en
+  av tio med avdelning kortas. Tidigare gjorde koden `(base + suffix).substring(0, 32)`,
   alltså högg den av *suffixet* — och ett avhugget suffix saknar sin
   avslutande parentes, som `stripNickSuffix` behöver för att hitta det igen.
   Följden var permanent: varje senare synk byggde samma sträng, jämförde den
@@ -352,7 +244,7 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
   namnled; i ett av de nio fallen är `Gao` hela efternamnet.
 
   Två följder: **auditens kategori 6 måste känna till regeln** — den jämför
-  smeknamn mot ScoutNet-namn och hade annars rapporterat alla 228 som
+  smeknamn mot ScoutNet-namn och hade annars rapporterat varenda förkortad som
   namnskillnad — och länkningsvägens `setNickname` tar namn och suffix *isär*,
   så den inte återinför samma bugg genom att slå ihop dem själv.
 - The bot cannot modify users above it in Discord's role hierarchy (403 is expected for admins)
@@ -437,11 +329,11 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 - Response has `participants` object keyed by member_no
 - Each participant has: `fee_id`, `cancelled`, `cancelled_date`, `questions`
   (object of questionId → answer)
-- **Avbokning har två fält, och boolean:en är det bredare.** Av 2 769 poster hade
-  175 `cancelled: true` men bara 168 ett `cancelled_date` — och inget hade datum
-  utan flagga. Ett datum implicerar alltså flaggan, aldrig omvänt. Läs därför
+- **Avbokning har två fält, och boolean:en är det bredare.** I ett verkligt
+  events data hade fler poster `cancelled: true` än ett `cancelled_date` — och
+  ingen hade datum utan flagga. Ett datum implicerar alltså flaggan, aldrig omvänt. Läs därför
   `scoutnet.isCancelled()` och aldrig fälten direkt; predikatet finns för att de
-  sex läsställena inte ska kunna drifta isär igen. De sju i mellanrummet var
+  sex läsställena inte ska kunna drifta isär igen. De i mellanrummet var
   obekräftade och obetalda anmälningar (`fee_id: null`, `confirmed: false`) som
   avbokats administrativt utan datum. Ingen av dem var länkad och ingen hade
   avgift, så inget blev av det — men en person med flaggan *och* en avgift hade
@@ -451,9 +343,14 @@ needs `AZURE_CONFIG_DIR` pointing at a Scouterna-tenant config dir too.
 
 ## Discord Developer Portal
 
-- **General Information** → Linked Roles Verification URL: `https://discord-scoutid.wsj27.scouterna.net/linked-role`
-- **General Information** → Interactions Endpoint URL: `https://discord-scoutid.wsj27.scouterna.net/interactions`
-- **OAuth2** → Redirect: `https://discord-scoutid.wsj27.scouterna.net/discord-oauth-callback`
+- **General Information** → Linked Roles Verification URL: `https://<host>/linked-role`
+- **General Information** → Interactions Endpoint URL: `https://<host>/interactions`
+- **OAuth2** → Redirect: `https://<host>/discord-oauth-callback`
+- ScoutIDs klientregistrering: redirect `https://<host>/scoutid-oauth-callback`
+
+`<host>` är instansens publika värd; `DISCORD_REDIRECT_URI`,
+`DISCORD_VALIDATION_URL` och `SCOUTID_REDIRECT_URI` i configen måste matcha
+exakt.
 
 ### `verified`, och varför ordningen mot Server Settings är tvingande
 
@@ -496,8 +393,8 @@ att **ingenting tas ifrån någon förrän ersättaren är bevisat fungerande**:
    `Verifierad = true` på den
 4. Se den fyllas. Antalet ska matcha de pushade. **Sanningens ögonblick** — går
    det inte har ingens åtkomst rörts
-5. Pausa nattjobbet:
-   `kubectl patch cronjob discord-scoutid-refresh -p '{"spec":{"suspend":true}}'`
+5. Pausa nattjobbet (`suspend: true` på `discord-scoutid-refresh`, under
+   GitOps via en commit — en hand-patch återställs)
 6. Peka `SCOUTNET_SCOUT_ROLE` på det nya namnet i configmappen och deploya
 7. `/refresh-scoutid alla:true dryrun:true` → **måste visa noll strippningar.**
    Annars: backa configmappen, ingenting är skrivet
@@ -533,7 +430,7 @@ renderats. En kontroll där hade fallit för varje förstagångslänkning. Vad s
 däremot är lagat är att rapporten inte längre påstår motsatsen —
 `roles.grantRoles` hoppar över managed roller och returnerar `{ granted,
 problem }`, alltså vad som *faktiskt* delades ut, så händelseloggens rad visar
-`WSJ-event, cmt` utan att hävda `scout`. Saknas `scout` i raden gick Discords
+`participant, cmt` utan att hävda `scout`. Saknas `scout` i raden gick Discords
 halva av flödet inte i mål. Den skipade `scout` är med flit **inget `problem`**:
 att flagga den hade lagt en varning på varje frisk länkning.
 
@@ -567,7 +464,7 @@ på det enda anropet nådde yttre catchen och svarade en medlem vars länk redan
 var sparad med ett naket `500`: inga roller, inget smeknamn, ingen rad i
 händelseloggen, och ingenting som sa vad hon skulle göra. Hon gjorde det enda
 sidan tillät och körde om — tre gånger på tio sekunder 2026-08-24, varav två gick
-igenom, vilket är varför `#server-logg` fick samma rad två gånger.
+igenom, vilket är varför loggkanalen fick samma rad två gånger.
 
 Pushen fångas nu, och allt som inte beror på den körs ändå. Vad som med flit
 *inte* händer är att påstå att det gick bra: utan `verified` hos Discord
@@ -670,13 +567,14 @@ rollout).
 
 ## Config format reference
 
-**Värdena står i [k8s/configmap.yaml](k8s/configmap.yaml), och bara där.** Det
-här avsnittet beskriver *formen*; filen bär värdena och motiveringen bakom varje
+**Värdena står i instansens egen config, och bara där** — för exemplet i
+[k8s/configmap.yaml](k8s/configmap.yaml), med påhittade värden. Det här avsnittet
+beskriver *formen*; instansens fil bär värdena och motiveringen bakom varje
 enskilt val.
 
-Listan var tidigare en kopia av prod-configen, rubricerad "aktuell". Den höll
-inte: kontrollerat 2026-09-21 hade fyra av fem stickprovade nycklar driftat — ett
-dubblerat `46628:cmt`, `wsj-event` mot guildens `WSJ-event`, och två som aldrig
+Listan var tidigare en kopia av en prod-config, rubricerad "aktuell". Den höll
+inte: vid ett stickprov hade fyra av fem nycklar driftat — ett dubblerat
+`fee_id`, ett rollnamn med fel skiftläge mot guilden, och två som aldrig
 uppdaterades när avdelningsnamnen rullades ut samma dag. En kopia av ett värde
 som ändras är en andra sanning, och den förlorar alltid.
 
@@ -690,23 +588,23 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_DIVISION_ROLES` | `kategori:frågeId:rollMedDiv:rollUtanDiv,…` |
 | `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
-| `SCOUTNET_DIVISION_NAMES` | `nummer:namn,…` — vad `{divnamn}` slår upp. **Andra kopian**: namnen ägs av `discord/terraform.tfvars` i wsj27-infra, och inget upptäcker driften |
+| `SCOUTNET_DIVISION_NAMES` | `nummer:namn,…` — vad `{divnamn}` slår upp. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
 
 Parsrarna ligger i [src/config.js](src/config.js) och pinnas av `unit/config`,
 inklusive vad som händer med trasig indata. Roll-konfigurationen låg tidigare i
 `terraform.tfvars`, men de variablerna togs bort när Container App avvecklades:
 Terraform hanterar inte längre något som boten läser.
 
-Läs ett värde ur prod när du behöver det exakta:
+Läs ett värde ur en körande instans när du behöver det exakta:
 
 ```bash
-kubectl get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_NICKNAME_SUFFIXES}'
+kubectl -n <namespace> get cm discord-scoutid-config -o jsonpath='{.data.SCOUTNET_NICKNAME_SUFFIXES}'
 ```
 
 ## Nattlig rollsynk — [src/refresh.js](src/refresh.js)
 
 Ett CronJob ([k8s/refresh-cronjob.yaml](k8s/refresh-cronjob.yaml), 04:10 UTC)
-kör `syncAllUserRoles` mot hela servern och rapporterar till `#server-logg`.
+kör `syncAllUserRoles` mot hela servern och rapporterar till loggkanalen.
 
 **Varför den finns:** ingenting propagerade ScoutNet-ändringar av sig självt. En
 deltagare som fick avdelning tilldelad satt kvar på `Deltagare-Väntande` tills en
@@ -720,15 +618,17 @@ gånger.
 
 ```bash
 node src/refresh.js --dry-run          # visa vad den skulle ändra
-kubectl get cronjob discord-scoutid-refresh
-kubectl create job manual-refresh --from=cronjob/discord-scoutid-refresh
+kubectl -n <namespace> get cronjob discord-scoutid-refresh
 ```
+
+Från Discord gör `/refresh-scoutid alla:true` samma sak, utan att behöva
+klusterbehörighet.
 
 Tre egenskaper som måste hålla om det här ändras:
 
 - **Guild-tillståndet hämtas en gång per körning, inte en gång per användare.**
   `syncUserRoles` hämtade tidigare hela rollistan själv, så en körning över 2 500
-  länkade personer bad om 151 roller 2 500 gånger för att komma fram till att
+  länkade personer bad om ett par hundra roller 2 500 gånger för att komma fram till att
   ingenting ändrats. Nu tar den emot `roleMap` och `member` från anroparen, och
   `syncAllUserRoles` hämtar båda en gång. Pinnat i `integration/syncall`.
 - **Pausen mellan skrivningar tas bara när något faktiskt skrevs.** 200 ms per
@@ -772,9 +672,8 @@ händelseloggen — den kanalen är protokollet över vad boten *gjorde*, och
 ## Händelselogg till Discord
 
 [src/eventlog.js](src/eventlog.js) skriver vad boten *gjorde*, när det hände,
-till `#server-logg` — en moderator-only kanal som ägs av
-[wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/main.tf`).
-`LOG_CHANNEL_ID` styr den; tomt värde betyder att loggen är av och allt annat
+till en kanal — bäst en moderator-only kanal, eftersom raderna bär namn och
+scoutid:n. `LOG_CHANNEL_ID` styr den; tomt värde betyder att loggen är av och allt annat
 beter sig identiskt.
 
 **Varför den finns:** informationen fanns bara i `kubectl logs`, alltså bara så
@@ -943,8 +842,7 @@ avvägning hela loggen gör med flit.
 
 ```bash
 node src/memberscan.js --dry-run      # skriv ut vad den skulle rapportera
-kubectl get cronjob discord-scoutid-memberscan
-kubectl create job manual-scan --from=cronjob/discord-scoutid-memberscan
+kubectl -n <namespace> get cronjob discord-scoutid-memberscan
 ```
 
 **Snapshoten är chunkad över properties och kontrollsummeras på längd.** En
@@ -967,10 +865,11 @@ Tre egenskaper som måste hålla om filen ändras:
   [src/server.js](src/server.js), *efter* `pendingWork` — flushar man före
   missas det ett slash-kommando loggar på vägen ut.
 
-Boten kan skriva i kanalen enbart tack vare en channel overwrite i infra-repot:
-dess roll har `402653184`, alltså Manage Roles + Manage Nicknames och varken
-View Channels eller Send Messages. **En 403 här betyder att overwriten saknas,
-inte att token är fel.**
+Botens roll behöver bara Manage Roles + Manage Nicknames (`402653184`, plus
+View Audit Log för medlemsscannern), alltså varken View Channels eller Send
+Messages globalt. Då kan den skriva i loggkanalen enbart tack vare en channel
+overwrite där. **En 403 här betyder att overwriten saknas, inte att token är
+fel.**
 
 ## Verktyg i devcontainern
 
@@ -1008,10 +907,10 @@ npm run format          # prettier --write .
 npm run format:check    # vad CI kör
 ```
 
-Båda fäller CI, före testerna, och alltså även deployen. Skillnaden mot
-RBAC-driftkontrollen — som bara varnar — är avsiktlig: det de rapporterar
-orsakas av just den commit som byggs och fixas genom att redigera den. Drift som
-ingen kodändring orsakat är fallet för att varna, det här är inte det.
+Båda fäller CI, före testerna, och alltså även imagen. Att de fäller i stället
+för att varna är avsiktligt: det de rapporterar orsakas av just den commit som
+byggs och fixas genom att redigera den. Drift som ingen kodändring orsakat är
+fallet för att bara varna, det här är inte det.
 
 **ESLint-extensionen var installerad långt innan konfigurationen fanns.** Den
 följer med `javascript-node`-basimagen, tillsammans med ett globalt `eslint`, och
@@ -1182,8 +1081,9 @@ når alla: servern har regelgrind (`MEMBER_VERIFICATION_GATE_ENABLED`), och en
 medlem som inte accepterat reglerna står som `pending` — Discord gömmer den ur
 varje personväljare och ur mention-autocomplete. Hen finns i guilden, kan bära
 länk, roller och smeknamn, och är alltså precis den admin oftast behöver laga.
-2026-09-19 var **30 av 139 medlemmar** pending, och en felaktig länkning gick
-inte att rätta eftersom personen inte gick att välja.
+I en server med regelgrind kan en betydande andel av medlemmarna vara pending —
+mätt en gång till drygt en femtedel — och en felaktig länkning gick inte att
+rätta eftersom personen inte gick att välja.
 
 Tre egenskaper att hålla:
 
@@ -1230,13 +1130,12 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   `SCOUTNET_DIVISION_ROLES` avgör om den delas upp och på vilken fråga, och
   `SCOUTNET_CATEGORY_ROLES` ger rubriknamnet. En kategori utan divisionsconfig är
   *en* grupp; får den en rad i `SCOUTNET_DIVISION_ROLES` delas den upp utan
-  kodändring. Det är exakt vad som behövs den dag CMT:s funktion finns i en
-  ScoutNet-fråga — idag går den inte att dela upp, eftersom svaren är opaka
-  alternativ-id:n och de tre CMT-`fee_id`:na är 40 + 1 + 1 där de två ensamma har
-  avgift 0.
+  kodändring. Det är exakt vad som behövs den dag en kategoris uppdelning finns
+  i en ScoutNet-fråga — innan dess går den inte att dela upp, och flera
+  `fee_id` som pekar på samma kategori säger ingenting om vem som gör vad.
 
   Rubriken speglar configen: en kategori utan flat roll etiketteras med sin nyckel,
-  så `25697:cmt` ger "cmt" och `25697:CMT` ger "CMT". Rolluppslagningen är
+  så `1003:cmt` ger "cmt" och `1003:CMT` ger "CMT". Rolluppslagningen är
   skiftlägesokänslig, så det är fritt att välja.
 
   **Den som inte hamnar i någon grupp räknas under "Utanför grupperna", med skäl.**
@@ -1258,40 +1157,30 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
 
 ## Krav på Discord-servern
 
-Discord-rollerna ägs av [Scouterna/wsj27-infra](https://github.com/Scouterna/wsj27-infra) (`discord/`) (Terraform). Boten letar upp roller efter namn (case-insensitive) — om en roll inte finns hoppas tilldelningen tyst över. Roller som måste finnas:
+**Boten skapar inga roller.** Rollerna måste finnas i servern med de namn
+configen anger — `SCOUTNET_SCOUT_ROLE`, `SCOUTNET_EVENT_ROLE`, varje
+`rollMedDiv`/`rollUtanDiv` i `SCOUTNET_DIVISION_ROLES` för varje division
+ScoutNet kan svara med, varje roll i `SCOUTNET_CATEGORY_ROLES`, och en roll per
+kategori utan divisionsconfig, döpt efter kategorin. Boten letar upp dem efter
+namn (skiftlägesokänsligt) och hoppar **tyst** över en som inte finns, så en roll
+som döpts om på ena sidan slutar bara delas ut — auditens kategori 7 och 8 är
+det som ser det. Vem som äger rollerna (handpåläggning eller Terraform) är
+instansens sak; skriv i det repot vilken configrad varje roll motsvarar.
 
-| Bot tilldelar | Källa i infra-repot |
-|---|---|
-| `scout` | Extern `Scout`-roll — en **managed Linked Role**, ej Terraform. Boten kan aldrig dela ut den; Discord gör det, mot `verified`-metadatan. Se avsnittet om Developer Portal |
-| `wsj-event` | `discord_role.wsj_event` |
-| `Deltagare-{nr}` / `Deltagare-Väntande` | `discord_role.participant[*]` / `discord_role.participant_pending` |
-| `Ledare-{nr}` / `Ledare-Väntande` | `discord_role.leader[*]` / `discord_role.leader_pending` |
-| `IST-Patrull-{nr}` | `discord_role.ist_patrol[*]` |
-| `IST-Rundresa` / `IST-Egenresa` | `discord_role.ist_travel[*]` |
-| `CMT` | `discord_role.cmt` |
-| `Avdelningsledare` / `IST` (platta markörer) | `discord_role.leader_flat` / `discord_role.ist_flat` |
+`SCOUTNET_SCOUT_ROLE` är speciell: en **managed Linked Role**, skapad i
+Discords gränssnitt mot `verified`-metadatan — aldrig av boten och inte av
+Terraform. Se avsnittet om Developer Portal för varför kravet inte får slås på
+före koden.
 
-Antal avdelningar (`var.troops`) och IST-patruller (`var.ist_patrols`) i
-infra-repot måste täcka alla värden ScoutNet kan returnera för
-division-frågorna 88168 (deltagare/IST) och 107592 (ledare).
+**Två kategorier kan dela divisionsmönster** — t.ex. två resegrupper vars
+patruller har gemensam numrering, båda `IST-Patrull-{div}`, med var sin platt
+markör som också är kategorins väntande-roll (`+` i `SCOUTNET_CATEGORY_ROLES`).
+Markören delas då ut direkt och ligger kvar när divisionen kommer. Två saker
+följer: `divisionPrefixes` returnerar varje prefix en gång, annars togs en gammal
+divisionsroll bort två gånger; och `getDesiredRoles` deduplicerar, eftersom
+markören efterfrågas både som markör och som väntande-roll. Båda pinnas i
+`integration/roles`.
 
-**IST är delat på två resegrupper, och de är två kategorier** — `fee_id` 25696
-är `ist-rundresa`, 25702 `ist-egenresa`. Var och en får `IST` plus sin
-resegruppsroll som platta markörer (`+` i `SCOUTNET_CATEGORY_ROLES`), och
-resegruppsrollen är dessutom kategorins väntande-roll. Den delas alltså ut
-direkt och ligger kvar när `IST-Patrull-{div}` kommer ur fråga 88168.
-
-Skälet är att patrullen kom sist. Hösten 2026 hade ingen av de 435 IST:arna
-patrull i ScoutNet, så alla stod på `IST-Väntande` — som öppnade `#alla-ist`
-och `#ist-fragor` men ingen av resegruppens kanaler, eftersom de byggdes av
-patrullrollerna. Resegruppsrollen bär nu den åtkomsten.
-
-Två saker följer av att båda kategorierna delar mönstret `IST-Patrull-{div}`:
-`divisionPrefixes` returnerar varje prefix en gång, annars togs en gammal
-patrullroll bort två gånger; och `getDesiredRoles` deduplicerar, eftersom
-resegruppsrollen efterfrågas både som markör och som väntande-roll. Båda
-pinnas i `integration/roles`.
-
-`IST-Väntande` raderades i infra-repot 2026-10-06, efter att synken delat ut
-resegrupperna — ordningen var tvingande, eftersom en raderad roll försvinner
-från alla på en gång och boten inte längre hanterade den.
+**Att radera en roll som boten delat ut kräver ordning**: ändra configen och
+synka först, radera sedan. En raderad roll försvinner från alla på en gång, och
+gör den det medan boten fortfarande hanterar den syns det inte i någon logg.
