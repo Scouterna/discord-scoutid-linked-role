@@ -180,8 +180,9 @@ export function managedRoleNames({ includeUnverified = false } = {}) {
  * `[{ category, prefix }]` for pattern-based removal of division roles:
  * "Deltagare-{div}" yields the prefix "deltagare-".
  *
- * One entry per prefix: both IST travel groups share `IST-Patrull-{div}`, and a
- * second entry would make the sync remove each stale patrol role twice.
+ * One entry per prefix: two categories may share one pattern (e.g. both use
+ * `Patrull-{div}`), and a second entry would make the sync remove each stale
+ * role twice.
  */
 export function divisionPrefixes() {
   const prefixes = [];

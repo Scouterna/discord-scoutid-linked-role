@@ -84,8 +84,8 @@ export async function getDesiredRoles(
     return [config.SCOUTNET_SCOUT_ROLE];
   }
 
-  // A travel group role is both the IST marker's companion and the pending role
-  // of the same category, so it can be asked for twice. The sync adds per entry.
+  // A flat category role can also be the same category's pending role, so it
+  // can be asked for twice. The sync adds per entry.
   return [...new Set(roles)];
 }
 

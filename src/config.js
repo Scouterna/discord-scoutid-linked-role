@@ -26,7 +26,7 @@ export function parseFeeRoles(str) {
 
 /**
  * `"category:withDiv:withoutDiv,..."` → `{ category: { withDiv, withoutDiv } }`.
- * Example: `"deltagare:{div}:,ledare:AL{div}:AL,cmt::CMT"`.
+ * Example: `"deltagare:{div}:,ledare:AL{div}:AL,funktionar::F"`.
  *
  * `{div}` is replaced with the zero-padded division number; an empty half means
  * no suffix in that case.
@@ -97,15 +97,15 @@ export function parseDivisionRoles(str) {
  *
  * Granted *in addition to* the category's division role, so a leader in troop 12
  * ends up with both `Ledare-12` and `Avdelningsledare`. A category with no
- * division config
- * already gets a flat role (`cmt` → `CMT`) and needs no entry.
+ * division config already gets a flat role named after itself (`funktionar`)
+ * and needs no entry.
  *
- * `+` gives a category several: IST is split by travel group, and someone on the
- * round trip carries both `IST`, which every IST holds, and `IST-Rundresa`.
+ * `+` gives a category several, e.g. a category split into sub-groups can carry
+ * both a shared `Grupp` role and a sub-group's own `Grupp-A`.
  *
  * This exists for Discord AutoMod, which can only *exempt* roles and never
  * target them, with a hard cap of 20 exempt roles: "everyone except
- * participants" needs 151 per-division roles, or two flat markers.
+ * participants" would otherwise need one exempt role per division.
  */
 export function parseCategoryRoles(str) {
   if (!str) return null;
