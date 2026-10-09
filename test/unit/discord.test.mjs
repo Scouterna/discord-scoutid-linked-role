@@ -123,6 +123,49 @@ test("a 429 is retried and the call still succeeds", async () => {
   assert.equal(roles[0].name, "scout");
 });
 
+test("a 504 on a read is retried instead of failing the caller", async () => {
+  // 2026-10-08: the role list answered 504 Gateway Timeout during a linking,
+  // and the member got no roles for ten hours — until the nightly sync, the only
+  // thing that ever retried it. Discord answered again a second later.
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1 ? err(504) : ok([{ id: "r1", name: "scout" }]);
+  };
+  const roles = await discord.getGuildRoles("G1");
+  assert.equal(calls, 2);
+  assert.equal(roles[0].name, "scout");
+});
+
+test("a request that got no response at all is retried when it is safe to repeat", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) throw new TypeError("fetch failed");
+    return ok({});
+  };
+  await discord.addRoleToUser("G1", "u1", "r1");
+  assert.equal(calls, 2);
+});
+
+test("a POST is never repeated after a transient failure", async () => {
+  // The failure does not say whether the POST landed. A token refresh that did
+  // has rotated the refresh token, so sending it again comes back invalid_grant
+  // — which the verification gate reads as a revoked grant and strips on.
+  for (const fail of [
+    () => err(504),
+    () => Promise.reject(new TypeError("fetch failed")),
+  ]) {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return fail();
+    };
+    await assert.rejects(() => discord.postChannelMessage("C1", "hej"));
+    assert.equal(calls, 1);
+  }
+});
+
 test("a non-429 error is not retried", async () => {
   // Retrying a 403 or a 404 just delays the failure and multiplies the log noise.
   let calls = 0;

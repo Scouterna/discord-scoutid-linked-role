@@ -453,6 +453,14 @@ test("a refusal is reported as a refusal, not as an absent member", async () => 
   assert.doesNotMatch(problem, /inte med i servern/);
 });
 
+test("any other failure names its status", async () => {
+  // 2026-10-08 the line read "rollerna kunde inte skrivas" and nothing more; the
+  // 504 behind it was only in a pod log that a deploy had since thrown away.
+  withGuild({ putStatus: 500 });
+  const { problem } = await roles.grantRoles("u1", ["event"]);
+  assert.match(problem, /HTTP 500/);
+});
+
 test("a role missing from the guild is named, not guessed at", async () => {
   withGuild({ guildRoles: [{ id: "r-scout", name: "scout", managed: true }] });
   const { granted, problem } = await roles.grantRoles("u1", [

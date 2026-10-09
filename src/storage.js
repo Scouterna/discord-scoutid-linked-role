@@ -191,7 +191,7 @@ export async function getUserIdsWithTokens(type) {
 const SNAPSHOT_CHUNK_CHARS = 8 * 1024;
 
 /**
- * Store the snapshot. `members` is `{ [discordUserId]: [nick, username] }` —
+ * Store the snapshot. `members` is `{ [discordUserId]: [nick, username, joined] }` —
  * arrays, or the key names would repeat per member and roughly double the size.
  * `auditCursors` maps action type to the newest entry already reported.
  */
