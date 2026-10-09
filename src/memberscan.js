@@ -44,17 +44,32 @@ function accountCreatedAt(userId) {
   }
 }
 
-/** `[nick, username]` per member — see storage.js for why it is this compact. */
+/**
+ * `[nick, username, joined]` per member — see storage.js for why it is this
+ * compact. `joined` is `joined_at` in base-36 seconds, which is what tells a
+ * member who left and came back between two scans from one who never left:
+ * the id is in both snapshots either way.
+ */
 function toSnapshot(members) {
   const snap = {};
   for (const m of members) {
+    const joinedMs = Date.parse(m.joined_at ?? "");
     snap[m.user.id] = [
       m.nick ?? "",
       m.user.global_name || m.user.username || "",
+      Number.isFinite(joinedMs) ? Math.floor(joinedMs / 1000).toString(36) : "",
     ];
   }
   return snap;
 }
+
+/**
+ * Left and came back since the last scan. Only when both snapshots know the
+ * join time — one written before the field existed has no third element, and
+ * reading that absence as a change would announce every member once.
+ */
+const rejoinedSince = (before, entry) =>
+  Boolean(before[2] && entry[2] && before[2] !== entry[2]);
 
 /**
  * Null and not a placeholder when the snapshot holds neither name: the log's
@@ -246,7 +261,9 @@ export async function runMemberScan({ dryRun = false } = {}) {
   for (const [id, entry] of Object.entries(current)) {
     const before = previous[id];
     if (!before) joined.push({ id, entry });
-    else if (wanted.has("nickname") && before[0] !== entry[0]) {
+    else if (rejoinedSince(before, entry)) {
+      joined.push({ id, entry, rejoined: true });
+    } else if (wanted.has("nickname") && before[0] !== entry[0]) {
       renamed.push({ id, entry, from: before[0], to: entry[0] });
     }
   }
@@ -270,10 +287,14 @@ export async function runMemberScan({ dryRun = false } = {}) {
     return entry ? displayName(entry) : null;
   };
 
-  // Only looked up for members who left, so an unchanged guild costs no storage
-  // reads beyond the snapshot itself.
+  // Only looked up for members who left or came back, so an unchanged guild
+  // costs no storage reads beyond the snapshot itself.
+  const rejoinedCount = joined.filter((j) => j.rejoined).length;
   let linkedIds = new Set();
-  if (gone.length > 0 && wanted.has("leave")) {
+  if (
+    (gone.length > 0 && wanted.has("leave")) ||
+    (rejoinedCount > 0 && wanted.has("join"))
+  ) {
     const links = await storage.getAllLinkedUsers();
     linkedIds = new Set(links.map((l) => l.discordUserId));
   }
@@ -289,12 +310,14 @@ export async function runMemberScan({ dryRun = false } = {}) {
   const sink = dryRun ? (line) => lines.push(line) : eventlog.logEvent;
 
   if (wanted.has("join")) {
-    emit(sink, "📥 Nya medlemmar", joined, ({ id, entry }) =>
+    emit(sink, "📥 Nya medlemmar", joined, ({ id, entry, rejoined }) =>
       eventlog.formatMemberJoined({
         discordUserId: id,
         name: displayName(entry),
         accountCreatedAt: accountCreatedAt(id),
         isBot: botIds.has(id),
+        rejoined,
+        linked: linkedIds.has(id),
       }),
     );
   }

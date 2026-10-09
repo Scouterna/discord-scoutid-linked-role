@@ -593,6 +593,27 @@ omförsök i taket plus 10 s preStop ryms i podens 60 s
 `terminationGracePeriodSeconds`, så ett rate limit kan inte hålla upp en
 rollout).
 
+#### Ett tillfälligt fel görs om, men bara där det är ofarligt
+
+Fram till 2026-10-09 gjordes bara 429 om. En **504 Gateway Timeout** på
+rollistan under en länkning 2026-10-08 föll därför rakt igenom: medlemmen fick
+inga roller, raden sa `rollerna kunde inte skrivas`, och det enda som någonsin
+gjorde om anropet var nattsynken tio timmar senare. Discord svarade igen en
+sekund efter.
+
+`request` gör nu också om **502, 503, 504 och ett uteblivet svar** (återställd
+anslutning, timeout), med samma backoff-trappa — men **bara för GET, PUT,
+DELETE och PATCH**. Ett tillfälligt fel säger inte om anropet nådde fram, och
+en POST som gjorde det är inte ofarlig att skicka igen: en token-förnyelse
+roterar refresh-tokenet, så omförsöket hade fått `invalid_grant` — som
+verifieringsgrinden läser som ett återkallat grant och strippar på. En 429 görs
+om oavsett metod, eftersom Discord nekade innan något gjordes. En 500 görs inte
+om: den är ett fel i Discords hantering av just det anropet, inte i vägen dit.
+
+`explainNothingGranted` skriver dessutom statusen i loggraden (`HTTP 504`).
+Podloggen har den också, men den överlever bara till nästa deploy om inte
+klustret samlar loggar.
+
 ## Config format reference
 
 **Värdena står i instansens egen config, och bara där** — för exemplet i
@@ -797,6 +818,15 @@ gateway-intent, och ingen process som måste ha varit ansluten i rätt sekund: e
 gateway-bot som legat nere en timme har tappat den timmen för alltid, den här
 rapporterar ändringen vid nästa körning.
 
+**Ett återinträde inom samma intervall syns på `joined_at`.** Id:t finns i båda
+snapshotarna, så diffen såg tidigare bara ett tömt smeknamn — 2026-10-08 lämnade
+en länkad deltagare och gick med igen inom tio minuter, och ingenting förklarade
+varför hen plötsligt saknade roller till nattsynken. Snapshoten bär därför
+`joined_at` som tredje element (base-36-sekunder, för storlekens skull), och en
+ändrad tid rapporteras som `lämnade servern och gick med igen`, med en not om
+rollerna för den som är länkad. En snapshot utan fältet — skriven före det
+fanns — jämförs inte på det, annars hade första körningen annonserat alla.
+
 **CronJob och inte en timer i servern** eftersom Deployment kör `replicas: 2` —
 ett intervall inne i den skulle rapportera varje join dubbelt. Det är också
 därför snapshoten måste ligga i Table Storage och inte i processminnet.
@@ -992,7 +1022,7 @@ den finns.
 | `unit/commands` | Vem ett kommando agerar på (`person` vs `personid`, och att båda satta är ett fel), plus hela `/refresh-scoutid alla:true`-rapporten som ren funktion: att renderingen *matchar* ändringsräkningen — ett resultat som bara byter smeknamn måste synas som en ändring och inte som "Inga ändringar" — att ingen halva använder mentions, att listan sorteras på namn med den namnlösa sist, och att bilagans dry run-markering bär ingen markup |
 | `unit/nickname` | `fitNickname` — att suffixet aldrig är det som huggs av, att efternamnet kortas från höger, och att resultatet går att strippa och suffixa om så ett avdelningsbyte landar. Plus `{divnamn}`, och att en namnlös avdelning tappar platshållaren *och* separatorn |
 | `unit/roles` | `getDesiredRoles` och `getNicknameSuffix` — fee → kategori → divisionsroll, zero-padding, plattmarkörer, avbokade. Plus vilka gamla divisionsroller synken får ta bort: de mönstret ger, inte en roll som bara börjar likadant, och ingenting alls för ett mönster utan fast text. Plus att ett ScoutNet-fel *kastar* i stället för att se ut som ett tomt svar, att `explainMissingRoles` håller ett avbrott skilt från en frånvaro, och att `grantRoles` skiljer ett konto utanför servern (404) från en nekad skrivning (403) från en roll som inte finns |
-| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att fel bär sin HTTP-status, att mentions alltid tystas, och att `memberWriteHint` läser 404 som medlemmen och 403 som behörigheten — och gissar inte på något annat |
+| `unit/discord` | Paginering förbi 1000-gränsen, 429-retry — inklusive att Discords `retry_after` vinner över backoff-trappan — att en 504 eller ett uteblivet svar görs om men aldrig för en POST, att fel bär sin HTTP-status, att mentions alltid tystas, och att `memberWriteHint` läser 404 som medlemmen och 403 som behörigheten — och gissar inte på något annat |
 | `unit/eventlog` | De tre reglerna: kastar aldrig, fördröjer aldrig, tappar aldrig buffern. Plus batchning under 2000 tecken, och att en länkning utan roller bär sin förklaring medan en med roller inte gör det |
 | `unit/memberscan` | Sammanfattningen och audit-pagineringen bakåt |
 | `unit/adoption` | Att grupperingen följer configen och inget annat: att ge en kategori en divisionsconfig delar upp den, att ta bort den slår den samman, utan kodändring. Plus avdelningsvyn: att en ledares scope kommer ur ScoutNet, att varje person hamnar i steget där vägen bröts, och att den som länkat från två konton räknas på det som kom längst |
@@ -1003,7 +1033,7 @@ den finns.
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
 | `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
 | `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Att ett konto utanför servern stoppas innan något sparas, i båda callbackarna, och får *Fel Discord-konto* med sitt namn escapat — men att en obesvarad medlemsfråga inte stoppar någon. Att sidan och loggraden följs åt: en länkning utan roller får aldrig lyckad-sidan eller `✅`, och ett ScoutNet-avbrott säger att rollerna kommer i stället för att de saknas. Plus att ett utgånget state och en främmande cookie svarar med en sida och inte ett naket `400`/`403` |
-| `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas |
+| `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas. Plus att ett återinträde inom ett intervall rapporteras, och att en snapshot utan `joined_at` inte annonserar alla |
 | `integration/prune` | Att en länk utanför servern tas bort med sina tokens, och de två sätten det kunde gå fel: en kort medlemslista läst som frånvaro, och ett fel läst som en 404. Båda behåller länken |
 
 **`server.js` exporterar nu `app` och lyssnar bara som entrypoint.** Importerad

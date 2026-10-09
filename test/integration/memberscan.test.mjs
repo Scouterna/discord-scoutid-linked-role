@@ -395,3 +395,44 @@ test("a truncated snapshot is treated as absent rather than diffed", async () =>
     "a short read was accepted as valid",
   );
 });
+
+test("a member who left and came back between two scans is reported", async () => {
+  // 2026-10-08: a linked participant left and rejoined within one interval. The
+  // id was in both snapshots, so the scan saw only a cleared nickname, and
+  // nothing said why a linked member suddenly had no roles until the nightly
+  // sync gave them back.
+  const JOINED = "2026-10-01T10:00:00.000000+00:00";
+  const withJoined = (m, joined_at) => ({ ...m, joined_at });
+  // A snapshot written before the join time was stored: the first scan over
+  // it must not read the missing field as a change and announce everyone.
+  await storage.storeMemberSnapshot(
+    {
+      [ANNA]: ["Anna Andersson (AL12)", "anna"],
+      [KIM]: ["Kim Nilsson", "kim"],
+    },
+    {},
+  );
+  audit[ROLE_UPDATE] = [];
+  audit[KICK] = [];
+  audit[BAN] = [];
+  members = [
+    withJoined(M(ANNA, "anna", "Anna Andersson (AL12)"), JOINED),
+    withJoined(M(KIM, "kim", "Kim Nilsson"), JOINED),
+  ];
+  let { out } = await runScan();
+  assert.equal(out, "", "an old-format snapshot announced unchanged members");
+
+  await storage.setLinkedScoutIDUserId(ANNA, "54321");
+  members = [
+    withJoined(M(ANNA, "anna", null), "2026-10-08T18:47:39.044000+00:00"),
+    withJoined(M(KIM, "kim", "Kim Nilsson"), JOINED),
+  ];
+  ({ out } = await runScan());
+  assert.match(out, /anna\*\* lämnade servern och gick med igen/);
+  assert.match(
+    out,
+    /nattens synk/,
+    "a linked member's lost roles not explained",
+  );
+  assert.doesNotMatch(out, /Kim/, "reported a member who never left");
+});

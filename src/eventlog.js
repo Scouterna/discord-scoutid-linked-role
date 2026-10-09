@@ -312,7 +312,18 @@ export function formatMemberJoined({
   name,
   accountCreatedAt,
   isBot,
+  rejoined = false,
+  linked = false,
 }) {
+  // Leaving drops every role and the nickname, and nothing gives them back
+  // until the nightly sync. The line is what explains a linked member who is
+  // suddenly without channels.
+  if (rejoined) {
+    const roles = linked
+      ? " — rollerna och smeknamnet försvann, nattens synk ger tillbaka dem (eller `/refresh-scoutid` nu)"
+      : "";
+    return `📥 ${who(discordUserId, name)} lämnade servern och gick med igen${roles}`;
+  }
   const age = accountCreatedAt
     ? ` — konto skapat för ${humanAge(Date.now() - accountCreatedAt)} sedan`
     : "";

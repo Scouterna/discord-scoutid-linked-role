@@ -549,7 +549,7 @@ function explainNothingGranted({ status, missing }) {
   if (status === 403) {
     return "Discord nekade skrivningen — står botens roll för lågt?";
   }
-  if (status != null) return "rollerna kunde inte skrivas";
+  if (status != null) return `rollerna kunde inte skrivas (HTTP ${status})`;
   if (missing.length > 0) {
     return `saknas i servern: ${missing.join(", ")}`;
   }
