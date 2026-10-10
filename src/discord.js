@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
 import * as storage from "./storage.js";
-import config, { divisionOptionName } from "./config.js";
+import config, { divisionKinds } from "./config.js";
 import { request, retryDelayMs } from "./http.js";
 
 /**
@@ -516,7 +516,10 @@ export const COMMANDS = [
     // Visible to everyone, and gated in the handler: a leader sees their own
     // division, so the command cannot be admin-only. Narrow who sees it in
     // Server Settings → Integrations if the picker should hide it from the rest.
-    description: `Hur många som länkat sig — admin: per grupp, ledare: din ${config.SCOUTNET_DIVISION_LABEL}`,
+    description:
+      `Hur många som länkat sig — admin: per grupp, annars din egen ${divisionKinds()
+        .map((k) => k.label)
+        .join(" eller ")}`.slice(0, 100),
     options: [
       {
         // Off by default: naming everyone who has not linked is thousands of
@@ -525,13 +528,13 @@ export const COMMANDS = [
         description: "Lista namnen på dem som inte länkat sig (admin)",
         type: BOOLEAN,
       },
-      {
-        // Follows SCOUTNET_DIVISION_LABEL, so the commands must be registered
-        // again after changing it.
-        name: divisionOptionName(config.SCOUTNET_DIVISION_LABEL),
-        description: `Visa en ${config.SCOUTNET_DIVISION_LABEL} som en ledare ser den (admin)`,
+      // One option per kind of division, named by SCOUTNET_DIVISION_LABEL(S),
+      // so the commands must be registered again after changing either.
+      ...divisionKinds().map((k) => ({
+        name: k.option,
+        description: `Visa en ${k.label} — admin: vilken som helst, annars bara din egen`,
         type: STRING,
-      },
+      })),
     ],
   },
   {

@@ -1,4 +1,4 @@
-import config, { divisionOptionName } from "./config.js";
+import config, { divisionLabel } from "./config.js";
 import * as discord from "./discord.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
@@ -421,7 +421,7 @@ async function scoutNetLines(scoutId) {
         ? participant.questions?.[divConfig.questionId] || null
         : null;
       lines.push(
-        `📋 ScoutNet: fee_id=${participant.fee_id}, kategori=${category}, ${config.SCOUTNET_DIVISION_LABEL}=${division ?? "(saknas)"}`,
+        `📋 ScoutNet: fee_id=${participant.fee_id}, kategori=${category}, ${divisionLabel(category)}=${division ?? "(saknas)"}`,
       );
     }
   } catch (e) {
@@ -447,11 +447,16 @@ const auditCommand = handler(
 // --- /adoption-scoutid ---
 
 /**
- * Admins get the whole event, or one division with the division option
- * (`avdelning:` by default — it follows SCOUTNET_DIVISION_LABEL). So does a
- * category scoped to `*` in `SCOUTNET_ADOPTION_SCOPE`, such as the event's
+ * Admins get the whole event, or one division with a division option. So does
+ * a category scoped to `*` in `SCOUTNET_ADOPTION_SCOPE`, such as the event's
  * staff. Everyone else gets their own division if the scope gives their
- * category one — a leader sees their troop — and a refusal otherwise.
+ * category one — a leader sees their troop, an IST their patrol — and a
+ * refusal otherwise.
+ *
+ * **One option per kind of division** (`divisionKinds`): `avdelning:` for
+ * troops, `ist-patrull:` for patrols, named by `SCOUTNET_DIVISION_LABEL(S)`.
+ * Nobody but an admin crosses between them — a troop leader asking for a
+ * patrol is refused exactly like one asking for another troop.
  *
  * The scope is read from ScoutNet through the caller's own link, not from their
  * Discord roles: the roles are derived from the same answer and can lag it by a
@@ -459,10 +464,6 @@ const auditCommand = handler(
  */
 const adoptionCommand = handler(
   async (interaction, { token, guildId, callerId }) => {
-    const label = config.SCOUTNET_DIVISION_LABEL;
-    const optionName = divisionOptionName(label);
-    const requested = option(interaction, optionName);
-
     // Admins, and a category scoped to `*`, see everything; anyone else needs
     // a scope of their own, read from ScoutNet through their link.
     let own = null;
@@ -478,7 +479,18 @@ const adoptionCommand = handler(
     }
     const seesAll = isAdmin(interaction) || own.all === true;
 
-    if (seesAll && requested == null) {
+    const asked = Object.fromEntries(
+      adoption
+        .divisionKinds()
+        .map((k) => [k.option, option(interaction, k.option)]),
+    );
+    const plan = adoption.planDivisionRequest({ asked, own, seesAll });
+    if (plan.error) {
+      await reply(token, plan.error);
+      return;
+    }
+
+    if (plan.overall) {
       const result = await adoption.runAdoption();
       // Always a file as well: the per-group breakdown is 130 lines at full size,
       // and it is the breakdown, not the total, that someone acts on.
@@ -492,62 +504,28 @@ const adoptionCommand = handler(
       );
       return;
     }
+    const { views, kind } = plan;
 
-    let scope;
-    if (seesAll) {
-      const typed = String(requested).trim();
-      // A value or a configured name, so not only numbers — but a division is
-      // never blank, and nothing typed by hand is a hundred characters long.
-      if (!typed || typed.length > 100) {
-        await reply(
-          token,
-          `Ogiltig \`${optionName}\` — ange ett värde eller ett namn, t.ex. \`12\`.`,
-        );
-        return;
-      }
-      const categories = adoption.allScopedCategories();
-      // Without a scope there is no notion of what a division contains, and an
-      // empty report would read as an empty troop.
-      if (categories.length === 0) {
-        await reply(
-          token,
-          `\`SCOUTNET_ADOPTION_SCOPE\` är inte satt, så det finns ingen vy per ${label}.`,
-        );
-        return;
-      }
-      scope = {
-        division: adoption.resolveDivision(typed, categories),
-        categories,
-      };
-    } else {
-      if (own.waiting) {
-        await reply(
-          token,
-          `Du har ingen ${label} i ScoutNet än, så det finns ingen att visa.`,
-        );
-        return;
-      }
-      if (
-        requested != null &&
-        adoption.resolveDivision(requested, own.categories) !== own.division
-      ) {
-        await reply(
-          token,
-          `Du kan bara se din egen ${label}, ${own.division}.`,
-        );
-        return;
-      }
-      scope = own;
-    }
-
-    const result = await adoption.runDivision(guildId, scope);
-    await replyOrAttach(token, adoption.formatDivision(result), {
-      filename: `${optionName}-${result.division}.txt`,
-      summary: `${label[0].toUpperCase()}${label.slice(1)} ${result.division}: ${result.done} av ${result.total} är inne — hela listan i bifogad fil`,
-      full: adoption.formatDivision(result, { plain: true }),
+    // A typed value can open more than one group of the same kind, so each is
+    // its own report, one after the other.
+    const results = await adoption.runDivisions(guildId, views);
+    const joined = (plain) =>
+      results.map((r) => adoption.formatDivision(r, { plain })).join("\n\n");
+    const head = results
+      .map(
+        (r) =>
+          `${capitalize(r.label)} ${r.division}${r.name ? ` – ${r.name}` : ""}: ${r.done} av ${r.total} är inne`,
+      )
+      .join(" · ");
+    await replyOrAttach(token, joined(false), {
+      filename: `${kind.option}-${results[0].division}.txt`,
+      summary: `${head} — hela listan i bifogad fil`,
+      full: joined(true),
     });
   },
 );
+
+const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
 
 // --- /scan-scoutid ---
 

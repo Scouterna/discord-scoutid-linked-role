@@ -1,4 +1,10 @@
-import config from "./config.js";
+import config, {
+  ALL_SCOPE as ALL,
+  divisionKinds,
+  divisionLabel,
+  divisionOptionName,
+  scopeGroups,
+} from "./config.js";
 import * as scoutnet from "./scoutnet.js";
 import * as storage from "./storage.js";
 import * as discord from "./discord.js";
@@ -339,9 +345,6 @@ export function formatAdoptionSummary(result) {
 
 // --- One division, for the leaders who run it ---
 
-/** The scope that sees everything, as an admin does. */
-const ALL = "*";
-
 /**
  * Who may see which division. `SCOUTNET_ADOPTION_SCOPE` maps a category to the
  * categories its members see, at their *own* division: `ledare:deltagare+ledare`
@@ -398,11 +401,101 @@ export function resolveDivision(input, categories, cfg = config) {
   return padDiv(typed);
 }
 
-/** Every category any scope reaches — what an admin's `avdelning:` covers. */
-export function allScopedCategories(cfg = config) {
-  return [
-    ...new Set(Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {}).flat()),
-  ].filter((c) => c !== ALL);
+export { scopeGroups, divisionKinds };
+
+/**
+ * The views a typed division opens within one kind: one per scope group of
+ * that kind, each with the typed text resolved against that group's names.
+ *
+ * A typed *name* opens only the group that name belongs to. Resolution falls
+ * back to the shared, unprefixed names, so without this check a shared name
+ * would open every group's division with that value. A typed *value* opens
+ * every group — which of them have anyone in it is the caller's to decide,
+ * since that needs the participant list.
+ */
+export function divisionViews(typed, groups, cfg = config) {
+  const wanted = String(typed).trim().toLowerCase();
+  const views = groups.map((categories) => {
+    const division = resolveDivision(typed, categories, cfg);
+    const name = divisionName(
+      categories[0],
+      division,
+      cfg.SCOUTNET_DIVISION_NAMES,
+    );
+    return { division, categories, byName: name?.toLowerCase() === wanted };
+  });
+  const named = views.filter((v) => v.byName);
+  return (named.length > 0 ? named : views).map(({ division, categories }) => ({
+    division,
+    categories,
+  }));
+}
+
+/**
+ * Who gets which view, given the division options the caller filled in —
+ * `asked` is `{ option: typed }`. Pure, so the boundary is testable apart from
+ * Discord and ScoutNet. Returns `{ overall: true }`, `{ views, kind }` or
+ * `{ error }`.
+ *
+ * **Nobody but `seesAll` crosses a boundary.** Someone with a scope sees their
+ * own division of their own kind and nothing else: a troop leader asking for
+ * `ist-patrull:` is refused exactly like one asking for another troop, and an
+ * IST asking for `avdelning:` the same.
+ */
+export function planDivisionRequest({ asked, own, seesAll, cfg = config }) {
+  const kinds = divisionKinds(cfg);
+  const given = kinds.filter((k) => asked[k.option] != null);
+  if (given.length > 1)
+    return {
+      error: `Ange bara en av ${given.map((k) => `\`${k.option}\``).join(" och ")}.`,
+    };
+  const [kind] = given;
+
+  if (seesAll) {
+    if (!kind) return { overall: true };
+    const typed = String(asked[kind.option]).trim();
+    // A value or a configured name, so not only numbers — but a division is
+    // never blank, and nothing typed by hand is a hundred characters long.
+    if (!typed || typed.length > 100)
+      return {
+        error: `Ogiltig \`${kind.option}\` — ange ett värde eller ett namn, t.ex. \`12\`.`,
+      };
+    // Without a scope there is no notion of what a division contains, and an
+    // empty report would read as an empty troop.
+    if (kind.groups.length === 0)
+      return {
+        error: `\`SCOUTNET_ADOPTION_SCOPE\` är inte satt, så det finns ingen vy per ${kind.label}.`,
+      };
+    return { views: divisionViews(typed, kind.groups, cfg), kind };
+  }
+
+  // The kind and group are found by the set, not by its first category: the
+  // scope may list a set in any order, and its label must not depend on that.
+  const setKey = (cats) => [...cats].sort().join("+");
+  const ownKind = kinds.find((k) =>
+    k.groups.some((g) => setKey(g) === setKey(own.categories)),
+  );
+  const group =
+    ownKind?.groups.find((g) => setKey(g) === setKey(own.categories)) ??
+    own.categories;
+  const { label, option: ownOption } = ownKind ?? {
+    label: divisionLabel(group[0], cfg),
+    option: divisionOptionName(divisionLabel(group[0], cfg)),
+  };
+  if (own.waiting)
+    return {
+      error: `Du har ingen ${label} i ScoutNet än, så det finns ingen att visa.`,
+    };
+  if (
+    kind &&
+    (kind.option !== ownOption ||
+      resolveDivision(asked[kind.option], group, cfg) !== own.division)
+  )
+    return { error: `Du kan bara se din egen ${label}, ${own.division}.` };
+  return {
+    views: [{ division: own.division, categories: group }],
+    kind: { label, option: ownOption },
+  };
 }
 
 /**
@@ -507,7 +600,7 @@ export function computeDivision({
   return {
     division: div,
     name: divisionName(categories[0], div, cfg.SCOUTNET_DIVISION_NAMES),
-    label: cfg.SCOUTNET_DIVISION_LABEL ?? "avdelning",
+    label: divisionLabel(categories[0], cfg),
     categories: groups,
     total: groups.reduce((n, c) => n + c.total, 0),
     done: stages.done.length,
@@ -515,22 +608,30 @@ export function computeDivision({
   };
 }
 
-/** Reads the live data and computes one division. */
-export async function runDivision(guildId, { division, categories }) {
+/**
+ * Reads the live data once and computes each view. Views with nobody in them
+ * are dropped — a typed `07` opens both troop and patrol, and only one may
+ * exist — unless all are empty, when the first stays so the reply can say so.
+ */
+export async function runDivisions(guildId, views) {
   const [participants, linkedUsers, members, guildRoles] = await Promise.all([
     scoutnet.getParticipants(),
     storage.getAllLinkedUsers(),
     discord.getGuildMembers(guildId),
     discord.getGuildRoles(guildId),
   ]);
-  return computeDivision({
-    participants,
-    linkedUsers,
-    members,
-    guildRoles,
-    division,
-    categories,
-  });
+  const results = views.map(({ division, categories }) =>
+    computeDivision({
+      participants,
+      linkedUsers,
+      members,
+      guildRoles,
+      division,
+      categories,
+    }),
+  );
+  const nonEmpty = results.filter((r) => r.total > 0);
+  return nonEmpty.length > 0 ? nonEmpty : results.slice(0, 1);
 }
 
 /**

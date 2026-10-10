@@ -265,7 +265,10 @@ const {
   formatDivision,
   leaderScope,
   resolveDivision,
-  allScopedCategories,
+  scopeGroups,
+  divisionViews,
+  divisionKinds,
+  planDivisionRequest,
 } = await import("../../src/adoption.js");
 
 const SCOPED = {
@@ -417,5 +420,154 @@ test("a category scoped to * sees everything, with or without a division", () =>
   assert.deepEqual(leaderScope(P(300), cfg), { all: true });
   assert.equal(leaderScope(P(300, {}, { cancelled: true }), cfg), null);
   // `*` is not a category a division contains.
-  assert.deepEqual(allScopedCategories(cfg), ["deltagare", "ledare"]);
+  assert.deepEqual(scopeGroups(cfg), [["deltagare", "ledare"]]);
+});
+
+const TWO_GROUPS = {
+  SCOUTNET_ADOPTION_SCOPE: {
+    ledare: ["deltagare", "ledare"],
+    "ist-a": ["ist-a", "ist-b"],
+    "ist-b": ["ist-b", "ist-a"],
+    cmt: ["*"],
+  },
+  SCOUTNET_DIVISION_NAMES: {
+    "07": "Vildsvinet",
+    "ist-a/07": "Tordyvel",
+    "ist-b/07": "Tordyvel",
+  },
+};
+
+test("troops and IST patrols are separate kinds, each its own option", () => {
+  const cfg = {
+    ...TWO_GROUPS,
+    SCOUTNET_DIVISION_LABELS: { "ist-a": ["ist-patrull"] },
+  };
+  // The same set in another order is the same group: IST in either category
+  // sees the whole patrol.
+  assert.deepEqual(scopeGroups(cfg), [
+    ["deltagare", "ledare"],
+    ["ist-a", "ist-b"],
+  ]);
+  assert.deepEqual(divisionKinds(cfg), [
+    {
+      label: "avdelning",
+      option: "avdelning",
+      groups: [["deltagare", "ledare"]],
+    },
+    {
+      label: "ist-patrull",
+      option: "ist-patrull",
+      groups: [["ist-a", "ist-b"]],
+    },
+  ]);
+  // Within a kind only that kind's groups are looked at.
+  const [troops, patrols] = divisionKinds(cfg);
+  assert.deepEqual(divisionViews("7", troops.groups, cfg), [
+    { division: "07", categories: ["deltagare", "ledare"] },
+  ]);
+  assert.deepEqual(divisionViews("Tordyvel", patrols.groups, cfg), [
+    { division: "07", categories: ["ist-a", "ist-b"] },
+  ]);
+  // No scope still gives the command its one option.
+  assert.deepEqual(divisionKinds({}), [
+    { label: "avdelning", option: "avdelning", groups: [] },
+  ]);
+});
+
+test("a name opens only the group it belongs to", () => {
+  // Two groups of one kind; "Vildsvinet" falls back to the shared name for
+  // the second group's 07 too, which is called something else.
+  const groups = [
+    ["deltagare", "ledare"],
+    ["ist-a", "ist-b"],
+  ];
+  assert.deepEqual(divisionViews("vildsvinet", groups, TWO_GROUPS), [
+    { division: "07", categories: ["deltagare", "ledare"] },
+  ]);
+  assert.equal(divisionViews("7", groups, TWO_GROUPS).length, 2);
+});
+
+test("an IST sees their own patrol, from either IST category", () => {
+  const cfg = {
+    ...TWO_GROUPS,
+    SCOUTNET_FEE_ROLES: { 400: "ist-a", 401: "ist-b", 100: "deltagare" },
+    SCOUTNET_DIVISION_ROLES: {
+      deltagare: { questionId: "88168" },
+      "ist-a": { questionId: "88168" },
+      "ist-b": { questionId: "88168" },
+    },
+  };
+  assert.deepEqual(leaderScope(P(401, { 88168: "7" }), cfg), {
+    division: "07",
+    categories: ["ist-b", "ist-a"],
+  });
+  const result = computeDivision({
+    cfg,
+    division: "07",
+    categories: ["ist-a", "ist-b"],
+    participants: {
+      1: named("Ia", 400, { 88168: "07" }),
+      2: named("Ib", 401, { 88168: "07" }),
+      // Troop 07 shares the question and the number, and is not in the patrol.
+      3: named("Del", 100, { 88168: "07" }),
+    },
+  });
+  assert.equal(result.total, 2);
+  assert.equal(result.name, "Tordyvel");
+  assert.equal(result.label, "avdelning");
+  // Labelled by its first category, the report says what the patrol is.
+  const labelled = computeDivision({
+    cfg: { ...cfg, SCOUTNET_DIVISION_LABELS: { "ist-a": ["ist-patrull"] } },
+    division: "07",
+    categories: ["ist-a", "ist-b"],
+    participants: {},
+  });
+  assert.match(
+    formatDivision(labelled, { plain: true }),
+    /^Ist-patrull 07 – Tordyvel/,
+  );
+});
+
+test("nobody but staff sees across the troop–patrol boundary", () => {
+  const cfg = {
+    ...TWO_GROUPS,
+    SCOUTNET_DIVISION_LABELS: { "ist-a": ["ist-patrull"] },
+  };
+  const troopLeader = { division: "07", categories: ["deltagare", "ledare"] };
+  const ist = { division: "07", categories: ["ist-b", "ist-a"] };
+  const plan = (asked, own, seesAll = false) =>
+    planDivisionRequest({ asked, own, seesAll, cfg });
+
+  // Their own, with or without the option.
+  assert.equal(plan({}, troopLeader).kind.option, "avdelning");
+  assert.deepEqual(plan({ avdelning: "Vildsvinet" }, troopLeader).views, [
+    troopLeader,
+  ]);
+  // The set's own order is used, so the report is labelled as a patrol
+  // however the scope row happened to list it.
+  assert.deepEqual(plan({ "ist-patrull": "7" }, ist).views, [
+    { division: "07", categories: ["ist-a", "ist-b"] },
+  ]);
+  // Same number, other kind: refused both ways.
+  assert.match(
+    plan({ "ist-patrull": "07" }, troopLeader).error,
+    /din egen avdelning/,
+  );
+  assert.match(plan({ avdelning: "07" }, ist).error, /din egen ist-patrull/);
+  // Another of their own kind: refused.
+  assert.match(plan({ avdelning: "08" }, troopLeader).error, /din egen/);
+  assert.match(plan({ "ist-patrull": "Ekoxe" }, ist).error, /din egen/);
+
+  // Staff: the overview, or any one of either kind — never both at once.
+  assert.deepEqual(plan({}, null, true), { overall: true });
+  assert.deepEqual(plan({ "ist-patrull": "07" }, null, true).views, [
+    { division: "07", categories: ["ist-a", "ist-b"] },
+  ]);
+  assert.deepEqual(plan({ avdelning: "07" }, null, true).views, [
+    { division: "07", categories: ["deltagare", "ledare"] },
+  ]);
+  assert.match(
+    plan({ avdelning: "07", "ist-patrull": "07" }, null, true).error,
+    /bara en av/,
+  );
 });

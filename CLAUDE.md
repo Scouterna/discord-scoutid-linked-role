@@ -638,6 +638,7 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_CATEGORY_ROLES` | `kategori:rollnamn,…` — platt markör *utöver* divisionsrollen |
 | `SCOUTNET_ADOPTION_SCOPE` | `kategori:kategori+kategori,…` — vilka kategorier den förstas medlemmar ser i `/adoption-scoutid`, i sin *egen* avdelning. `kategori:*` ser allt, som en admin. Tomt = bara admins |
 | `SCOUTNET_NICKNAME_SUFFIXES` | `kategori:suffixMedDiv:suffixUtanDiv,…`; `{div}` och `{divnamn}` fylls i |
+| `SCOUTNET_DIVISION_LABELS` | `kategori:etikett,…` — en kategori vars division heter något annat (`ist-a:ist-patrull`). Varje distinkt etikett blir en egen `/adoption-scoutid`-option, och bara admins och `*`-scope korsar mellan dem. Ändras det måste kommandona registreras om |
 | `SCOUTNET_DIVISION_LABEL` | ord, `avdelning` som default — vad en division kallas i svar och rapporter, och namnet på `/adoption-scoutid`-optionen. Ett en-ord i obestämd form ("ingen patrull"). Ändras det måste kommandona registreras om |
 | `SCOUTNET_DIVISION_NAMES` | `värde:namn` eller `kategori/värde:namn`, kommaseparerat — vad `{divnamn}` slår upp; kategorins egen rad vinner. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
 
@@ -1182,8 +1183,24 @@ medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åt
   heter **`dryrun`**, inte `torrkör` — namnet är ett gränssnitt admins skriver.
 - `/status-scoutid person:` — detaljerad status för en användare. Antingen
   `person:` eller `personid:` krävs.
-- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin), eller för en ledare den egna avdelningen. `avdelning:12` visar en avdelning som ledarna ser den (admin) — värdet eller dess namn ur `SCOUTNET_DIVISION_NAMES`, och optionen heter det `SCOUTNET_DIVISION_LABEL` säger.
+- `/adoption-scoutid` — hur många av de anmälda som länkat sig, per grupp (admin), eller för en ledare den egna avdelningen och för en IST den egna patrullen. `avdelning:12` visar en avdelning som ledarna ser den (admin), `ist-patrull:07` en patrull — värdet eller dess namn ur `SCOUTNET_DIVISION_NAMES`, och optionen heter det `SCOUTNET_DIVISION_LABEL` säger.
   `saknas:true` listar namnen.
+
+  **Avdelningar och patruller är skilda sorter, med var sin option**
+  (`divisionKinds` i [src/config.js](src/config.js)). Varje distinkt
+  kategorimängd i `SCOUTNET_ADOPTION_SCOPE` är en vy, och vyns *etikett* —
+  `SCOUTNET_DIVISION_LABELS` för dess första kategori, annars
+  `SCOUTNET_DIVISION_LABEL` — är dess option: `avdelning:` och `ist-patrull:`.
+  Avdelningar och patruller numreras båda från 01, så en gemensam option hade
+  gjort `avdelning:07` till en rapport över två grupper som inte har med
+  varandra att göra — och låtit en avdelningsledare läsa en patrull. **Gränsen
+  korsas bara av admins och `*`-scope**: en ledare som ber om `ist-patrull:` nekas
+  precis som en som ber om en annan avdelning, och en IST som ber om
+  `avdelning:` likaså (`planDivisionRequest`, ren och testad). Den egna vyn slås
+  upp på *mängden*, inte på första kategorin, så att en scoperad som listar
+  `ist-b+ist-a` inte får fel etikett. Ett namn öppnar bara den grupp namnet hör
+  till: uppslagningen faller tillbaka på de delade namnen, och utan den
+  kontrollen hade ett delat namn öppnat varje grupp med samma värde.
 
   **Grupperingen kommer helt ur configen** — [src/adoption.js](src/adoption.js)
   nämner ingen kategori vid namn. `SCOUTNET_FEE_ROLES` ger kategorin,

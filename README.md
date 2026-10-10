@@ -131,9 +131,10 @@ reports it.
 | `/refresh-scoutid alla:true`        | Admin    | Re-sync every linked user                                 |
 | `/status-scoutid person:@user`      | Admin    | Everything the bot knows about one user                   |
 | `/adoption-scoutid`                 | Admin    | How many registered participants have linked, per group    |
-| `/adoption-scoutid`                 | Leader   | Where each person in your own troop stands, and who is stuck |
+| `/adoption-scoutid`                 | Leader   | Where each person in your own troop (or patrol) stands, and who is stuck |
 | `/adoption-scoutid`                 | `*` scope | Everything an admin sees — for staff who are not Discord admins |
 | `/adoption-scoutid avdelning:12`    | Admin    | One troop, as its leaders see it — by value or name; the option follows `SCOUTNET_DIVISION_LABEL` |
+| `/adoption-scoutid ist-patrull:07`  | Admin    | One patrol — each label in `SCOUTNET_DIVISION_LABELS` is its own option, and only admins cross between them |
 | `/audit-scoutid`                    | Admin    | Full consistency report across Discord, storage, ScoutNet |
 | `/link-scoutid person:@user scoutid:12345` | Admin | Link a user manually, bypassing ScoutID                |
 | `/scan-scoutid`                     | Admin    | Run the member scan now; `dryrun:true` for a dry run      |
@@ -323,7 +324,11 @@ SCOUTNET_CATEGORY_ROLES=ledare:Avdelningsledare,ist-a:IST+IST-A
 
 # category:category+category — what a member of the first sees in /adoption-scoutid;
 # category:* sees everything, as an admin does
-SCOUTNET_ADOPTION_SCOPE=ledare:deltagare+ledare
+SCOUTNET_ADOPTION_SCOPE=ledare:deltagare+ledare,ist-a:ist-a
+
+# category:label — a division called something else; each label is its own
+# /adoption-scoutid option, and only admins cross between them
+SCOUTNET_DIVISION_LABELS=ist-a:ist-patrull
 
 # category:suffixWithDiv:suffixWithoutDiv (empty = no suffix)
 SCOUTNET_NICKNAME_SUFFIXES=deltagare:{div}:,funktionar::F
