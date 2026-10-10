@@ -48,6 +48,60 @@ export function divisionOptionName(label) {
   return /^[-_\p{L}\p{N}]{1,32}$/u.test(name) ? name : "avdelning";
 }
 
+/** The scope that sees everything, as an admin does. */
+export const ALL_SCOPE = "*";
+
+/**
+ * What a category's division is called — `SCOUTNET_DIVISION_LABELS` for that
+ * category, else `SCOUTNET_DIVISION_LABEL`. A troop is an `avdelning` and an
+ * IST patrol an `ist-patrull`, and each label is its own slash-command option.
+ */
+export function divisionLabel(category, cfg = config) {
+  return (
+    cfg.SCOUTNET_DIVISION_LABELS?.[category]?.[0] ??
+    cfg.SCOUTNET_DIVISION_LABEL ??
+    "avdelning"
+  );
+}
+
+/**
+ * The distinct category sets `SCOUTNET_ADOPTION_SCOPE` names — each one a view:
+ * `ledare:deltagare+ledare,ist-a:ist-a+ist-b,ist-b:ist-a+ist-b` gives two,
+ * troops and IST patrols. Order follows the config.
+ */
+export function scopeGroups(cfg = config) {
+  const seen = new Map();
+  for (const cats of Object.values(cfg.SCOUTNET_ADOPTION_SCOPE ?? {})) {
+    if (cats.includes(ALL_SCOPE)) continue;
+    const key = [...cats].sort().join("+");
+    if (!seen.has(key)) seen.set(key, cats);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * The scope groups by what their division is called, one per slash-command
+ * option: `{ label, option, groups }`. A group is labelled by its first
+ * category. **Kinds never mix** — troops and patrols are both numbered from
+ * 01, and one option over both made `avdelning:07` a report of two unrelated
+ * groups of people, and let a troop leader read a patrol. With no scope there
+ * is still one kind, so the command keeps its option.
+ */
+export function divisionKinds(cfg = config) {
+  const kinds = new Map();
+  for (const categories of scopeGroups(cfg)) {
+    const label = divisionLabel(categories[0], cfg);
+    const option = divisionOptionName(label);
+    if (!kinds.has(option)) kinds.set(option, { label, option, groups: [] });
+    kinds.get(option).groups.push(categories);
+  }
+  if (kinds.size === 0) {
+    const label = cfg.SCOUTNET_DIVISION_LABEL ?? "avdelning";
+    return [{ label, option: divisionOptionName(label), groups: [] }];
+  }
+  return [...kinds.values()];
+}
+
 /**
  * `"category:withDiv:withoutDiv,..."` → `{ category: { withDiv, withoutDiv } }`.
  * Example: `"deltagare:{div}:,ledare:AL{div}:AL,funktionar::F"`.
@@ -238,6 +292,12 @@ const config = {
   // (see divisionOptionName), so changing it means registering the commands
   // again.
   SCOUTNET_DIVISION_LABEL: process.env.SCOUTNET_DIVISION_LABEL || "avdelning",
+  // `category:label,…` — a category whose division is called something else,
+  // such as `ist-a:ist-patrull`. Each distinct label is its own
+  // `/adoption-scoutid` option, so changing it means registering again.
+  SCOUTNET_DIVISION_LABELS: parseCategoryRoles(
+    process.env.SCOUTNET_DIVISION_LABELS,
+  ),
 
   // General
   COOKIE_SECRET: process.env.COOKIE_SECRET,

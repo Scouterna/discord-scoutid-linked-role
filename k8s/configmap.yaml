@@ -53,6 +53,9 @@ data:
   # category:category+category — which categories a member of the first sees in
   # `/adoption-scoutid`, at their own division: a leader in division 12 sees the
   # participants and leaders of 12. `*` sees everything, as an admin does.
+  # Each distinct category set is a view of its own, and a set whose first
+  # category has a label in SCOUTNET_DIVISION_LABELS gets its own option —
+  # only admins and `*` cross between them.
   # Empty = the command is admin-only.
   SCOUTNET_ADOPTION_SCOPE: ledare:deltagare+ledare,funktionar:*
   # category:withDiv:withoutDiv (empty = no suffix). Produces e.g. "Ida
