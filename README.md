@@ -285,6 +285,9 @@ What is covered:
 - **`integration/health`** — `/readyz` against a real table, which is the only
   way to test the answer that matters: 200 when storage genuinely works.
 - **`integration/audit`** — all 13 categories, and that the audit never writes.
+  Plus that a ScoutNet outage mid-audit does not read as "no drift", that the
+  report names people rather than mentioning them, and that each person is
+  counted once.
 - **`integration/linking`** — the ScoutID callback over a real socket: a failed
   metadata push still stores the link, grants roles and sets the nickname — and
   answers with the page that says what is missing, instead of a 500. An account
