@@ -27,11 +27,16 @@ import {
 /**
  * The member's fee category and division. `null` means not a live participant;
  * a **throw** means ScoutNet could not be asked — see `getDesiredRoles`.
+ *
+ * `participants` is a list the caller already holds, looked up instead of
+ * fetched — so a caller that has one cannot meet an outage halfway through.
  */
-async function getParticipantInfo(scoutnetMemberId) {
+async function getParticipantInfo(scoutnetMemberId, participants) {
   if (!config.SCOUTNET_EVENT_ID) return null;
 
-  const participant = await scoutnet.getParticipant(scoutnetMemberId);
+  const participant = participants
+    ? (participants[String(scoutnetMemberId)] ?? null)
+    : await scoutnet.getParticipant(scoutnetMemberId);
   if (!participant || scoutnet.isCancelled(participant)) return null;
 
   const category =
@@ -59,12 +64,12 @@ async function getParticipantInfo(scoutnetMemberId) {
  */
 export async function getDesiredRoles(
   scoutnetMemberId,
-  { allowIncomplete = false } = {},
+  { allowIncomplete = false, participants = null } = {},
 ) {
   const roles = [config.SCOUTNET_SCOUT_ROLE];
 
   try {
-    const info = await getParticipantInfo(scoutnetMemberId);
+    const info = await getParticipantInfo(scoutnetMemberId, participants);
     if (!info) return roles;
 
     roles.push(config.SCOUTNET_EVENT_ROLE);
@@ -99,12 +104,12 @@ export async function getDesiredRoles(
  */
 export async function getNicknameSuffix(
   scoutnetMemberId,
-  { allowIncomplete = false } = {},
+  { allowIncomplete = false, participants = null } = {},
 ) {
   if (!config.SCOUTNET_NICKNAME_SUFFIXES) return "";
 
   try {
-    const info = await getParticipantInfo(scoutnetMemberId);
+    const info = await getParticipantInfo(scoutnetMemberId, participants);
     if (!info?.category) return "";
 
     const suffix = config.SCOUTNET_NICKNAME_SUFFIXES[info.category];

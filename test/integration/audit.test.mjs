@@ -79,6 +79,13 @@ const mutations = [];
  * the whole point of the change that introduced this.
  */
 let connectionStatus = 401;
+/**
+ * Set to simulate the ScoutNet cache expiring into an outage mid-audit: the
+ * read-back of a role-connection — which happens partway through, in the
+ * gate's category — clears the cache, and every ScoutNet fetch after that fails.
+ */
+let scoutnetDiesMidAudit = false;
+let scoutnetFetches = 0;
 
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
@@ -86,6 +93,7 @@ globalThis.fetch = async (url, opts = {}) => {
   const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
   if (u.includes("/role-connection")) {
+    if (scoutnetDiesMidAudit) await storage.clearScoutNetCache();
     return {
       ok: connectionStatus === 200,
       status: connectionStatus,
@@ -100,7 +108,18 @@ globalThis.fetch = async (url, opts = {}) => {
     mutations.push(`${method} ${u}`);
     return ok({});
   }
-  if (u.includes("scoutnet.se")) return ok({ participants });
+  if (u.includes("scoutnet.se")) {
+    scoutnetFetches++;
+    if (scoutnetDiesMidAudit && scoutnetFetches > 1) {
+      return {
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        text: async () => "",
+      };
+    }
+    return ok({ participants });
+  }
   if (u.endsWith("/roles")) return ok(ROLES);
   if (u.includes(`/members/${BOT_USER}`)) {
     return ok({ user: { id: BOT_USER }, roles: ["r-bot"] });
@@ -138,6 +157,8 @@ async function link(userId, scoutId, { withTokens = true } = {}) {
 }
 
 const counts = (result) => result.totals.byCategory;
+const itemsOf = (result, id) =>
+  result.categories.find((c) => c.id === id).items;
 
 test("a consistent guild reports zero issues", async () => {
   members = [
@@ -302,10 +323,10 @@ test("a participant cancelled by flag alone is reported too", async () => {
     questions: { 88168: "7" },
   };
   const result = await audit.runAudit(GUILD);
-  const items = result.categories.find((c) => c.id === "cancelled").items;
+  const items = itemsOf(result, "cancelled");
   assert.ok(
-    items.some((i) => i.includes("u9") && i.includes("utan datum")),
-    `flaggad-men-odaterad saknas i rapporten: ${items.join(" | ")}`,
+    items.some((i) => i.userId === "u9" && i.text.includes("utan datum")),
+    `flaggad-men-odaterad saknas i rapporten: ${items.map((i) => i.text).join(" | ")}`,
   );
 });
 
@@ -417,11 +438,10 @@ test("a member the bot cannot modify is left out of role drift", async () => {
   await storage.clearScoutNetCache();
 
   const result = await audit.runAudit(GUILD);
-  const drift = result.categories.find((c) => c.id === "role_drift");
   // They are genuinely drifted — missing Event and Deltagare-07 — so without
   // the skip they would show up here.
   assert.ok(
-    !drift.items.some((i) => i.includes("u13")),
+    !itemsOf(result, "role_drift").some((i) => i.userId === "u13"),
     "a member above the bot must not be reported as drifted",
   );
 });
@@ -447,11 +467,10 @@ test("role drift reports what a sync would remove, Overifierad included", async 
 
   try {
     const result = await audit.runAudit(GUILD);
-    const drift = result.categories.find((c) => c.id === "role_drift");
-    const item = drift.items.find((i) => i.includes("u14"));
+    const item = itemsOf(result, "role_drift").find((i) => i.userId === "u14");
     assert.ok(item, "a verified member holding Overifierad is drift");
-    assert.match(item, /har felaktigt: Overifierad/);
-    assert.doesNotMatch(item, /saknar/);
+    assert.match(item.text, /har felaktigt: Overifierad/);
+    assert.doesNotMatch(item.text, /saknar/);
   } finally {
     members = before;
     await storage.deleteLink("u14");
@@ -467,11 +486,50 @@ test("a bot role missing MANAGE_ROLES is reported", async () => {
   ROLES.find((r) => r.id === "r-bot").permissions = "0";
   try {
     const result = await audit.runAudit(GUILD);
-    const perms = result.categories.find((c) => c.id === "bot_permissions");
-    assert.ok(perms.items.some((i) => i.includes("MANAGE_ROLES")));
-    assert.ok(perms.items.some((i) => i.includes("MANAGE_NICKNAMES")));
+    const perms = itemsOf(result, "bot_permissions");
+    assert.ok(perms.some((i) => i.text.includes("MANAGE_ROLES")));
+    assert.ok(perms.some((i) => i.text.includes("MANAGE_NICKNAMES")));
   } finally {
     ROLES.find((r) => r.id === "r-bot").permissions = original;
+  }
+});
+
+test("a ScoutNet outage mid-audit is not reported as no drift", async () => {
+  // The drift and suffix checks used to fetch each member's wish list on their
+  // own, inside `catch { continue }`. Once the cache expired into an outage,
+  // every member was skipped and the category read as "no drift" — the reading
+  // this repository forbids everywhere else. They now read the participants the
+  // audit gathered once, so there is no second fetch to fail.
+  const before = members;
+  members = [...members, M("u15", "Drift Person (07)", ["r-scout", "r-d07"])];
+  await link("u15", "1515");
+  participants["1515"] = {
+    fee_id: 25694,
+    cancelled_date: null,
+    first_name: "Drift",
+    last_name: "Person",
+    questions: { 88168: "7" },
+  };
+  await storage.clearScoutNetCache();
+  scoutnetDiesMidAudit = true;
+  scoutnetFetches = 0;
+
+  try {
+    const result = await audit.runAudit(GUILD);
+    assert.equal(scoutnetFetches, 1, "the audit fetched ScoutNet again");
+    const item = itemsOf(result, "role_drift").find((i) => i.userId === "u15");
+    assert.ok(item, "the drifted member vanished with the outage");
+    assert.match(item.text, /saknar: event/i);
+    assert.ok(
+      itemsOf(result, "wrong_nickname_suffix").length > 0,
+      "the suffix check vanished with the outage",
+    );
+  } finally {
+    scoutnetDiesMidAudit = false;
+    members = before;
+    await storage.deleteLink("u15");
+    delete participants["1515"];
+    await storage.clearScoutNetCache();
   }
 });
 
@@ -508,30 +566,50 @@ test("the attachment is readable without Discord to render it", async () => {
   // need reading.
   const result = await audit.runAudit(GUILD);
   const txt = audit.formatAuditText(result);
-
-  assert.doesNotMatch(txt, /<@/, "an unresolved mention survived");
+  assert.doesNotMatch(txt, /<@/, "a mention reached the attachment");
   assert.doesNotMatch(txt, /\*|__|`/, "Discord markup survived");
-  // The items spell out `<@id> (nickname)` because a rendered mention shows the
-  // account name, not the server one. Resolved, that is the same string twice.
-  assert.doesNotMatch(
-    txt,
-    /(\S[^()]*) \(\1\)/,
-    "a name was printed twice in a row",
-  );
 
-  // Every mention the markdown version makes must appear as a name in the text
-  // version. Asserting on an arbitrary member instead would only prove that
-  // someone consistent — who is not in the report at all — was absent.
+  // Every person a finding is about appears by name in both versions — and in
+  // the attachment with the id beside it, for pasting into `personid:`.
+  // Asserting on an arbitrary member instead would only prove that someone
+  // consistent — who is not in the report at all — was absent.
   const md = audit.formatAuditMarkdown(result);
-  const mentioned = [...md.matchAll(/<@([^>]+)>/g)].map((m) => m[1]);
-  assert.ok(mentioned.length > 0, "the fixture should produce findings");
-  for (const id of new Set(mentioned)) {
+  assert.doesNotMatch(md, /<@/, "the message used a mention, not a name");
+  const people = new Set(
+    result.categories.flatMap((c) => c.items.map((i) => i.userId)),
+  );
+  people.delete(undefined);
+  assert.ok(people.size > 0, "the fixture should produce findings");
+  for (const id of people) {
+    const name = result.names[id];
+    if (!name) continue; // not in the guild: printed as the bare id
+    assert.match(md, new RegExp(escape(`**${name}**`)), `${id} in the message`);
     assert.match(
       txt,
-      new RegExp(escape(result.names[id])),
-      `${id} was not resolved to a name`,
+      new RegExp(escape(`${name} (${id})`)),
+      `${id} in the file`,
     );
   }
+});
+
+test("people are counted from the findings, once each", async () => {
+  // The count used to be pulled back out of the rendered text, by matching
+  // `<@id>`. Now each item carries its id, so the count is the ids.
+  const result = await audit.runAudit(GUILD);
+  const people = new Set(
+    result.categories.flatMap((c) =>
+      c.items.filter((i) => i.userId).map((i) => i.userId),
+    ),
+  );
+  assert.equal(result.totals.affectedUsers, people.size);
+  // The point of counting people: someone in several categories is one person.
+  const findings = result.categories.flatMap((c) =>
+    c.items.filter((i) => i.userId),
+  );
+  assert.ok(
+    findings.length > people.size,
+    "the fixture should put someone in several categories",
+  );
 });
 
 function escape(s) {

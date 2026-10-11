@@ -765,7 +765,7 @@ sina catch-grenar, som aldrig når den returen. Anroparens namn kommer ur
 `interaction.member` i `handler`. Smeknamnsraden använder med flit *konto*namnet:
 nicket är det som ändras och står redan två gånger i raden.
 
-Formen delas numera av `/refresh-scoutid alla:true`, och `reportName` /
+Formen delas numera av `/refresh-scoutid alla:true` och `/audit-scoutid`, och `reportName` /
 `reportNamePlain` i [src/guild.js](src/guild.js) är enda hemmet för den — den låg
 tidigare bara i eventlog.js, och rapporten skrev råa id:n i bilagan och `<@id>` i
 meddelandet. Bilagans variant bär **inget markup men behåller id:t bredvid
@@ -773,11 +773,6 @@ namnet**: en fil renderar ingenting, och filen är den långa listan en admin l�
 igenom och går till när hen behöver ett id att klistra i `personid:`. Rapporten
 sorteras dessutom på namn — 240 rader i lagringsordning är inte läsbara ens med
 namn.
-
-`/audit-scoutid` är **inte** omlagd och skriver fortfarande `<@id> (nick)`, med
-samma platshållare i meddelandeversionen. Dess `affectedUsers` räknar dessutom
-personer genom att plocka `<@id>` ur itemtexten, så en övergång där rör tretton
-kategorier och den räkningen.
 
 **En länkning som inte gav några roller säger varför.** Raden slutade tidigare
 på `→ inga roller`, vilket är samma text för "inte anmäld i eventet", "avbokad
@@ -1032,7 +1027,7 @@ den finns.
 | `integration/metadata` | Att pushen bär `verified: true` utan att kontakta ScoutID, att ett ScoutNet-avbrott bara kostar det visade namnet, att `utan token` skiljs från `fel` — och `verifyConnection`s tre svar: ett onåbart Discord är aldrig ett nej, men ett dött refresh-token (`invalid_grant`) är det |
 | `integration/syncall` | `syncAllUserRoles` — att guild-tillståndet hämtas *en* gång, att en oförändrad server inte skriver något, och att en dry-run inte skriver alls |
 | `integration/health` | `/readyz` mot en riktig tabell — enda sättet att testa svaret som betyder något: 200 när storage faktiskt fungerar |
-| `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver |
+| `integration/audit` | Alla 13 kategorierna, och att auditen aldrig skriver. Plus att ett ScoutNet-avbrott mitt i en audit inte läses som "ingen drift", att rapporten skriver namn och aldrig mentions, och att personer räknas en gång var ur fyndens id:n |
 | `integration/linking` | `/scoutid-oauth-callback` över en riktig socket: att en misslyckad metadata-push ändå länkar, delar ut roller och sätter smeknamn — och svarar med sidan som säger vad som saknas i stället för ett `500`. Att ett konto utanför servern stoppas innan något sparas, i båda callbackarna, och får *Fel Discord-konto* med sitt namn escapat — men att en obesvarad medlemsfråga inte stoppar någon. Att sidan och loggraden följs åt: en länkning utan roller får aldrig lyckad-sidan eller `✅`, och ett ScoutNet-avbrott säger att rollerna kommer i stället för att de saknas. Plus att ett utgånget state och en främmande cookie svarar med en sida och inte ett naket `400`/`403` |
 | `integration/memberscan` | Hela flödet i sekvens: vad som sparas när, och vad som inte får sparas. Plus att ett återinträde inom ett intervall rapporteras, och att en snapshot utan `joined_at` inte annonserar alla |
 | `integration/prune` | Att en länk utanför servern tas bort med sina tokens, och de två sätten det kunde gå fel: en kort medlemslista läst som frånvaro, och ett fel läst som en 404. Båda behåller länken |
@@ -1107,17 +1102,21 @@ listade den 17 personer som inte var i någon fara alls, med identiska råd inge
 dem behövde — och en audit som skriker lika högt om ett icke-problem som om ett
 problem är en ingen läser. Proben är en `GET`, så auditen är fortfarande läsande.
 
-**Två format, för Discord renderar inte bilagor.** `formatAuditMarkdown` är för
-meddelandet: `**fetstil**` och `<@id>` blir namn. Över 2 000 tecken blir rapporten
-en `.txt`, och där renderas ingenting — den kom fram som literala `__…__` och råa
-sifferid:n, oläslig precis när den är lång nog att behöva läsas. `formatAuditText`
-löser upp namnen ur `audit.names`, strippar markup och stryker under rubrikerna.
+**Ett fynd är data, inte en rad.** Varje kategori returnerar items som
+`{ userId, text }` — `userId` utelämnat för fynd som inte gäller en medlem — och
+formaterarna sätter namnet framför: `reportName` i meddelandet, `reportNamePlain`
+i bilagan, samma form som `/refresh-scoutid alla:true`. Tidigare skrev varje
+kategori `<@id> (nick)` själv, mentionen renderades som @okänd-användare, och
+bilagan fick lösa upp den igen med regex. Över 2 000 tecken blir rapporten en
+`.txt`; `formatAuditText` strippar markup ur texten och stryker under rubrikerna.
+En kategori som inte kunde köras sätter `skipped` i stället för en
+parentesrad bland fynden.
 
 **Rubriken räknar personer, inte bara fynd.** En person kan förekomma i fyra
 kategorier, så "23 avvikelser" lästes som en nödsituation när sanningen var två
-medlemmar som behövde göra något. `totals.affectedUsers` plockas ur
-omnämnandena i itemtexten — mentionformatet är fast, och alternativet är att
-bygga om tretton kategorier för ett tal.
+medlemmar som behövde göra något. `totals.affectedUsers` är antalet unika
+`userId` bland fynden. Det plockades tidigare ur den renderade texten genom att
+matcha `<@id>` — en parser över programmets egen utdata.
 
 ### Kommandon
 
@@ -1175,6 +1174,14 @@ förnya och spara ett token och alltså skriva, och den räknar smeknamn som
 kategori 6 och 13 redan granskar. Det som skilde var rolluträkningen, och den
 finns nu på ett ställe. Kvar som avsiktlig skillnad: auditen hoppar över
 medlemmar boten inte kan ändra, eftersom deras drift är ett fynd ingen kan åtgärda.
+
+**Rolldrift och suffix läser deltagarna auditen redan hämtat**, via
+`getDesiredRoles(id, { participants })` och samma option på
+`getNicknameSuffix`. De hämtade tidigare per medlem, inne i `catch { continue }`:
+gick cachen ut mitt i en audit och ScoutNet var nere hoppades varje medlem över,
+och kategorin sa "ingen drift" — just det svar ett avbrott aldrig får ge. Med
+snapshoten finns ingen andra hämtning som kan fallera; ett avbrott fäller auditen
+där deltagarna hämtas, synligt.
 
 - `/audit-scoutid` — full rapport (admin). Filattachment om >2000 tecken.
 - `/scan-scoutid` — kör medlemsscannern nu (admin). `dryrun:true` = visa utan att posta.

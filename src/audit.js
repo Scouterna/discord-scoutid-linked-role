@@ -7,6 +7,8 @@ import { RELINK_INSTRUCTION, verifyConnection } from "./metadata.js";
 import {
   roleMapOf,
   displayName,
+  reportName,
+  reportNamePlain,
   stripNickSuffix,
   abbreviatedNames,
   withDivision,
@@ -22,10 +24,7 @@ import {
  * findings, because an audit that cries wolf is one nobody reads.
  */
 
-const SKIPPED_NO_EVENT = "(SCOUTNET_EVENT_ID inte satt — hoppar över.)";
-
-/** Findings are counted; parenthesised lines are "this check was skipped" notes. */
-const isSkipNote = (item) => item.startsWith("(");
+const SKIPPED_NO_EVENT = "SCOUTNET_EVENT_ID inte satt — hoppar över.";
 
 function normalizeName(s) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -109,9 +108,15 @@ async function gatherContext(guildId) {
 
 /**
  * The checks, in report order. `needs` declares a precondition — unmet, the
- * check contributes a skip note instead of running. `run` returns
- * `{ items, note }`; `note` is context that belongs in the report even when the
- * category is empty.
+ * check is skipped instead of run. `run` returns `{ items, note, skipped }`:
+ * `note` is context that belongs in the report even when the category is empty,
+ * and `skipped` says why the check could not run after all.
+ *
+ * An item is data, not a line: `{ userId, text }`, with `userId` left out for a
+ * finding that is not about a member. The formatters put the name in front —
+ * `reportName` in the message, `reportNamePlain` in the attachment — and the
+ * person count is taken from the ids, so no check renders a name and nothing
+ * parses one back out.
  */
 const CHECKS = [
   {
@@ -124,7 +129,7 @@ const CHECKS = [
         .filter(
           (m) => m.roles.includes(scoutRole.id) && !linkedMap.has(m.user.id),
         )
-        .map((m) => `- <@${m.user.id}> (${displayName(m)})`),
+        .map((m) => ({ userId: m.user.id, text: "" })),
     }),
   },
 
@@ -161,9 +166,10 @@ const CHECKS = [
           connection.status === "unknown"
             ? `kunde inte avgöra kopplingen (${connection.detail})`
             : `kopplingen är död (${connection.detail})`;
-        items.push(
-          `- <@${u.discordUserId}> (${displayName(member)}) scoutid=\`${u.scoutId}\` — ${why}, be hen ${RELINK_INSTRUCTION}`,
-        );
+        items.push({
+          userId: u.discordUserId,
+          text: `scoutid=\`${u.scoutId}\` — ${why}, be hen ${RELINK_INSTRUCTION}`,
+        });
       }
       return {
         items,
@@ -191,15 +197,15 @@ const CHECKS = [
       try {
         tokenIds = await storage.getUserIdsWithTokens("discord-token");
       } catch (e) {
-        return { items: [`(Kunde inte läsa tokens: ${e.message})`] };
+        return { skipped: `Kunde inte läsa tokens: ${e.message}` };
       }
       return {
         items: linkedUsers
           .filter((u) => !tokenIds.has(u.discordUserId))
-          .map(
-            (u) =>
-              `- <@${u.discordUserId}> (${displayName(memberMap.get(u.discordUserId)) || "ej i guilden"}) scoutid=\`${u.scoutId}\` — be hen ${RELINK_INSTRUCTION}. \`/link-scoutid\` lagar inte det här, och utan token finns inget andra bevis heller`,
-          ),
+          .map((u) => ({
+            userId: u.discordUserId,
+            text: `${memberMap.has(u.discordUserId) ? "" : "(ej i guilden) "}scoutid=\`${u.scoutId}\` — be hen ${RELINK_INSTRUCTION}. \`/link-scoutid\` lagar inte det här, och utan token finns inget andra bevis heller`,
+          })),
       };
     },
   },
@@ -207,12 +213,16 @@ const CHECKS = [
   {
     id: "stale_link",
     title: "Storage-länk men inte (längre) medlem i guilden",
+    /**
+     * No `userId`: there is no member to name, and someone who has left is not
+     * one of the people the report asks to act.
+     */
     run: ({ linkedUsers, memberMap }) => ({
       items: linkedUsers
         .filter((u) => !memberMap.has(u.discordUserId))
-        .map(
-          (u) => `- discord=\`${u.discordUserId}\` scoutid=\`${u.scoutId}\``,
-        ),
+        .map((u) => ({
+          text: `discord=\`${u.discordUserId}\` scoutid=\`${u.scoutId}\``,
+        })),
     }),
   },
 
@@ -225,7 +235,10 @@ const CHECKS = [
         .filter((u) => scoutnet.isCancelled(participants[u.scoutId]))
         .map((u) => {
           const p = participants[u.scoutId];
-          return `- <@${u.discordUserId}> scoutid=\`${u.scoutId}\` ${scoutnet.fullName(p) || "?"} (avbokad ${scoutnet.cancelledLabel(p)})`;
+          return {
+            userId: u.discordUserId,
+            text: `scoutid=\`${u.scoutId}\` ${scoutnet.fullName(p) || "?"} (avbokad ${scoutnet.cancelledLabel(p)})`,
+          };
         }),
     }),
   },
@@ -265,9 +278,10 @@ const CHECKS = [
         ) {
           continue;
         }
-        items.push(
-          `- <@${u.discordUserId}> scoutid=\`${u.scoutId}\` Discord="${shown}" ScoutNet="${scoutnet.fullName(p)}"`,
-        );
+        items.push({
+          userId: u.discordUserId,
+          text: `scoutid=\`${u.scoutId}\` ScoutNet="${scoutnet.fullName(p)}"`,
+        });
       }
       return { items };
     },
@@ -279,7 +293,7 @@ const CHECKS = [
     run: ({ roleMap }) => ({
       items: managedRoleNames()
         .filter((name) => !roleMap.has(name.toLowerCase()))
-        .map((name) => `- \`${name}\``),
+        .map((name) => ({ text: `\`${name}\`` })),
     }),
   },
 
@@ -293,7 +307,7 @@ const CHECKS = [
       for (const [category, names] of expectedDivisions) {
         const missing = [...names].filter((n) => !roleMap.has(n.toLowerCase()));
         if (missing.length > 0) {
-          items.push(`- ${category}: ${missing.sort().join(", ")}`);
+          items.push({ text: `${category}: ${missing.sort().join(", ")}` });
         }
       }
       return { items };
@@ -307,7 +321,7 @@ const CHECKS = [
     run: ({ participants }) => {
       if (!config.SCOUTNET_FEE_ROLES) {
         return {
-          items: ["(SCOUTNET_FEE_ROLES inte konfigurerad — hoppar över.)"],
+          skipped: "SCOUTNET_FEE_ROLES inte konfigurerad — hoppar över.",
         };
       }
       const seen = new Map(); // fee_id → participant count
@@ -319,12 +333,9 @@ const CHECKS = [
         }
       }
       return {
-        items: [...seen.entries()]
-          .sort()
-          .map(
-            ([fid, count]) =>
-              `- fee_id=\`${fid}\` (${count} deltagare) — saknas i SCOUTNET_FEE_ROLES`,
-          ),
+        items: [...seen.entries()].sort().map(([fid, count]) => ({
+          text: `fee_id=\`${fid}\` (${count} deltagare) — saknas i SCOUTNET_FEE_ROLES`,
+        })),
       };
     },
   },
@@ -349,9 +360,9 @@ const CHECKS = [
         const role = roleMap.get(lower);
         if (!role) continue; // already reported as a missing role
         if (role.position >= botHighestPosition) {
-          items.push(
-            `- \`${role.name}\` (position ${role.position}) ligger på eller över botens högsta position (${botHighestPosition})`,
-          );
+          items.push({
+            text: `\`${role.name}\` (position ${role.position}) ligger på eller över botens högsta position (${botHighestPosition})`,
+          });
         }
       }
 
@@ -366,8 +377,10 @@ const CHECKS = [
       const has = (bit) => (perms & bit) === bit;
       if (!has(1n << 3n)) {
         // ADMINISTRATOR implies both
-        if (!has(1n << 28n)) items.push("- Bot saknar MANAGE_ROLES");
-        if (!has(1n << 27n)) items.push("- Bot saknar MANAGE_NICKNAMES");
+        if (!has(1n << 28n)) items.push({ text: "Bot saknar MANAGE_ROLES" });
+        if (!has(1n << 27n)) {
+          items.push({ text: "Bot saknar MANAGE_NICKNAMES" });
+        }
       }
       return { items };
     },
@@ -381,9 +394,16 @@ const CHECKS = [
      * Members the bot cannot modify are skipped: a 403 from the role hierarchy
      * is expected for them, so reporting the drift would be a permanent finding
      * nobody can act on.
+     *
+     * The wish list is read from the participants the audit already gathered,
+     * not fetched per member. It used to be fetched, inside `catch { continue }`:
+     * a cache that expired mid-audit into a ScoutNet outage skipped every member,
+     * and the category read as "no drift" — the one answer an outage must never
+     * give. With the snapshot there is no second fetch to fail, and an outage
+     * fails the audit where the participants are gathered, visibly.
      */
     run: async (ctx) => {
-      const { linkedUsers, memberMap, roleMap, botMember } = ctx;
+      const { linkedUsers, memberMap, roleMap, botMember, participants } = ctx;
       const items = [];
 
       for (const u of linkedUsers) {
@@ -391,12 +411,9 @@ const CHECKS = [
         if (!member) continue;
         if (botMember && !ctx.canBotModify(member)) continue;
 
-        let desired;
-        try {
-          desired = await roles.getDesiredRoles(u.scoutId);
-        } catch {
-          continue;
-        }
+        const desired = await roles.getDesiredRoles(u.scoutId, {
+          participants,
+        });
 
         // The sync's own plan, so the audit cannot disagree with what a refresh
         // would do. It used to recompute the diff here, and the two differed on
@@ -415,7 +432,10 @@ const CHECKS = [
           if (missing.length > 0) parts.push(`saknar: ${missing.join(", ")}`);
           if (extra.length > 0)
             parts.push(`har felaktigt: ${extra.join(", ")}`);
-          items.push(`- <@${u.discordUserId}> — ${parts.join(" · ")}`);
+          items.push({
+            userId: u.discordUserId,
+            text: `— ${parts.join(" · ")}`,
+          });
         }
       }
       return { items };
@@ -442,9 +462,10 @@ const CHECKS = [
         }
         for (const [category, names] of byCategory) {
           if (names.length > 1) {
-            items.push(
-              `- <@${m.user.id}> har flera ${category}-roller: ${names.sort().join(", ")}`,
-            );
+            items.push({
+              userId: m.user.id,
+              text: `har flera ${category}-roller: ${names.sort().join(", ")}`,
+            });
           }
         }
       }
@@ -456,26 +477,25 @@ const CHECKS = [
     id: "wrong_nickname_suffix",
     title: "Användare med fel nickname-suffix",
     needs: "participants",
-    run: async ({ linkedUsers, memberMap }) => {
+    /** From the gathered participants, for the same reason as `role_drift`. */
+    run: async ({ linkedUsers, memberMap, participants }) => {
       const items = [];
       for (const u of linkedUsers) {
         const member = memberMap.get(u.discordUserId);
         if (!member) continue;
 
-        let expected;
-        try {
-          expected = await roles.getNicknameSuffix(u.scoutId);
-        } catch {
-          continue;
-        }
+        const expected = await roles.getNicknameSuffix(u.scoutId, {
+          participants,
+        });
         const expectedToken = extractSuffix(expected);
         const shown = displayName(member);
         const actualToken = extractSuffix(shown);
 
         if ((expectedToken || "") !== (actualToken || "")) {
-          items.push(
-            `- <@${u.discordUserId}> nick="${shown}" — har "${actualToken ?? "(inget)"}" förväntat "${expectedToken ?? "(inget)"}"`,
-          );
+          items.push({
+            userId: u.discordUserId,
+            text: `— har "${actualToken ?? "(inget)"}" förväntat "${expectedToken ?? "(inget)"}"`,
+          });
         }
       }
       return { items };
@@ -487,10 +507,10 @@ const CHECKS = [
 function skipNote(need, ctx) {
   if (need === "participants" && !ctx.participants) return SKIPPED_NO_EVENT;
   if (need === "scoutRole" && !ctx.scoutRole) {
-    return `(Rollen \`${ctx.scoutRoleName}\` finns inte i guilden.)`;
+    return `Rollen \`${ctx.scoutRoleName}\` finns inte i guilden.`;
   }
   if (need === "botMember" && !ctx.botMember) {
-    return "(Kunde inte hämta bot-medlemmen — hoppar över.)";
+    return "Kunde inte hämta bot-medlemmen — hoppar över.";
   }
   return null;
 }
@@ -500,36 +520,35 @@ export async function runAudit(guildId) {
 
   const categories = [];
   for (const check of CHECKS) {
-    const skip = check.needs ? skipNote(check.needs, ctx) : null;
-    const { items = [], note = null } = skip
-      ? { items: [skip] }
-      : ((await check.run(ctx)) ?? {});
+    const need = check.needs ? skipNote(check.needs, ctx) : null;
+    const {
+      items = [],
+      note = null,
+      skipped = null,
+    } = need ? { skipped: need } : ((await check.run(ctx)) ?? {});
     categories.push({
       id: check.id,
       title: typeof check.title === "function" ? check.title(ctx) : check.title,
       items,
       note,
+      skipped,
+      count: items.length,
     });
   }
 
   const totals = { issues: 0, byCategory: {}, affectedUsers: 0 };
+  // How many *people* the findings are about. One person can appear in four
+  // categories, so a finding count alone reads as an emergency when the truth
+  // is two members needing to act.
   const affected = new Set();
   for (const c of categories) {
-    c.count = c.items.filter((i) => !isSkipNote(i)).length;
     totals.byCategory[c.id] = c.count;
     totals.issues += c.count;
-    // How many *people* the findings are about. One person can appear in four
-    // categories, so a finding count alone reads as an emergency when the truth
-    // is two members needing to act. Pulled out of the item text because the
-    // mention format is fixed and the alternative is threading a second number
-    // through thirteen checks.
-    for (const item of c.items) {
-      for (const m of item.matchAll(/<@([^>]+)>/g)) affected.add(m[1]);
-    }
+    for (const item of c.items) if (item.userId) affected.add(item.userId);
   }
   totals.affectedUsers = affected.size;
 
-  // Display names for the plain-text report, which cannot render a mention.
+  // The name each item is printed under, resolved once for both formats.
   const names = {};
   for (const m of ctx.guildMembers) names[m.user.id] = displayName(m);
 
@@ -555,7 +574,14 @@ function metaLine({ guildMembers, linkedUsers, participants }) {
   return parts.join(" · ");
 }
 
-/** The report as a Discord message, where markup and mentions render. */
+/** One item: the name when there is one, then the text, never a stray space. */
+const bullet = (lead, name, text) =>
+  lead + [name, text].filter(Boolean).join(" ");
+
+/**
+ * The report as a Discord message, where markup renders. Names, never
+ * mentions — see `reportName`.
+ */
 export function formatAuditMarkdown(audit) {
   const lines = [
     "**Audit-rapport för ScoutID-länkningar**",
@@ -565,7 +591,7 @@ export function formatAuditMarkdown(audit) {
 
   if (audit.totals.issues === 0) {
     lines.push("✅ Inga avvikelser hittades.");
-    const skipped = audit.categories.filter((c) => c.items.some(isSkipNote));
+    const skipped = audit.categories.filter((c) => c.skipped);
     if (skipped.length > 0) {
       lines.push("", `_Skippade: ${skipped.map((c) => c.title).join(", ")}_`);
     }
@@ -578,7 +604,11 @@ export function formatAuditMarkdown(audit) {
   );
   for (const c of audit.categories.filter((c) => c.count > 0)) {
     lines.push(`__${c.title}__ — ${c.count}`);
-    lines.push(...c.items.filter((i) => !isSkipNote(i)));
+    lines.push(
+      ...c.items.map(({ userId, text }) =>
+        bullet("- ", userId && reportName(userId, audit.names[userId]), text),
+      ),
+    );
     if (c.note) lines.push(`_${c.note}_`);
     lines.push("");
   }
@@ -596,22 +626,13 @@ export function formatAuditMarkdown(audit) {
 /**
  * The same report as plain text, for the file attachment.
  *
- * An attachment renders nothing, so markup would arrive as literal `__…__` and
- * mentions as raw numeric ids — unreadable exactly when the report is long
- * enough to need reading. Names are resolved from `audit.names` instead.
+ * An attachment renders nothing, so markup would arrive as literal `__…__` —
+ * unreadable exactly when the report is long enough to need reading. Names go
+ * through `reportNamePlain`, which keeps the id beside them for pasting.
  */
 export function formatAuditText(audit) {
   const strip = (t) =>
-    t
-      .replace(/<@([^>]+)>/g, (_, id) => audit.names?.[id] ?? `användare ${id}`)
-      .replace(/\*+/g, "")
-      .replace(/__/g, "")
-      .replace(/`/g, "")
-      // Items spell out `<@id> (nickname)` because a rendered mention shows the
-      // account name, not the server nickname. Resolved, they are the same
-      // string twice.
-      .replace(/([^\s()][^()]*) \(\1\)/g, "$1")
-      .replace(/^- /, "  · ");
+    t.replace(/\*+/g, "").replace(/__/g, "").replace(/`/g, "");
 
   const lines = [
     "AUDIT-RAPPORT FÖR SCOUTID-LÄNKNINGAR",
@@ -631,7 +652,15 @@ export function formatAuditText(audit) {
     if (c.count > 0) {
       const heading = `${strip(c.title)} (${c.count})`;
       lines.push(heading, "-".repeat(heading.length));
-      lines.push(...c.items.filter((i) => !isSkipNote(i)).map(strip));
+      lines.push(
+        ...c.items.map(({ userId, text }) =>
+          bullet(
+            "  · ",
+            userId && reportNamePlain(userId, audit.names[userId]),
+            strip(text),
+          ),
+        ),
+      );
     }
     if (c.note) lines.push(`  (${strip(c.note)})`);
   }
