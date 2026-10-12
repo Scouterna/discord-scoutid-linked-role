@@ -27,6 +27,7 @@ const {
   parseCategoryRoles,
   parseMemberEvents,
   parseDivisionNames,
+  parseNameOverrides,
   normalizeDivision,
   divisionOptionName,
 } = await import("../../src/config.js");
@@ -201,4 +202,16 @@ test("the division option follows the label, or falls back to avdelning", () => 
   // Discord refuses spaces in option names; registration must not fail on it.
   assert.equal(divisionOptionName("min grupp"), "avdelning");
   assert.equal(divisionOptionName(""), "avdelning");
+});
+
+test("name overrides map member numbers to first and last name", () => {
+  assert.deepEqual(parseNameOverrides("123:Kim:Andersson, 456:Alex"), {
+    123: { first_name: "Kim", last_name: "Andersson" },
+    456: { first_name: "Alex", last_name: "" },
+  });
+});
+
+test("a name override without a member number or a first name is dropped", () => {
+  assert.equal(parseNameOverrides("abc:Kim:A,123::A,:Kim:A"), null);
+  assert.equal(parseNameOverrides(""), null);
 });

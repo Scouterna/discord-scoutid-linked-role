@@ -641,6 +641,7 @@ som ändras är en andra sanning, och den förlorar alltid.
 | `SCOUTNET_DIVISION_LABELS` | `kategori:etikett,…` — en kategori vars division heter något annat (`ist-a:ist-patrull`). Varje distinkt etikett blir en egen `/adoption-scoutid`-option, och bara admins och `*`-scope korsar mellan dem. Ändras det måste kommandona registreras om |
 | `SCOUTNET_DIVISION_LABEL` | ord, `avdelning` som default — vad en division kallas i svar och rapporter, och namnet på `/adoption-scoutid`-optionen. Ett en-ord i obestämd form ("ingen patrull"). Ändras det måste kommandona registreras om |
 | `SCOUTNET_DIVISION_NAMES` | `värde:namn` eller `kategori/värde:namn`, kommaseparerat — vad `{divnamn}` slår upp; kategorins egen rad vinner. Ofta en **andra kopia** av namn som också bygger serverns kanaler; inget upptäcker driften, så skriv ut på båda ställena att den andra finns |
+| `SCOUTNET_NAME_OVERRIDES` | `medlemsnr:Förnamn:Efternamn,…` — ersätter ScoutNet-namnet för den som inte kan få det ändrat där. Läggs in i deltagarlistan i `getParticipants`, så smeknamn, audit och kopplingskort ser samma namn; länkningen läser `nameOverride`. Personuppgift: bara i privat ConfigMap eller Secret |
 
 Parsrarna ligger i [src/config.js](src/config.js) och pinnas av `unit/config`,
 inklusive vad som händer med trasig indata. Roll-konfigurationen låg tidigare i

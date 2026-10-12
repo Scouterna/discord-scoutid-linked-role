@@ -159,6 +159,27 @@ export function parseDivisionNames(str) {
 }
 
 /**
+ * `"memberNo:Förnamn:Efternamn,..."` →
+ * `{ memberNo: { first_name, last_name } }`.
+ *
+ * A name that replaces the one in ScoutNet, for a member who cannot get it
+ * changed there. The bot takes the name from ScoutNet on every sync, so a
+ * nickname changed by hand in Discord is undone by the next refresh; this is
+ * what holds. The value is personal data: keep it in a private ConfigMap or a
+ * Secret, never in this repo. An empty last name is allowed.
+ */
+export function parseNameOverrides(str) {
+  if (!str) return null;
+  const map = {};
+  for (const entry of str.split(",")) {
+    const [memberNo, first, last = ""] = entry.split(":").map((s) => s.trim());
+    if (!/^\d+$/.test(memberNo ?? "") || !first) continue;
+    map[memberNo] = { first_name: first, last_name: last };
+  }
+  return Object.keys(map).length > 0 ? map : null;
+}
+
+/**
  * `"category:questionId:withDiv:withoutDiv,..."` →
  * `{ category: { questionId, withDiv, withoutDiv } }`.
  * Example: `"deltagare:5001:Deltagare-{div}:Deltagare-Väntande"`.
@@ -285,6 +306,9 @@ const config = {
   ),
   SCOUTNET_DIVISION_NAMES: parseDivisionNames(
     process.env.SCOUTNET_DIVISION_NAMES,
+  ),
+  SCOUTNET_NAME_OVERRIDES: parseNameOverrides(
+    process.env.SCOUTNET_NAME_OVERRIDES,
   ),
   // What a division is called in replies and reports — "avdelning", "patrull",
   // "grupp". An en-word in the indefinite form: the texts say "ingen
