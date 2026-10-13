@@ -5,6 +5,7 @@ import config from "./config.js";
 import * as discord from "./discord.js";
 import * as scoutid from "./scoutid.js";
 import * as storage from "./storage.js";
+import * as scoutnet from "./scoutnet.js";
 import * as roles from "./roles.js";
 import * as eventlog from "./eventlog.js";
 import { handlers } from "./commands.js";
@@ -298,7 +299,11 @@ app.get("/scoutid-oauth-callback", async (req, res) => {
       const suffix = await roles.getNicknameSuffix(scoutIDUser.scoutid, {
         allowIncomplete: true,
       });
-      await roles.setNickname(discordUserId, scoutIDUser.name, suffix);
+      await roles.setNickname(
+        discordUserId,
+        scoutnet.nameOverride(scoutIDUser.scoutid) ?? scoutIDUser.name,
+        suffix,
+      );
     }
 
     // Nothing granted — say why, in the line someone reads two hours later.

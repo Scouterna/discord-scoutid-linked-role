@@ -45,6 +45,37 @@ export async function getParticipant(memberId) {
 }
 
 /**
+ * The full name from `SCOUTNET_NAME_OVERRIDES` for this member, or null. For
+ * the link, which names the member before ScoutNet is read: there the name
+ * comes from ScoutID, and ScoutID has the same name as ScoutNet.
+ */
+export function nameOverride(
+  memberId,
+  overrides = config.SCOUTNET_NAME_OVERRIDES,
+) {
+  const override = overrides?.[String(memberId)];
+  return override ? fullName(override) : null;
+}
+
+/**
+ * The participants with the names from `SCOUTNET_NAME_OVERRIDES` put in place
+ * of ScoutNet's, so that every reader — the nickname, the audit, the
+ * connection card — sees the same name. Only the overridden entries are
+ * copied; the rest are the objects passed in.
+ */
+export function applyNameOverrides(
+  participants,
+  overrides = config.SCOUTNET_NAME_OVERRIDES,
+) {
+  if (!overrides || !participants) return participants;
+  const result = { ...participants };
+  for (const [memberNo, name] of Object.entries(overrides)) {
+    if (result[memberNo]) result[memberNo] = { ...result[memberNo], ...name };
+  }
+  return result;
+}
+
+/**
  * Every participant in the configured event, keyed by member number. Cached in
  * process memory for 10 minutes — the full list exceeds what Table Storage
  * holds in one property, and a cache miss costs one extra fetch.
@@ -54,7 +85,7 @@ export async function getParticipant(memberId) {
  */
 export async function getParticipants() {
   const cached = await storage.getScoutNetData("participants");
-  if (cached) return cached;
+  if (cached) return applyNameOverrides(cached);
 
   const url = `https://scoutnet.se/api/project/get/participants?id=${config.SCOUTNET_EVENT_ID}&key=${config.SCOUTNET_PARTICIPANTS_APIKEY}`;
   const response = await fetch(url);
@@ -67,5 +98,5 @@ export async function getParticipants() {
   const data = await response.json();
   const participants = data.participants ?? data;
   await storage.storeScoutNetData("participants", participants);
-  return participants;
+  return applyNameOverrides(participants);
 }
